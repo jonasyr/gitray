@@ -1,10 +1,28 @@
-import React from 'react';
+import React, { useState } from 'react';
 import RepoInput from '../components/RepoInput';
+import CommitList from '../components/CommitList';
+import { getWorkspaceCommits } from '../services/api';
+import { Commit } from '../../../../packages/shared-types/src';
 
 const MainPage: React.FC = () => {
-  const handleVisualize = (repoUrl: string) => {
+  const [commits, setCommits] = useState<Commit[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleVisualize = async (repoUrl: string) => {
     console.log('Visualizing:', repoUrl);
-    // Hier kommt die Logik zur Visualisierung des Repositories hin
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const fetchedCommits = await getWorkspaceCommits(repoUrl);
+      setCommits(fetchedCommits);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An unknown error occurred');
+      setCommits([]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -20,21 +38,39 @@ const MainPage: React.FC = () => {
       </header>
 
       {/* Hauptbereich */}
-      <div className="flex flex-col items-center justify-center flex-grow space-y-8">
+      <div className="flex flex-col items-center justify-center flex-grow space-y-8 w-full max-w-6xl px-4">
         <RepoInput onVisualize={handleVisualize} />
 
-        {/* Erklärungs-Buttons */}
-        <div className="flex space-x-4">
-          <button className="bg-blue-200 hover:bg-blue-300 text-black font-bold py-2 px-4 rounded-md">
-            Explanation 1
-          </button>
-          <button className="bg-blue-200 hover:bg-blue-300 text-black font-bold py-2 px-4 rounded-md">
-            Explanation 2
-          </button>
-          <button className="bg-blue-200 hover:bg-blue-300 text-black font-bold py-2 px-4 rounded-md">
-            Explanation 3
-          </button>
-        </div>
+        {isLoading && (
+          <div className="mt-8 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto"></div>
+            <p className="mt-2 text-gray-600">Loading repository data...</p>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-8 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md">
+            <p><strong>Error:</strong> {error}</p>
+          </div>
+        )}
+
+        {!isLoading && !error && commits.length > 0 && (
+          <CommitList commits={commits} />
+        )}
+
+        {!isLoading && !error && commits.length === 0 && !error && (
+          <div className="flex space-x-4 mt-8">
+            <button className="bg-blue-200 hover:bg-blue-300 text-black font-bold py-2 px-4 rounded-md">
+              Explanation 1
+            </button>
+            <button className="bg-blue-200 hover:bg-blue-300 text-black font-bold py-2 px-4 rounded-md">
+              Explanation 2
+            </button>
+            <button className="bg-blue-200 hover:bg-blue-300 text-black font-bold py-2 px-4 rounded-md">
+              Explanation 3
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Footer-Bereich */}
