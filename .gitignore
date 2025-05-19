@@ -312,3 +312,7 @@ dist
 .pnpm-store/
 
 **/.claude/settings.local.json
+
+# Kompilierte JavaScript-Dateien
+apps/backend/src/**/*.js
+apps/backend/src/**/*.js.map
