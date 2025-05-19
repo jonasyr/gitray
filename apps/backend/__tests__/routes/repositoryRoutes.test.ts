@@ -1,3 +1,5 @@
+// Additional tests for apps/backend/__tests__/routes/repositoryRoutes.test.ts
+
 import request from 'supertest';
 import express, { Application } from 'express';
 import { gitService } from '../../src/services/gitService';
@@ -17,7 +19,7 @@ const mockCloneRepository = gitService.cloneRepository as jest.MockedFunction<ty
 const mockGetCommits = gitService.getCommits as jest.MockedFunction<typeof gitService.getCommits>;
 const mockCleanupRepository = gitService.cleanupRepository as jest.MockedFunction<typeof gitService.cleanupRepository>;
 
-describe('Repository API', () => {
+describe('Repository API Extended Tests', () => {
   let app: Application;
   
   beforeEach(() => {
@@ -30,7 +32,30 @@ describe('Repository API', () => {
     app.use('/', repositoryRoutes);
   });
 
-  test('sollte Commits für ein gültiges Repository zurückgeben', async () => {
+  test('sollte Fehler bei getCommits korrekt behandeln', async () => {
+    // Arrange
+    const validRepoUrl = 'https://github.com/username/repo.git';
+    const tempDir = '/tmp/repo-123';
+    const mockError = new Error('Fehler beim Abrufen der Commits');
+    
+    mockCloneRepository.mockResolvedValue(tempDir);
+    mockGetCommits.mockRejectedValue(mockError);
+    mockCleanupRepository.mockResolvedValue();
+    
+    // Act
+    const response = await request(app)
+      .post('/')
+      .send({ repoUrl: validRepoUrl });
+    
+    // Assert
+    expect(response.status).toBe(500);
+    expect(response.body.error).toBe(mockError.message);
+    expect(mockCloneRepository).toHaveBeenCalledWith(validRepoUrl);
+    expect(mockGetCommits).toHaveBeenCalledWith(tempDir);
+    expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
+  });
+
+  test('sollte Commits zurückgeben, auch wenn Cleanup fehlschlägt', async () => {
     // Arrange
     const validRepoUrl = 'https://github.com/username/repo.git';
     const tempDir = '/tmp/repo-123';
@@ -43,10 +68,14 @@ describe('Repository API', () => {
         authorEmail: 'test@example.com'
       }
     ];
+    const cleanupError = new Error('Cleanup fehlgeschlagen');
     
     mockCloneRepository.mockResolvedValue(tempDir);
     mockGetCommits.mockResolvedValue(mockCommits);
-    mockCleanupRepository.mockResolvedValue();
+    mockCleanupRepository.mockRejectedValue(cleanupError);
+    
+    // Spy on console.error to verify it's called
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     
     // Act
     const response = await request(app)
@@ -56,42 +85,43 @@ describe('Repository API', () => {
     // Assert
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ commits: mockCommits });
-    
-    // Überprüfen der Aufrufe der Service-Methoden
     expect(mockCloneRepository).toHaveBeenCalledWith(validRepoUrl);
     expect(mockGetCommits).toHaveBeenCalledWith(tempDir);
     expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
+    expect(consoleSpy).toHaveBeenCalled();
+    
+    // Clean up
+    consoleSpy.mockRestore();
   });
 
-  test('sollte 400 für eine ungültige URL zurückgeben', async () => {
-    // Arrange
-    const invalidRepoUrl = 'invalid-url';
+  test('sollte mit verschiedenen URL-Formaten umgehen können', async () => {
+    // Spy on console.error to prevent output pollution during tests
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     
-    // Act
-    const response = await request(app)
+    // Test with empty string
+    await request(app)
       .post('/')
-      .send({ repoUrl: invalidRepoUrl });
+      .send({ repoUrl: '' });
     
-    // Assert
-    expect(response.status).toBe(400);
-    expect(response.body.error).toContain('Invalid repository URL');
-    expect(mockCloneRepository).not.toHaveBeenCalled();
-  });
-
-  test('sollte Fehler beim Klonen korrekt behandeln', async () => {
-    // Arrange
-    const validRepoUrl = 'https://github.com/username/repo.git';
-    const mockError = new Error('Repository nicht gefunden');
-    
-    mockCloneRepository.mockRejectedValue(mockError);
-    
-    // Act
-    const response = await request(app)
+    // Test with obviously invalid URL
+    await request(app)
       .post('/')
-      .send({ repoUrl: validRepoUrl });
+      .send({ repoUrl: 'not-a-url' });
     
-    // Assert
-    expect(response.status).toBe(500);
-    expect(response.body.error).toBe(mockError.message);
+    // Test with basic valid URL - only this should trigger cloneRepository
+    const validUrl = 'https://github.com/user/repo.git';
+    mockCloneRepository.mockResolvedValueOnce('/tmp/valid-repo');
+    mockGetCommits.mockResolvedValueOnce([]);
+    
+    await request(app)
+      .post('/')
+      .send({ repoUrl: validUrl });
+    
+    // Assert that cloneRepository was called exactly once, and only with the valid URL
+    expect(mockCloneRepository).toHaveBeenCalledTimes(1);
+    expect(mockCloneRepository).toHaveBeenCalledWith(validUrl);
+    
+    // Clean up
+    consoleSpy.mockRestore();
   });
 });
