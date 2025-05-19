@@ -1,9 +1,6 @@
 // apps/frontend/src/__tests__/main.test.tsx
 import { createRoot } from 'react-dom/client';
 
-// Define type for Container to match React's DOM types
-type Container = Element | DocumentFragment;
-
 // Mock the modules
 jest.mock('react-dom/client', () => ({
   createRoot: jest.fn(() => ({
