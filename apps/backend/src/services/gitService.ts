@@ -2,43 +2,37 @@ import simpleGit, {
   SimpleGit,
   SimpleGitOptions,
   DefaultLogFields,
-} from 'simple-git'; // Import necessary types
+} from 'simple-git';
 import { mkdtemp, rm } from 'fs/promises';
 import path from 'path';
 import os from 'os';
-
-// Define the Commit interface directly since we're having issues with shared-types
-interface Commit {
-  sha: string;
-  message: string;
-  date: string;
-  authorName: string;
-  authorEmail: string;
-}
-
-// Optional: Define more specific options if needed
-const gitOptions: Partial<SimpleGitOptions> = {
-  baseDir: process.cwd(),
-  binary: 'git',
-  maxConcurrentProcesses: 6,
-};
+import { 
+  Commit, 
+  TimePeriod, 
+  CommitFilterOptions, 
+  CommitAggregation, 
+  CommitHeatmapData 
+} from '../../../../packages/shared-types/src';
 
 // Define the fields we expect from simple-git log based on the default structure
-// Note: simple-git types might evolve, adjust if needed.
-// This interface helps ensure we handle the expected log data.
 interface GitLogEntry extends DefaultLogFields {
   hash: string;
   date: string; // ISO 8601 format string
   message: string;
   author_name: string;
   author_email: string;
-  // refs, body, etc. are also available if needed later
 }
 
 class GitService {
   private git: SimpleGit;
 
   constructor() {
+    const gitOptions: Partial<SimpleGitOptions> = {
+      baseDir: process.cwd(),
+      binary: 'git',
+      maxConcurrentProcesses: 6,
+    };
+    
     this.git = simpleGit(gitOptions);
     console.log('GitService initialized.');
   }
@@ -111,18 +105,16 @@ class GitService {
       const localGit: SimpleGit = simpleGit(localRepoPath);
 
       // Use git.log to retrieve commits.
-      // The default log format includes the necessary fields.
-      // We limit the number of commits using maxCount.
       const logOptions = {
         maxCount: maxCount,
       };
 
-      const log = await localGit.log<GitLogEntry>(logOptions); // Specify expected type
+      const log = await localGit.log<GitLogEntry>(logOptions);
 
-      // Map the result from simple-git log to our shared Commit interface
+      // Map the result to our shared Commit interface
       const commits: Commit[] = log.all
         .map((entry: GitLogEntry) => {
-          // Basic validation (optional, but good practice)
+          // Basic validation
           if (
             !entry.hash ||
             !entry.message ||
@@ -131,17 +123,17 @@ class GitService {
             !entry.author_email
           ) {
             console.warn('Skipping commit with missing data:', entry);
-            return null; // Skip this entry if essential data is missing
+            return null;
           }
           return {
             sha: entry.hash,
             message: entry.message,
-            date: entry.date, // Already in ISO 8601 string format
+            date: entry.date,
             authorName: entry.author_name,
             authorEmail: entry.author_email,
           };
         })
-        .filter((commit): commit is Commit => commit !== null); // Filter out any null entries
+        .filter((commit): commit is Commit => commit !== null);
 
       console.log(
         `Successfully retrieved ${commits.length} commits from ${localRepoPath}.`
@@ -156,6 +148,127 @@ class GitService {
         `Failed to get commits from repository: ${localRepoPath}. Reason: ${error instanceof Error ? error.message : String(error)}`
       );
     }
+  }
+
+  /**
+   * Aggregates commit data by time periods.
+   * @param commits Array of commits to aggregate
+   * @param timePeriod The time period to aggregate by (day, week, month, year)
+   * @param filterOptions Optional filter options
+   * @returns Aggregated commit data for visualization
+   */
+  async aggregateCommitsByTime(
+    commits: Commit[],
+    timePeriod: TimePeriod,
+    filterOptions?: CommitFilterOptions
+  ): Promise<CommitHeatmapData> {
+    console.log(`Aggregating commits by ${timePeriod}`, filterOptions);
+    
+    // Apply filters if provided
+    let filteredCommits = [...commits];
+    
+    if (filterOptions) {
+      if (filterOptions.author) {
+        filteredCommits = filteredCommits.filter(commit => 
+          commit.authorName.includes(filterOptions.author!) || 
+          commit.authorEmail.includes(filterOptions.author!)
+        );
+      }
+      
+      if (filterOptions.fromDate) {
+        const fromDate = new Date(filterOptions.fromDate);
+        filteredCommits = filteredCommits.filter(commit => 
+          new Date(commit.date) >= fromDate
+        );
+      }
+      
+      if (filterOptions.toDate) {
+        const toDate = new Date(filterOptions.toDate);
+        filteredCommits = filteredCommits.filter(commit => 
+          new Date(commit.date) <= toDate
+        );
+      }
+    }
+    
+    // Create a map to aggregate commits by time period
+    const aggregationMap = new Map<string, CommitAggregation>();
+    let maxCommitCount = 0;
+    
+    // Process each commit
+    filteredCommits.forEach(commit => {
+      const date = new Date(commit.date);
+      let periodKey: string;
+      
+      // Determine the period key based on the time period
+      switch (timePeriod) {
+        case 'day':
+          // Format: YYYY-MM-DD
+          periodKey = date.toISOString().split('T')[0];
+          break;
+        case 'week':
+          // Get the first day of the week (Sunday)
+          const dayOfWeek = date.getUTCDay();
+          const firstDayOfWeek = new Date(date);
+          firstDayOfWeek.setUTCDate(date.getUTCDate() - dayOfWeek);
+          periodKey = firstDayOfWeek.toISOString().split('T')[0];
+          break;
+        case 'month':
+          // Format: YYYY-MM
+          periodKey = date.toISOString().substring(0, 7);
+          break;
+        case 'year':
+          // Format: YYYY
+          periodKey = date.toISOString().substring(0, 4);
+          break;
+        default:
+          periodKey = date.toISOString().split('T')[0]; // Default to day
+      }
+      
+      // Update or create the aggregation for this period
+      if (aggregationMap.has(periodKey)) {
+        const existing = aggregationMap.get(periodKey)!;
+        existing.commitCount += 1;
+        
+        // Update authors if not already included
+        if (!existing.authors?.includes(commit.authorName)) {
+          existing.authors = [...(existing.authors || []), commit.authorName];
+        }
+        
+        // Update max commit count if needed
+        if (existing.commitCount > maxCommitCount) {
+          maxCommitCount = existing.commitCount;
+        }
+      } else {
+        aggregationMap.set(periodKey, {
+          periodStart: periodKey,
+          commitCount: 1,
+          authors: [commit.authorName]
+        });
+        
+        // Update max commit count if needed
+        if (1 > maxCommitCount) {
+          maxCommitCount = 1;
+        }
+      }
+    });
+    
+    // Convert the map to an array and sort by period start
+    const aggregatedData = Array.from(aggregationMap.values())
+      .sort((a, b) => a.periodStart.localeCompare(b.periodStart));
+    
+    // Create the result
+    const result: CommitHeatmapData = {
+      timePeriod,
+      data: aggregatedData,
+      metadata: {
+        maxCommitCount,
+        totalCommits: filteredCommits.length,
+        filterOptions
+      }
+    };
+    
+    console.log(`Generated heatmap data with ${aggregatedData.length} time periods`);
+    return result;
   }
 
   /**
@@ -178,4 +291,3 @@ class GitService {
 }
 
 export const gitService = new GitService();
-// export default GitService; // Uncomment if you prefer exporting the class
