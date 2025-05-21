@@ -1,6 +1,6 @@
 import express from 'express';
 import { gitService } from '../services/gitService';
-import { TimePeriod, CommitFilterOptions, Commit } from '../../../../packages/shared-types/src';
+import { TimePeriod, CommitFilterOptions } from '../../../../packages/shared-types/src';
 
 const router = express.Router();
 

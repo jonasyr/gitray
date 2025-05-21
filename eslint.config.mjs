@@ -16,6 +16,8 @@ export default [
       'prettier.config.js',
       '**/dist/**',
       '**/node_modules/**',
+      'apps/backend/src/**/*.js',
+      'apps/backend/src/**/*.js.map',
     ],
   },
 

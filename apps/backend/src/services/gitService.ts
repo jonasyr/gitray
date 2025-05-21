@@ -205,13 +205,14 @@ class GitService {
           // Format: YYYY-MM-DD
           periodKey = date.toISOString().split('T')[0];
           break;
-        case 'week':
+        case 'week': {
           // Get the first day of the week (Sunday)
           const dayOfWeek = date.getUTCDay();
           const firstDayOfWeek = new Date(date);
           firstDayOfWeek.setUTCDate(date.getUTCDate() - dayOfWeek);
           periodKey = firstDayOfWeek.toISOString().split('T')[0];
           break;
+        }
         case 'month':
           // Format: YYYY-MM
           periodKey = date.toISOString().substring(0, 7);

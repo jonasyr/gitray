@@ -1,14 +1,15 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import MainPage from '../pages/MainPage';
-import { getWorkspaceCommits } from '../services/api';
+import { getRepositoryFullData } from '../services/api';
 import { Commit } from '../../../../packages/shared-types/src';
 
 // Mock the API module
 jest.mock('../services/api', () => ({
-  getWorkspaceCommits: jest.fn(),
+  getRepositoryFullData: jest.fn(),
+  getHeatmapData: jest.fn(),
 }));
 
-const mockedGetWorkspaceCommits = getWorkspaceCommits as jest.MockedFunction<typeof getWorkspaceCommits>;
+const mockedGetRepositoryFullData = getRepositoryFullData as jest.MockedFunction<typeof getRepositoryFullData>;
 
 describe('MainPage Component', () => {
   test('should fetch and display commits when repository URL is submitted', async () => {
@@ -23,7 +24,14 @@ describe('MainPage Component', () => {
       }
     ];
     
-    mockedGetWorkspaceCommits.mockResolvedValue(mockCommits);
+    mockedGetRepositoryFullData.mockResolvedValue({
+      commits: mockCommits,
+      heatmapData: {
+        timePeriod: 'month',
+        data: [],
+        metadata: { maxCommitCount: 0, totalCommits: 0 },
+      },
+    });
     render(<MainPage />);
     
     const input = screen.getByRole('textbox');
@@ -35,9 +43,13 @@ describe('MainPage Component', () => {
     
     // Assert
     await waitFor(() => {
-      expect(mockedGetWorkspaceCommits).toHaveBeenCalledWith('https://github.com/test/repo.git');
-      expect(screen.getByText('Repository Commits')).toBeDefined();
-      expect(screen.getByText('123abc4')).toBeDefined();
+      expect(mockedGetRepositoryFullData).toHaveBeenCalledWith(
+        'https://github.com/test/repo.git',
+        'month'
+      );
     });
+
+    // The heatmap should be displayed by default
+    expect(screen.getByText('Repository Activity')).toBeInTheDocument();
   });
 });

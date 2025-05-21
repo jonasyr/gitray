@@ -18,24 +18,25 @@ export const formatDateByPeriod = (date: Date, timePeriod: TimePeriod): string =
         month: 'short', 
         day: 'numeric' 
       });
-    case 'week':
+    case 'week': {
       // Get start of the week
       const startOfWeek = new Date(date);
       const dayOfWeek = date.getDay();
       startOfWeek.setDate(date.getDate() - dayOfWeek);
-      
+
       // Get end of the week
       const endOfWeek = new Date(startOfWeek);
       endOfWeek.setDate(startOfWeek.getDate() + 6);
-      
+
       // Format as "Apr 1 - Apr 7, 2023"
       return `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${
-        endOfWeek.toLocaleDateString('en-US', { 
-          month: 'short', 
-          day: 'numeric', 
-          year: 'numeric' 
+        endOfWeek.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric'
         })
       }`;
+    }
     case 'month':
       return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
     case 'year':
@@ -65,11 +66,12 @@ export const generateDateRange = (
     case 'day':
       // No adjustment needed for days
       break;
-    case 'week':
+    case 'week': {
       // Set to start of week (Sunday)
       const dayOfWeek = currentDate.getDay();
       currentDate.setDate(currentDate.getDate() - dayOfWeek);
       break;
+    }
     case 'month':
       // Set to first day of month
       currentDate.setDate(1);
