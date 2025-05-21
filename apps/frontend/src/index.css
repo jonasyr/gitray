@@ -58,6 +58,13 @@ button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
 
+/* Color scale for react-calendar-heatmap */
+.color-empty { background-color: #2d333b; fill: #2d333b; }
+.color-scale-1 { background-color: #0e4429; fill: #0e4429; }
+.color-scale-2 { background-color: #006d32; fill: #006d32; }
+.color-scale-3 { background-color: #26a641; fill: #26a641; }
+.color-scale-4 { background-color: #39d353; fill: #39d353; }
+
 @media (prefers-color-scheme: light) {
   :root {
     color: #213547;

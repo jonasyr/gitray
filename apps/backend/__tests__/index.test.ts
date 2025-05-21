@@ -9,6 +9,7 @@ type MockApp = {
 
 type MockExpress = jest.Mock<MockApp> & {
   json: jest.Mock;
+  Router?: jest.Mock;
 };
 
 // Mocking the modules
@@ -21,9 +22,11 @@ jest.mock('express', () => {
       return mockApp;
     }),
   };
-  
+  const mockRouter = { get: jest.fn(), post: jest.fn(), use: jest.fn() };
+
   const mockExpress = jest.fn(() => mockApp) as MockExpress;
   mockExpress.json = jest.fn(() => mockJson);
+  mockExpress.Router = jest.fn(() => mockRouter);
   return mockExpress;
 });
 

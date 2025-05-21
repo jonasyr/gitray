@@ -59,12 +59,14 @@ export const getHeatmapData = async (
   filterOptions?: CommitFilterOptions
 ): Promise<CommitHeatmapData> => {
   try {
-    const response = await apiClient.post('/api/repositories/heatmap', {
-      repoUrl,
-      timePeriod,
-      filterOptions
-    });
-    return response.data.heatmapData;
+    const params = new URLSearchParams({ repoUrl, timePeriod });
+    if (filterOptions?.author) params.append('author', filterOptions.author);
+    if (filterOptions?.fromDate) params.append('fromDate', filterOptions.fromDate);
+    if (filterOptions?.toDate) params.append('toDate', filterOptions.toDate);
+    if (filterOptions?.fileExtension) params.append('fileExtension', filterOptions.fileExtension);
+
+    const response = await apiClient.get('/api/commits/heatmap', { params });
+    return response.data;
   } catch (error) {
     if (axios.isAxiosError(error)) {
       if (error.response) {
