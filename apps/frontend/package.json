@@ -12,9 +12,11 @@
     "test:coverage": "jest --config=jest.config.cjs --coverage"
   },
   "dependencies": {
+    "apexcharts": "^4.7.0",
     "axios": "^1.9.0",
     "date-fns": "^4.1.0",
     "react": "^19.0.0",
+    "react-apexcharts": "^1.7.0",
     "react-calendar-heatmap": "^1.10.0",
     "react-dom": "^19.0.0",
     "typescript": "~5.7.2"
