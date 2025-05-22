@@ -47,8 +47,8 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl }) => {
     return `color-scale-${level}`;
   };
 
-  const tooltipDataAttrs = (v?: HeatmapValue) =>
-    v ? { 'data-tip': `${v.count} commits on ${v.date}` } : null;
+  const titleForValue = (v?: HeatmapValue) =>
+    v ? `${v.count} commit${v.count === 1 ? '' : 's'} on ${v.date}` : null;
 
   const startDate = new Date(Date.now() - 364 * 24 * 60 * 60 * 1000);
   const endDate = new Date();
@@ -75,7 +75,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl }) => {
             values={values}
             showWeekdayLabels
             classForValue={classForValue}
-            tooltipDataAttrs={tooltipDataAttrs}
+            titleForValue={titleForValue}
             onClick={(v: HeatmapValue | undefined) =>
               v && window.open(`${repoUrl}/commits?until=${v.date}`, '_blank')}
           />

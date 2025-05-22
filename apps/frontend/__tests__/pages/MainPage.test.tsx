@@ -1,10 +1,10 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import MainPage from '../pages/MainPage';
-import { getRepositoryFullData } from '../services/api';
+import MainPage from '../../src/pages/MainPage';
+import { getRepositoryFullData } from '../../src/services/api';
 import { Commit } from '../../../../packages/shared-types/src';
 
 // Mock the API module
-jest.mock('../services/api', () => ({
+jest.mock('../../src/services/api', () => ({
   getRepositoryFullData: jest.fn(),
   getHeatmapData: jest.fn(),
 }));

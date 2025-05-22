@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import CommitList from '../components/CommitList';
+import CommitList from '../../src/components/CommitList';
 import { Commit } from '../../../../packages/shared-types/src';
 
 describe('CommitList Component', () => {

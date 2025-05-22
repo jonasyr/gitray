@@ -1,6 +1,6 @@
 // apps/frontend/src/__tests__/App.test.tsx
 import { render, screen } from '@testing-library/react';
-import App from '../App';
+import App from '../src/App';
 
 describe('App Component (ohne jest-dom)', () => {
   test('rendert MainPage mit Login- und Signup-Buttons', () => {

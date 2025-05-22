@@ -1,5 +1,5 @@
 import axios, { AxiosRequestConfig } from 'axios';
-import { getWorkspaceCommits } from '../services/api';
+import { getWorkspaceCommits } from '../../src/services/api';
 import { Commit } from '../../../../packages/shared-types/src';
 
 // Define type for our mock axios
