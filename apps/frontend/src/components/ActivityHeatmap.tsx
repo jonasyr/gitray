@@ -38,7 +38,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl }) => {
   const values: HeatmapValue[] = data
     ? data.data.map(b => ({ date: b.periodStart, count: b.commitCount, authors: b.authors }))
     : [];
-  const max = data?.metadata?.maxCommitCount || 0;
+  const max = data?.metadata?.maxCommitCount ?? 0;
 
   const classForValue = (v?: HeatmapValue) => {
     if (!v) return 'color-empty';
@@ -61,7 +61,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl }) => {
           type="text"
           placeholder="Author"
           className="px-2 py-1 text-sm bg-gray-800 border border-gray-700 rounded"
-          value={filterOptions.author || ''}
+          value={filterOptions.author ?? ''}
           onChange={e => setFilterOptions({ ...filterOptions, author: e.target.value || undefined })}
         />
       </div>

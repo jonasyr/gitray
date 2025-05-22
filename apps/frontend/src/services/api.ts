@@ -32,7 +32,7 @@ export const getWorkspaceCommits = async (repoUrl: string): Promise<Commit[]> =>
       if (error.response) {
         // The request was made and the server responded with a status code
         // that falls out of the range of 2xx
-        throw new Error(`Server error: ${error.response.data?.error || error.message}`);
+        throw new Error(`Server error: ${error.response.data?.error ?? error.message}`);
       } else if (error.request) {
         // The request was made but no response was received
         throw new Error('No response from server. Please check your network connection.');
@@ -69,7 +69,7 @@ export const getHeatmapData = async (
   } catch (error) {
     if (axios.isAxiosError(error)) {
       if (error.response) {
-        throw new Error(`Server error: ${error.response.data?.error || error.message}`);
+        throw new Error(`Server error: ${error.response.data?.error ?? error.message}`);
       } else if (error.request) {
         throw new Error('No response from server. Please check your network connection.');
       } else {
@@ -106,7 +106,7 @@ export const getRepositoryFullData = async (
   } catch (error) {
     if (axios.isAxiosError(error)) {
       if (error.response) {
-        throw new Error(`Server error: ${error.response.data?.error || error.message}`);
+        throw new Error(`Server error: ${error.response.data?.error ?? error.message}`);
       } else if (error.request) {
         throw new Error('No response from server. Please check your network connection.');
       } else {
