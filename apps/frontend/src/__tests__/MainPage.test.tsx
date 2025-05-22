@@ -26,11 +26,7 @@ describe('MainPage Component', () => {
     
     mockedGetRepositoryFullData.mockResolvedValue({
       commits: mockCommits,
-      heatmapData: {
-        timePeriod: 'month',
-        data: [],
-        metadata: { maxCommitCount: 0, totalCommits: 0 },
-      },
+      heatmapData: { timePeriod: 'day', data: [], metadata: { maxCommitCount: 0, totalCommits: 0 } },
     });
     render(<MainPage />);
     
@@ -45,7 +41,7 @@ describe('MainPage Component', () => {
     await waitFor(() => {
       expect(mockedGetRepositoryFullData).toHaveBeenCalledWith(
         'https://github.com/test/repo.git',
-        'month'
+        'day'
       );
     });
 

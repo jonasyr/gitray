@@ -1,27 +1,16 @@
 import simpleGit, {
   SimpleGit,
   SimpleGitOptions,
-  DefaultLogFields,
 } from 'simple-git';
 import { mkdtemp, rm } from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { 
   Commit, 
-  TimePeriod, 
-  CommitFilterOptions, 
-  CommitAggregation, 
-  CommitHeatmapData 
+  CommitFilterOptions,
+  CommitAggregation,
+  CommitHeatmapData
 } from '../../../../packages/shared-types/src';
-
-// Define the fields we expect from simple-git log based on the default structure
-interface GitLogEntry extends DefaultLogFields {
-  hash: string;
-  date: string; // ISO 8601 format string
-  message: string;
-  author_name: string;
-  author_email: string;
-}
 
 class GitService {
   private git: SimpleGit;
@@ -55,13 +44,8 @@ class GitService {
 
       const localGit = simpleGit(tempDir);
 
-      const cloneOptions = {
-        '--depth': 50,
-      };
-      await localGit.clone(repoUrl, '.', cloneOptions);
-      console.log(
-        `Successfully cloned ${repoUrl} into ${tempDir} with depth 50.`
-      );
+      await localGit.clone(repoUrl, '.');
+      console.log(`Successfully cloned ${repoUrl} into ${tempDir}.`);
 
       return tempDir;
     } catch (error) {
@@ -89,49 +73,29 @@ class GitService {
   /**
    * Retrieves the commit history from a local repository path.
    * @param localRepoPath The file system path to the cloned repository.
-   * @param maxCount The maximum number of commits to retrieve (default: 100).
    * @returns A promise that resolves with an array of Commit objects.
    * @throws Will throw an error if reading the commit log fails.
    */
-  async getCommits(
-    localRepoPath: string,
-    maxCount: number = 100
-  ): Promise<Commit[]> {
-    console.log(
-      `Attempting to read commits from: ${localRepoPath}, maxCount: ${maxCount}`
-    );
+  async getCommits(localRepoPath: string): Promise<Commit[]> {
+    console.log(`Attempting to read commits from: ${localRepoPath}`);
     try {
-      // Create a simple-git instance specifically for the repo path
       const localGit: SimpleGit = simpleGit(localRepoPath);
 
-      // Use git.log to retrieve commits.
-      const logOptions = {
-        maxCount: maxCount,
-      };
+      const raw = await localGit.raw([
+        'log',
+        '--pretty=format:%H|%cI|%an|%ae|%s',
+      ]);
 
-      const log = await localGit.log<GitLogEntry>(logOptions);
-
-      // Map the result to our shared Commit interface
-      const commits: Commit[] = log.all
-        .map((entry: GitLogEntry) => {
-          // Basic validation
-          if (
-            !entry.hash ||
-            !entry.message ||
-            !entry.date ||
-            !entry.author_name ||
-            !entry.author_email
-          ) {
-            console.warn('Skipping commit with missing data:', entry);
+      const commits: Commit[] = raw
+        .split('\n')
+        .filter(Boolean)
+        .map(line => {
+          const [hash, date, authorName, authorEmail, message] = line.split('|');
+          if (!hash || !date || !authorName || !authorEmail || !message) {
+            console.warn('Skipping commit with missing data:', line);
             return null;
           }
-          return {
-            sha: entry.hash,
-            message: entry.message,
-            date: entry.date,
-            authorName: entry.author_name,
-            authorEmail: entry.author_email,
-          };
+          return { sha: hash, message, date, authorName, authorEmail };
         })
         .filter((commit): commit is Commit => commit !== null);
 
@@ -159,117 +123,64 @@ class GitService {
    */
   async aggregateCommitsByTime(
     commits: Commit[],
-    timePeriod: TimePeriod,
     filterOptions?: CommitFilterOptions
   ): Promise<CommitHeatmapData> {
-    console.log(`Aggregating commits by ${timePeriod}`, filterOptions);
-    
-    // Apply filters if provided
-    let filteredCommits = [...commits];
-    
-    if (filterOptions) {
-      if (filterOptions.author) {
-        filteredCommits = filteredCommits.filter(commit => 
-          commit.authorName.includes(filterOptions.author!) || 
-          commit.authorEmail.includes(filterOptions.author!)
-        );
-      }
-      
-      if (filterOptions.fromDate) {
-        const fromDate = new Date(filterOptions.fromDate);
-        filteredCommits = filteredCommits.filter(commit => 
-          new Date(commit.date) >= fromDate
-        );
-      }
-      
-      if (filterOptions.toDate) {
-        const toDate = new Date(filterOptions.toDate);
-        filteredCommits = filteredCommits.filter(commit => 
-          new Date(commit.date) <= toDate
-        );
-      }
+    console.log('Aggregating commits by day', filterOptions);
+
+    let filtered = [...commits];
+    if (filterOptions?.author) {
+      filtered = filtered.filter(c =>
+        c.authorName.includes(filterOptions.author!) ||
+        c.authorEmail.includes(filterOptions.author!)
+      );
     }
-    
-    // Create a map to aggregate commits by time period
-    const aggregationMap = new Map<string, CommitAggregation>();
+    const endDate = filterOptions?.toDate
+      ? new Date(filterOptions.toDate)
+      : new Date();
+    const startDate = filterOptions?.fromDate
+      ? new Date(filterOptions.fromDate)
+      : new Date(endDate.getTime() - 86400000 * 364);
+
+    if (filterOptions?.fromDate) {
+      filtered = filtered.filter(c => new Date(c.date) >= startDate);
+    }
+    if (filterOptions?.toDate) {
+      filtered = filtered.filter(c => new Date(c.date) <= endDate);
+    }
+
+    const map = new Map<string, CommitAggregation>();
+    for (
+      let d = new Date(startDate);
+      d <= endDate;
+      d.setUTCDate(d.getUTCDate() + 1)
+    ) {
+      const key = d.toISOString().split('T')[0];
+      map.set(key, { periodStart: key, commitCount: 0, authors: [] });
+    }
+
     let maxCommitCount = 0;
-    
-    // Process each commit
-    filteredCommits.forEach(commit => {
-      const date = new Date(commit.date);
-      let periodKey: string;
-      
-      // Determine the period key based on the time period
-      switch (timePeriod) {
-        case 'day':
-          // Format: YYYY-MM-DD
-          periodKey = date.toISOString().split('T')[0];
-          break;
-        case 'week': {
-          // Get the first day of the week (Sunday)
-          const dayOfWeek = date.getUTCDay();
-          const firstDayOfWeek = new Date(date);
-          firstDayOfWeek.setUTCDate(date.getUTCDate() - dayOfWeek);
-          periodKey = firstDayOfWeek.toISOString().split('T')[0];
-          break;
-        }
-        case 'month':
-          // Format: YYYY-MM
-          periodKey = date.toISOString().substring(0, 7);
-          break;
-        case 'year':
-          // Format: YYYY
-          periodKey = date.toISOString().substring(0, 4);
-          break;
-        default:
-          periodKey = date.toISOString().split('T')[0]; // Default to day
+    filtered.forEach(c => {
+      const key = new Date(c.date).toISOString().split('T')[0];
+      const bucket = map.get(key);
+      if (!bucket) return;
+      bucket.commitCount += 1;
+      if (!bucket.authors!.includes(c.authorName)) {
+        bucket.authors!.push(c.authorName);
       }
-      
-      // Update or create the aggregation for this period
-      if (aggregationMap.has(periodKey)) {
-        const existing = aggregationMap.get(periodKey)!;
-        existing.commitCount += 1;
-        
-        // Update authors if not already included
-        if (!existing.authors?.includes(commit.authorName)) {
-          existing.authors = [...(existing.authors || []), commit.authorName];
-        }
-        
-        // Update max commit count if needed
-        if (existing.commitCount > maxCommitCount) {
-          maxCommitCount = existing.commitCount;
-        }
-      } else {
-        aggregationMap.set(periodKey, {
-          periodStart: periodKey,
-          commitCount: 1,
-          authors: [commit.authorName]
-        });
-        
-        // Update max commit count if needed
-        if (1 > maxCommitCount) {
-          maxCommitCount = 1;
-        }
+      if (bucket.commitCount > maxCommitCount) {
+        maxCommitCount = bucket.commitCount;
       }
     });
-    
-    // Convert the map to an array and sort by period start
-    const aggregatedData = Array.from(aggregationMap.values())
-      .sort((a, b) => a.periodStart.localeCompare(b.periodStart));
-    
-    // Create the result
-    const result: CommitHeatmapData = {
-      timePeriod,
+
+    const aggregatedData = Array.from(map.values());
+    return {
+      timePeriod: 'day',
       data: aggregatedData,
       metadata: {
         maxCommitCount,
-        totalCommits: filteredCommits.length,
-        filterOptions
-      }
+        totalCommits: filtered.length,
+      },
     };
-    
-    console.log(`Generated heatmap data with ${aggregatedData.length} time periods`);
-    return result;
   }
 
   /**

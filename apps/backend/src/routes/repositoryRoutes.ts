@@ -1,6 +1,6 @@
 import express from 'express';
 import { gitService } from '../services/gitService';
-import { TimePeriod, CommitFilterOptions } from '../../../../packages/shared-types/src';
+import { CommitFilterOptions } from '../../../../packages/shared-types/src';
 
 const router = express.Router();
 
@@ -31,7 +31,7 @@ router.post('/', async (req, res, next) => {
     tempDir = await gitService.cloneRepository(repoUrl);
     
     // Get the commits
-    const commits = await gitService.getCommits(tempDir, 1000);
+    const commits = await gitService.getCommits(tempDir);
     
     // Send the response with the commits
     res.status(200).json({ commits });
@@ -62,7 +62,7 @@ router.post('/', async (req, res, next) => {
 
 // POST endpoint to get commit heatmap data
 router.post('/heatmap', async (req, res, next) => {
-  const { repoUrl, timePeriod, filterOptions } = req.body;
+  const { repoUrl, filterOptions } = req.body;
   
   // Validate inputs
   if (!repoUrl || !isValidUrl(repoUrl)) {
@@ -70,10 +70,6 @@ router.post('/heatmap', async (req, res, next) => {
     return;
   }
   
-  if (!timePeriod || !['day', 'week', 'month', 'year'].includes(timePeriod)) {
-    res.status(400).json({ error: 'Invalid time period. Must be one of: day, week, month, year.' });
-    return;
-  }
   
   let tempDir: string | undefined;
   
@@ -81,13 +77,12 @@ router.post('/heatmap', async (req, res, next) => {
     // Clone the repository
     tempDir = await gitService.cloneRepository(repoUrl);
     
-    // Get all commits (with a high maxCount to ensure we get enough data)
-    const commits = await gitService.getCommits(tempDir, 1000);
+    // Get all commits
+    const commits = await gitService.getCommits(tempDir);
     
     // Aggregate the commits by time period
     const heatmapData = await gitService.aggregateCommitsByTime(
-      commits, 
-      timePeriod as TimePeriod, 
+      commits,
       filterOptions as CommitFilterOptions
     );
     
@@ -120,7 +115,7 @@ router.post('/heatmap', async (req, res, next) => {
 
 // NEW ENDPOINT: Get both commits and heatmap data in a single request
 router.post('/full-data', async (req, res, next) => {
-  const { repoUrl, timePeriod, filterOptions } = req.body;
+  const { repoUrl, filterOptions } = req.body;
   
   // Validate the repository URL
   if (!repoUrl || !isValidUrl(repoUrl)) {
@@ -128,9 +123,6 @@ router.post('/full-data', async (req, res, next) => {
     return;
   }
   
-  const validTimePeriod = timePeriod && ['day', 'week', 'month', 'year'].includes(timePeriod) 
-    ? timePeriod as TimePeriod 
-    : 'month';
   
   let tempDir: string | undefined;
   
@@ -138,13 +130,12 @@ router.post('/full-data', async (req, res, next) => {
     // Clone the repository only once
     tempDir = await gitService.cloneRepository(repoUrl);
     
-    // Get all commits with a high limit
-    const commits = await gitService.getCommits(tempDir, 1000);
+    // Get all commits
+    const commits = await gitService.getCommits(tempDir);
     
     // Generate heatmap data from the same commits
     const heatmapData = await gitService.aggregateCommitsByTime(
       commits,
-      validTimePeriod,
       filterOptions as CommitFilterOptions
     );
     

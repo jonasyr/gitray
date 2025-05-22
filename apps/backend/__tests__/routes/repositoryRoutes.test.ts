@@ -51,7 +51,7 @@ describe('Repository API Extended Tests', () => {
     expect(response.status).toBe(500);
     expect(response.body.error).toBe(mockError.message);
     expect(mockCloneRepository).toHaveBeenCalledWith(validRepoUrl);
-    expect(mockGetCommits).toHaveBeenCalledWith(tempDir, 1000);
+    expect(mockGetCommits).toHaveBeenCalledWith(tempDir);
     expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
   });
 
@@ -86,7 +86,7 @@ describe('Repository API Extended Tests', () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ commits: mockCommits });
     expect(mockCloneRepository).toHaveBeenCalledWith(validRepoUrl);
-    expect(mockGetCommits).toHaveBeenCalledWith(tempDir, 1000);
+    expect(mockGetCommits).toHaveBeenCalledWith(tempDir);
     expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
     expect(consoleSpy).toHaveBeenCalled();
     

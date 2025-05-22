@@ -13,6 +13,7 @@ describe('GitService', () => {
   const mockGit = {
     clone: jest.fn(),
     log: jest.fn(),
+    raw: jest.fn(),
   };
 
   // Reset all mocks before each test
@@ -36,7 +37,7 @@ describe('GitService', () => {
       expect(result).toBe('/tmp/git-visualizer-test');
       expect(mkdtemp).toHaveBeenCalledWith(expect.stringContaining(path.join(os.tmpdir(), 'git-visualizer-')));
       expect(simpleGit).toHaveBeenCalledWith('/tmp/git-visualizer-test');
-      expect(mockGit.clone).toHaveBeenCalledWith(repoUrl, '.', { '--depth': 50 });
+      expect(mockGit.clone).toHaveBeenCalledWith(repoUrl, '.');
     });
   });
 
@@ -44,31 +45,13 @@ describe('GitService', () => {
     test('should retrieve and transform commits from a repository', async () => {
       // Arrange
       const localRepoPath = '/tmp/git-visualizer-test';
-      const maxCount = 10;
       
-      const mockLogResult = {
-        all: [
-          {
-            hash: 'abc123',
-            date: '2023-01-01T12:00:00Z',
-            message: 'Initial commit',
-            author_name: 'Test User',
-            author_email: 'test@example.com',
-          },
-          {
-            hash: 'def456',
-            date: '2023-01-02T14:00:00Z',
-            message: 'Add feature X',
-            author_name: 'Another User',
-            author_email: 'another@example.com',
-          },
-        ],
-      };
-      
-      mockGit.log.mockResolvedValue(mockLogResult);
+      const mockRaw = `abc123|2023-01-01T12:00:00Z|Test User|test@example.com|Initial commit\n` +
+        `def456|2023-01-02T14:00:00Z|Another User|another@example.com|Add feature X`;
+      mockGit.raw.mockResolvedValue(mockRaw);
       
       // Act
-      const commits = await gitService.getCommits(localRepoPath, maxCount);
+      const commits = await gitService.getCommits(localRepoPath);
       
       // Assert
       expect(commits).toHaveLength(2);
@@ -80,7 +63,10 @@ describe('GitService', () => {
         authorEmail: 'test@example.com',
       });
       expect(simpleGit).toHaveBeenCalledWith(localRepoPath);
-      expect(mockGit.log).toHaveBeenCalledWith({ maxCount });
+      expect(mockGit.raw).toHaveBeenCalledWith([
+        'log',
+        '--pretty=format:%H|%cI|%an|%ae|%s',
+      ]);
     });
   });
 
@@ -102,6 +88,7 @@ describe('GitService Extended Tests', () => {
   const mockGit = {
     clone: jest.fn(),
     log: jest.fn(),
+    raw: jest.fn(),
   };
 
   beforeEach(() => {
@@ -144,38 +131,20 @@ describe('GitService Extended Tests', () => {
     test('should handle errors when retrieving commits', async () => {
       const localRepoPath = '/tmp/git-visualizer-test';
       const mockError = new Error('Failed to get log');
-      mockGit.log.mockRejectedValue(mockError);
+      mockGit.raw.mockRejectedValue(mockError);
       await expect(gitService.getCommits(localRepoPath)).rejects.toThrow('Failed to get commits from repository');
       expect(simpleGit).toHaveBeenCalledWith(localRepoPath);
-      expect(mockGit.log).toHaveBeenCalled();
+      expect(mockGit.raw).toHaveBeenCalled();
     });
 
     test('should filter out commits with missing data', async () => {
       const localRepoPath = '/tmp/git-visualizer-test';
-      const mockLogResult = {
-        all: [
-          {
-            hash: 'abc123',
-            date: '2023-01-01T12:00:00Z',
-            message: 'Complete commit',
-            author_name: 'Test User',
-            author_email: 'test@example.com',
-          },
-          {
-            hash: 'def456',
-            date: '2023-01-02T14:00:00Z',
-            author_name: 'Another User',
-            author_email: 'another@example.com',
-          },
-          {
-            hash: 'ghi789',
-            date: '2023-01-03T15:00:00Z',
-            message: 'Missing author name',
-            author_email: 'another@example.com',
-          },
-        ],
-      };
-      mockGit.log.mockResolvedValue(mockLogResult);
+      const mockRaw = [
+        'abc123|2023-01-01T12:00:00Z|Test User|test@example.com|Complete commit',
+        'def456|2023-01-02T14:00:00Z||another@example.com|No author',
+        'ghi789|2023-01-03T15:00:00Z|Another User|another@example.com|',
+      ].join('\n');
+      mockGit.raw.mockResolvedValue(mockRaw);
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       const commits = await gitService.getCommits(localRepoPath);
       expect(commits).toHaveLength(1);
@@ -184,20 +153,6 @@ describe('GitService Extended Tests', () => {
       warnSpy.mockRestore();
     });
 
-    test('should use default maxCount of 100 when not provided', async () => {
-      const localRepoPath = '/tmp/git-visualizer-test';
-      mockGit.log.mockResolvedValue({ all: [] });
-      await gitService.getCommits(localRepoPath);
-      expect(mockGit.log).toHaveBeenCalledWith({ maxCount: 100 });
-    });
-
-    test('should use provided maxCount when specified', async () => {
-      const localRepoPath = '/tmp/git-visualizer-test';
-      const maxCount = 50;
-      mockGit.log.mockResolvedValue({ all: [] });
-      await gitService.getCommits(localRepoPath, maxCount);
-      expect(mockGit.log).toHaveBeenCalledWith({ maxCount: 50 });
-    });
   });
 
   describe('cleanupRepository error handling', () => {

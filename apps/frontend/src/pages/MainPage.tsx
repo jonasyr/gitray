@@ -3,16 +3,14 @@ import RepoInput from '../components/RepoInput';
 import CommitList from '../components/CommitList';
 import ActivityHeatmap from '../components/ActivityHeatmap';
 import { getRepositoryFullData } from '../services/api';
-import { Commit, CommitHeatmapData, TimePeriod } from '../../../../packages/shared-types/src';
+import { Commit } from '../../../../packages/shared-types/src';
 
 const MainPage: React.FC = () => {
   const [commits, setCommits] = useState<Commit[]>([]);
-  const [heatmapData, setHeatmapData] = useState<CommitHeatmapData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [repoUrl, setRepoUrl] = useState<string>('');
   const [showHeatmap, setShowHeatmap] = useState<boolean>(false);
-  const [selectedTimePeriod] = useState<TimePeriod>('month');
 
   const handleVisualize = async (inputRepoUrl: string) => {
     console.log('Visualizing:', inputRepoUrl);
@@ -22,18 +20,16 @@ const MainPage: React.FC = () => {
     
     try {
       // Use the optimized endpoint to fetch both commits and heatmap data at once
-      const { commits, heatmapData } = await getRepositoryFullData(
-        inputRepoUrl, 
-        selectedTimePeriod
+      const { commits } = await getRepositoryFullData(
+        inputRepoUrl,
+        'day'
       );
-      
+
       setCommits(commits);
-      setHeatmapData(heatmapData);
       setShowHeatmap(true); // Show heatmap by default after fetching
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unknown error occurred');
       setCommits([]);
-      setHeatmapData(null);
       setShowHeatmap(false);
     } finally {
       setIsLoading(false);
@@ -93,11 +89,7 @@ const MainPage: React.FC = () => {
             
             {/* Show either commit list or heatmap based on selection */}
             {showHeatmap ? (
-              <ActivityHeatmap 
-                repoUrl={repoUrl} 
-                initialTimePeriod={selectedTimePeriod}
-                heatmapData={heatmapData || undefined}
-              />
+              <ActivityHeatmap repoUrl={repoUrl} />
             ) : (
               <CommitList commits={commits} />
             )}
