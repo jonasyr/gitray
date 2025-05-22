@@ -89,7 +89,7 @@ const MainPage: React.FC = () => {
             
             {/* Show either commit list or heatmap based on selection */}
             {showHeatmap ? (
-              <ActivityHeatmap repoUrl={repoUrl} />
+              <ActivityHeatmap repoUrl={repoUrl} commits={commits} />
             ) : (
               <CommitList commits={commits} />
             )}

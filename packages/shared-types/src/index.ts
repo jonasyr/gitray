@@ -26,7 +26,14 @@ export type TimePeriod = 'day' | 'week' | 'month' | 'year';
  * Filter options for commit aggregation
  */
 export interface CommitFilterOptions {
+  /** Single author filter (deprecated in favor of `authors`) */
   author?: string;
+
+  /**
+   * Filter commits by multiple authors. When provided, takes precedence over
+   * `author`.
+   */
+  authors?: string[];
   fileExtension?: string;
   fromDate?: string;
   toDate?: string;

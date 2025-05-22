@@ -60,7 +60,11 @@ export const getHeatmapData = async (
 ): Promise<CommitHeatmapData> => {
   try {
     const params = new URLSearchParams({ repoUrl, timePeriod });
-    if (filterOptions?.author) params.append('author', filterOptions.author);
+    if (filterOptions?.authors && filterOptions.authors.length > 0) {
+      params.append('authors', filterOptions.authors.join(','));
+    } else if (filterOptions?.author) {
+      params.append('author', filterOptions.author);
+    }
     if (filterOptions?.fromDate) params.append('fromDate', filterOptions.fromDate);
     if (filterOptions?.toDate) params.append('toDate', filterOptions.toDate);
 

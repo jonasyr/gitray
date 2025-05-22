@@ -22,7 +22,10 @@ describe('ActivityHeatmap (happy path, AAA)', () => {
 
     // Act
     const { container } = render(
-      <ActivityHeatmap repoUrl="https://github.com/test/repo.git" />
+      <ActivityHeatmap
+        repoUrl="https://github.com/test/repo.git"
+        commits={[]}
+      />
     );
     await waitFor(() => expect(mockedGetHeatmapData).toHaveBeenCalled());
 

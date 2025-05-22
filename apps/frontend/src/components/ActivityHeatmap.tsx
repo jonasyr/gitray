@@ -1,12 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 import '../styles/heatmap.css';
-import { CommitFilterOptions, CommitHeatmapData } from '../../../../packages/shared-types/src';
+import Select from 'react-select';
+import { CommitFilterOptions, CommitHeatmapData, Commit } from '../../../../packages/shared-types/src';
 import { getHeatmapData } from '../services/api';
 
 interface ActivityHeatmapProps {
   repoUrl: string;
+  commits: Commit[];
 }
 
 interface HeatmapValue {
@@ -15,10 +17,19 @@ interface HeatmapValue {
   authors?: string[];
 }
 
-const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl }) => {
+const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) => {
   const [filterOptions, setFilterOptions] = useState<CommitFilterOptions>({});
   const [data, setData] = useState<CommitHeatmapData | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const authorOptions = useMemo(
+    () =>
+      Array.from(new Set(commits.map(c => c.authorName))).map(a => ({
+        value: a,
+        label: a,
+      })),
+    [commits]
+  );
 
   const fetchData = async () => {
     if (!repoUrl) return;
@@ -57,12 +68,45 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl }) => {
     <div className="w-full">
       <h2 className="text-xl font-bold mb-2">Repository Activity</h2>
       <div className="flex space-x-2 mb-4">
-        <input
-          type="text"
-          placeholder="Author"
-          className="px-2 py-1 text-sm bg-gray-800 border border-gray-700 rounded"
-          value={filterOptions.author ?? ''}
-          onChange={e => setFilterOptions({ ...filterOptions, author: e.target.value || undefined })}
+        <Select
+          isMulti
+          options={authorOptions}
+          className="min-w-[200px] text-sm"
+          styles={{
+            control: base => ({
+              ...base,
+              backgroundColor: '#1f2937', // gray-800
+              borderColor: '#374151', // gray-700
+            }),
+            menu: base => ({ ...base, backgroundColor: '#1f2937', color: 'white' }),
+            option: (base, state) => ({
+              ...base,
+              backgroundColor: state.isSelected
+                ? '#10b981'
+                : state.isFocused
+                ? '#374151'
+                : '#1f2937',
+              color: 'white',
+              cursor: 'pointer',
+            }),
+            multiValue: base => ({ ...base, backgroundColor: '#065f46', color: 'white' }),
+            multiValueLabel: base => ({ ...base, color: 'white' }),
+            multiValueRemove: base => ({
+              ...base,
+              color: 'white',
+              ':hover': { backgroundColor: '#064e3b', color: 'white' },
+            }),
+          }}
+          value={
+            filterOptions.authors?.map(a => ({ value: a, label: a })) ?? []
+          }
+          onChange={vals =>
+            setFilterOptions({
+              ...filterOptions,
+              authors: vals.map(v => v.value),
+            })
+          }
+          placeholder="Author(s)"
         />
       </div>
       {loading ? (

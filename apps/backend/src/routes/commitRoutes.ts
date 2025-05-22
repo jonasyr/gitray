@@ -6,7 +6,8 @@ const router = express.Router();
 
 // GET /api/commits/heatmap?repoUrl=...&author=...&fromDate=...&toDate=...
 router.get('/heatmap', (async (req, res, next) => {
-  const { repoUrl, author, fromDate, toDate } = req.query as Record<string, string>;
+  const { repoUrl, author, authors, fromDate, toDate } =
+    req.query as Record<string, string>;
 
   // Basic validation
   if (!repoUrl) {
@@ -19,6 +20,7 @@ router.get('/heatmap', (async (req, res, next) => {
     const commits = await gitService.getCommits(tempDir);
     const filters: CommitFilterOptions = {
       author: author || undefined,
+      authors: authors ? authors.split(',') : undefined,
       fromDate: fromDate || undefined,
       toDate: toDate || undefined,
     };

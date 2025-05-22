@@ -128,10 +128,13 @@ class GitService {
     console.log('Aggregating commits by day', filterOptions);
 
     let filtered = [...commits];
-    if (filterOptions?.author) {
+    const filterAuthors = filterOptions?.authors ??
+      (filterOptions?.author ? [filterOptions.author] : undefined);
+    if (filterAuthors && filterAuthors.length > 0) {
       filtered = filtered.filter(c =>
-        c.authorName.includes(filterOptions.author!) ||
-        c.authorEmail.includes(filterOptions.author!)
+        filterAuthors.some(a =>
+          c.authorName.includes(a) || c.authorEmail.includes(a)
+        )
       );
     }
     const endDate = filterOptions?.toDate
