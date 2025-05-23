@@ -1,14 +1,21 @@
 #!/usr/bin/env sh
 . "$(dirname "$0")/_/husky.sh"
+echo "🔧 Husky pre-commit hook running..."
 
-# Format codebase and add changes
-pnpm format
-git add -A
+run_step() {
+  cmd="$1"
+  label="$2"
+  # echo "⏳ Running $label..."
+  if $cmd; then
+    # echo "✅ $label passed"
+  else
+    # echo "❌ $label failed"
+    exit 1
+  fi
+}
 
-# Run full linting and markdown linting
-pnpm lint
-pnpm lint:md
-
-# Run staged linting and formatting
-pnpm lint-staged
-
+# run_step "pnpm format" "format (Prettier)"
+run_step "git add -A" "stage formatted files"
+run_step "pnpm lint" "lint (ESLint)"
+run_step "pnpm lint:md" "lint:md (markdown lint)"
+run_step "pnpm lint-staged" "lint-staged"
