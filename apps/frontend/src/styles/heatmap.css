@@ -8,3 +8,10 @@
   stroke-width:1;
   transition:all .15s ease-in-out;
 }
+.react-calendar-heatmap .react-calendar-heatmap-month-label {
+  font-size: 0.875rem; /* larger month names */
+}
+
+.react-calendar-heatmap .react-calendar-heatmap-weekday-label {
+  font-size: 0.75rem; /* larger weekday labels */
+}

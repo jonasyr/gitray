@@ -43,8 +43,8 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
   };
 
   useEffect(() => {
-    fetchData().catch(err => console.error(err));
-  }, [repoUrl, filterOptions]);
+    fetchData().catch(console.error);
+  }, [repoUrl]);
 
   const values: HeatmapValue[] = data
     ? data.data.map(b => ({ date: b.periodStart, count: b.commitCount, authors: b.authors }))
@@ -65,13 +65,17 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
   const endDate = new Date();
 
   return (
-    <div className="w-full">
-      <h2 className="text-xl font-bold mb-2">Repository Activity</h2>
-      <div className="flex space-x-2 mb-4">
+    <div className="w-full p-4 bg-gray-800 rounded-md">
+      <h2 className="text-xl font-bold mb-3">Repository Activity</h2>
+
+      {/* author selector & trigger fetch on close */}
+      <div className="flex items-center mb-100">
         <Select
           isMulti
           options={authorOptions}
-          className="min-w-[200px] text-sm"
+          className="min-w-[150px] text-sm"
+          closeMenuOnSelect={false}
+          onMenuClose={fetchData}
           styles={{
             control: base => ({
               ...base,
@@ -107,26 +111,34 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
             })
           }
           placeholder="Author(s)"
+          
         />
       </div>
+
       {loading ? (
         <div className="text-center">Loading...</div>
       ) : (
         <>
-          <CalendarHeatmap
-            startDate={startDate}
-            endDate={endDate}
-            values={values}
-            showWeekdayLabels
-            classForValue={classForValue}
-            titleForValue={titleForValue}
-            onClick={(v: HeatmapValue | undefined) =>
-              v && window.open(`${repoUrl}/commits?until=${v.date}`, '_blank')}
-          />
+          {/* now a real MT and no CSS scale */}
+          <div className="mx-auto mt-8">
+            <CalendarHeatmap
+              startDate={startDate}
+              endDate={endDate}
+              values={values}
+              showWeekdayLabels
+              cellSize={60} // ↑ bump this up instead of using CSS scale
+              gutterSize={3}
+              classForValue={classForValue as (v?: HeatmapValue) => string}
+              titleForValue={titleForValue as (v?: HeatmapValue) => string | null}
+              onClick={(v: HeatmapValue | undefined) =>
+                v && window.open(`${repoUrl}/commits?until=${v.date}`, '_blank')
+              }
+            />
+          </div>
           <div className="flex items-center text-xs mt-2 space-x-1 justify-end">
             <span>Less</span>
             <div className="w-3 h-3 color-empty" />
-            {[1, 2, 3, 4].map(l => (
+            {[1, 2, 3, 4].map((l: number) => (
               <div key={l} className={`w-3 h-3 color-scale-${l}`} />
             ))}
             <span>More</span>
