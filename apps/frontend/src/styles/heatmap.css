@@ -1,0 +1,73 @@
+/* Base heatmap colors */
+.react-calendar-heatmap .color-empty {
+  fill: #161b22;
+}
+.react-calendar-heatmap .color-scale-1 {
+  fill: #0e4429;
+}
+.react-calendar-heatmap .color-scale-2 {
+  fill: #006d32;
+}
+.react-calendar-heatmap .color-scale-3 {
+  fill: #26a641;
+}
+.react-calendar-heatmap .color-scale-4 {
+  fill: #39d353;
+}
+
+/* Hover effects */
+.react-calendar-heatmap rect:hover {
+  stroke: #fff;
+  stroke-width: 2;
+  transition: all 0.15s ease-in-out;
+  cursor: pointer;
+}
+
+/* Make the SVG responsive */
+.react-calendar-heatmap {
+  width: 100%;
+  height: auto;
+}
+
+/* Text styling */
+.react-calendar-heatmap text {
+  fill: #8b949e;
+  font-size: 12px;
+}
+
+.react-calendar-heatmap .react-calendar-heatmap-month-label {
+  font-size: 14px;
+  fill: #c9d1d9;
+}
+
+.react-calendar-heatmap .react-calendar-heatmap-weekday-label {
+  font-size: 12px;
+  fill: #8b949e;
+}
+
+/* Additional box styling for legend */
+.color-empty {
+  background-color: #161b22;
+}
+.color-scale-1 {
+  background-color: #0e4429;
+}
+.color-scale-2 {
+  background-color: #006d32;
+}
+.color-scale-3 {
+  background-color: #26a641;
+}
+.color-scale-4 {
+  background-color: #39d353;
+}
+
+/* Style for the Select component's placeholder */
+.css-1wa3eu0-placeholder {
+  color: #9ca3af; /* Light gray for better visibility */
+}
+
+/* Style for the Select component's input text */
+.css-1uccc91-singleValue {
+  color: #ffffff; /* White text for better contrast */
+}

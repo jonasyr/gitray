@@ -10,7 +10,7 @@ const styles = {
     underline: [4, 24],
     inverse: [7, 27],
     hidden: [8, 28],
-    strikethrough: [9, 29]
+    strikethrough: [9, 29],
   },
   color: {
     black: [30, 39],
@@ -28,7 +28,7 @@ const styles = {
     blueBright: [94, 39],
     magentaBright: [95, 39],
     cyanBright: [96, 39],
-    whiteBright: [97, 39]
+    whiteBright: [97, 39],
   },
   bgColor: {
     bgBlack: [40, 49],
@@ -46,8 +46,8 @@ const styles = {
     bgBlueBright: [104, 49],
     bgMagentaBright: [105, 49],
     bgCyanBright: [106, 49],
-    bgWhiteBright: [107, 49]
-  }
+    bgWhiteBright: [107, 49],
+  },
 };
 
 // Export constants from the styles object
@@ -62,14 +62,14 @@ function assembleStyles() {
   const styles = {
     modifier: {},
     color: {},
-    bgColor: {}
+    bgColor: {},
   };
 
   for (const [groupName, group] of Object.entries(styles)) {
     for (const [styleName, style] of Object.entries(group)) {
       styles[styleName] = {
         open: `\u001B[${style[0]}m`,
-        close: `\u001B[${style[1]}m`
+        close: `\u001B[${style[1]}m`,
       };
       group[styleName] = styles[styleName];
       codes.set(style[0], style[1]);
@@ -77,7 +77,7 @@ function assembleStyles() {
 
     Object.defineProperty(styles, groupName, {
       value: group,
-      enumerable: false
+      enumerable: false,
     });
   }
 
@@ -91,5 +91,5 @@ module.exports = {
   foregroundColorNames,
   backgroundColorNames,
   colorNames,
-  assembleStyles
+  assembleStyles,
 };

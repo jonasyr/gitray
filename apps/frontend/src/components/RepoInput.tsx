@@ -5,7 +5,9 @@ interface RepoInputProps {
 }
 
 const RepoInput: React.FC<RepoInputProps> = ({ onVisualize }) => {
-  const [repoUrl, setRepoUrl] = useState<string>('https://github.com/username/Repository');
+  const [repoUrl, setRepoUrl] = useState<string>(
+    'https://github.com/username/Repository'
+  );
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setRepoUrl(event.target.value);

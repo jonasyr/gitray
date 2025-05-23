@@ -156,10 +156,10 @@ test('should perform expected operation', async () => {
   // Arrange
   const input = 'test input';
   mockDependency.mockResolvedValue(expectedResult);
-  
+
   // Act
   const result = await functionUnderTest(input);
-  
+
   // Assert
   expect(result).toEqual(expectedResult);
   expect(mockDependency).toHaveBeenCalledWith(input);

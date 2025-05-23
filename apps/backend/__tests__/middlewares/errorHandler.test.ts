@@ -17,7 +17,7 @@ describe('Error Handler Middleware', () => {
       json: jest.fn(),
     };
     mockNext = jest.fn();
-    
+
     // Spy on console.error to verify it's called and prevent actual console output during tests
     consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
   });

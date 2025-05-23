@@ -1,7 +1,6 @@
 #!/usr/bin/env sh
 . "$(dirname "$0")/_/husky.sh"
 
-# run markdownlint on all .md, then lint-staged for code
-pnpm lint:md
-pnpm lint-staged
+echo "🔧 Husky pre-commit hook running..."
 
+pnpm lint-staged

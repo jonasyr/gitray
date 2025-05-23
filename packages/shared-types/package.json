@@ -7,7 +7,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "devDependencies": {
-    "rimraf": "^5.0.1",
+    "rimraf": "^5.0.10",
     "typescript": "~5.7.3"
   }
 }

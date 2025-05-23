@@ -15,7 +15,7 @@ describe('Index Routes', () => {
   test('should respond with a welcome message for the root route', async () => {
     // Act
     const response = await request(app).get('/');
-    
+
     // Assert
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ message: 'Hello from Backend!' });

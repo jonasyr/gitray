@@ -1,6 +1,6 @@
 // apps/frontend/src/__tests__/App.test.tsx
 import { render, screen } from '@testing-library/react';
-import App from '../App';
+import App from '../src/App';
 
 describe('App Component (ohne jest-dom)', () => {
   test('rendert MainPage mit Login- und Signup-Buttons', () => {
@@ -15,7 +15,9 @@ describe('App Component (ohne jest-dom)', () => {
 
   test('rendert exakt drei Explanation-Buttons', () => {
     render(<App />);
-    const explainBtns = screen.getAllByRole('button', { name: /explanation \d+/i });
+    const explainBtns = screen.getAllByRole('button', {
+      name: /explanation \d+/i,
+    });
     expect(explainBtns.length).toBe(3);
   });
 

@@ -15,7 +15,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Disabling shallow clone for better SonarCloud analysis
+          fetch-depth: 0 # Disabling shallow clone for better SonarCloud analysis
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -97,7 +97,7 @@ jobs:
         run: pnpm lint
 
   build:
-    needs: [lint, setup]  # Added setup as dependency to fix cache path issue
+    needs: [lint, setup] # Added setup as dependency to fix cache path issue
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -188,8 +188,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-reports
-          path: "**/coverage"  # Using glob pattern to find all coverage directories
-          if-no-files-found: warn  # Add warning if no files found
+          path: '**/coverage' # Using glob pattern to find all coverage directories
+          if-no-files-found: warn # Add warning if no files found
           retention-days: 1
 
   sonarcloud:
@@ -199,7 +199,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Disabling shallow clone for better SonarCloud analysis
+          fetch-depth: 0 # Disabling shallow clone for better SonarCloud analysis
 
       - name: Download Coverage Reports
         uses: actions/download-artifact@v4
@@ -212,6 +212,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
 # Your workflow is correct for SonarCloud usage.
 # No changes needed here.

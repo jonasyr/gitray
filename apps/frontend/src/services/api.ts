@@ -1,5 +1,10 @@
 import axios from 'axios';
-import { Commit } from '../../../../packages/shared-types/src';
+import {
+  Commit,
+  TimePeriod,
+  CommitFilterOptions,
+  CommitHeatmapData,
+} from '../../../../packages/shared-types/src';
 
 // Define the base URL for the API
 // In a production app, this would typically come from an environment variable
@@ -18,7 +23,9 @@ const apiClient = axios.create({
  * @param repoUrl The URL of the git repository
  * @returns Promise containing an array of commits
  */
-export const getWorkspaceCommits = async (repoUrl: string): Promise<Commit[]> => {
+export const getWorkspaceCommits = async (
+  repoUrl: string
+): Promise<Commit[]> => {
   try {
     const response = await apiClient.post('/api/repositories', { repoUrl });
     return response.data.commits;
@@ -27,10 +34,14 @@ export const getWorkspaceCommits = async (repoUrl: string): Promise<Commit[]> =>
       if (error.response) {
         // The request was made and the server responded with a status code
         // that falls out of the range of 2xx
-        throw new Error(`Server error: ${error.response.data?.error || error.message}`);
+        throw new Error(
+          `Server error: ${error.response.data?.error ?? error.message}`
+        );
       } else if (error.request) {
         // The request was made but no response was received
-        throw new Error('No response from server. Please check your network connection.');
+        throw new Error(
+          'No response from server. Please check your network connection.'
+        );
       } else {
         // Something happened in setting up the request
         throw new Error(`Error: ${error.message}`);
@@ -41,6 +52,92 @@ export const getWorkspaceCommits = async (repoUrl: string): Promise<Commit[]> =>
   }
 };
 
+/**
+ * Fetches heatmap data for a repository
+ * @param repoUrl The URL of the git repository
+ * @param timePeriod The time period to aggregate by
+ * @param filterOptions Optional filters to apply
+ * @returns Promise containing heatmap data
+ */
+export const getHeatmapData = async (
+  repoUrl: string,
+  timePeriod: TimePeriod,
+  filterOptions?: CommitFilterOptions
+): Promise<CommitHeatmapData> => {
+  try {
+    const params = new URLSearchParams({ repoUrl, timePeriod });
+    if (filterOptions?.authors && filterOptions.authors.length > 0) {
+      params.append('authors', filterOptions.authors.join(','));
+    } else if (filterOptions?.author) {
+      params.append('author', filterOptions.author);
+    }
+    if (filterOptions?.fromDate)
+      params.append('fromDate', filterOptions.fromDate);
+    if (filterOptions?.toDate) params.append('toDate', filterOptions.toDate);
+
+    const response = await apiClient.get('/api/commits/heatmap', { params });
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        throw new Error(
+          `Server error: ${error.response.data?.error ?? error.message}`
+        );
+      } else if (error.request) {
+        throw new Error(
+          'No response from server. Please check your network connection.'
+        );
+      } else {
+        throw new Error(`Error: ${error.message}`);
+      }
+    }
+    throw new Error('An unexpected error occurred');
+  }
+};
+
+/**
+ * Fetches both commits and heatmap data in a single request
+ * @param repoUrl The URL of the git repository
+ * @param timePeriod The time period to aggregate by
+ * @param filterOptions Optional filters to apply
+ * @returns Promise containing both commit and heatmap data
+ */
+export const getRepositoryFullData = async (
+  repoUrl: string,
+  timePeriod: TimePeriod = 'month',
+  filterOptions?: CommitFilterOptions
+): Promise<{ commits: Commit[]; heatmapData: CommitHeatmapData }> => {
+  try {
+    const response = await apiClient.post('/api/repositories/full-data', {
+      repoUrl,
+      timePeriod,
+      filterOptions,
+    });
+
+    return {
+      commits: response.data.commits,
+      heatmapData: response.data.heatmapData,
+    };
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        throw new Error(
+          `Server error: ${error.response.data?.error ?? error.message}`
+        );
+      } else if (error.request) {
+        throw new Error(
+          'No response from server. Please check your network connection.'
+        );
+      } else {
+        throw new Error(`Error: ${error.message}`);
+      }
+    }
+    throw new Error('An unexpected error occurred');
+  }
+};
+
 export default {
   getWorkspaceCommits,
+  getHeatmapData,
+  getRepositoryFullData,
 };

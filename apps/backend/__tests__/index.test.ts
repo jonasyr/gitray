@@ -9,6 +9,7 @@ type MockApp = {
 
 type MockExpress = jest.Mock<MockApp> & {
   json: jest.Mock;
+  Router?: jest.Mock;
 };
 
 // Mocking the modules
@@ -21,9 +22,11 @@ jest.mock('express', () => {
       return mockApp;
     }),
   };
-  
+  const mockRouter = { get: jest.fn(), post: jest.fn(), use: jest.fn() };
+
   const mockExpress = jest.fn(() => mockApp) as MockExpress;
   mockExpress.json = jest.fn(() => mockJson);
+  mockExpress.Router = jest.fn(() => mockRouter);
   return mockExpress;
 });
 
@@ -39,15 +42,15 @@ const originalEnv = process.env;
 describe('Express App Initialization', () => {
   let mockExpress: MockExpress;
   let mockCors: jest.Mock;
-  
+
   beforeEach(() => {
     // Reset mocks before each test
     jest.clearAllMocks();
-    
+
     // Setup process.env
     process.env = { ...originalEnv };
     process.env.PORT = '3001';
-    
+
     // Import the mocked modules after resetting mocks
     // Using jest.requireMock to avoid require() style imports
     mockExpress = jest.requireMock('express');
@@ -57,7 +60,7 @@ describe('Express App Initialization', () => {
   afterEach(() => {
     // Restore process.env
     process.env = originalEnv;
-    
+
     // Clear require cache to ensure fresh imports in each test
     jest.resetModules();
   });
@@ -66,10 +69,10 @@ describe('Express App Initialization', () => {
     // Act - Import the index module to trigger the app initialization
     // Using dynamic import instead of require
     await import('../src/index');
-    
+
     // Get the mock Express app
     const mockApp = mockExpress();
-    
+
     // Assert
     expect(dotenv.config).toHaveBeenCalled();
     expect(mockExpress).toHaveBeenCalled();
@@ -78,7 +81,10 @@ describe('Express App Initialization', () => {
     expect(mockExpress.json).toHaveBeenCalled();
     expect(mockApp.use).toHaveBeenCalledWith(mockExpress.json());
     expect(mockApp.use).toHaveBeenCalledWith('/api', 'mockedRoutes');
-    expect(mockApp.use).toHaveBeenCalledWith('/api/repositories', 'mockedRepositoryRoutes');
+    expect(mockApp.use).toHaveBeenCalledWith(
+      '/api/repositories',
+      'mockedRepositoryRoutes'
+    );
     expect(mockApp.use).toHaveBeenCalledWith('mockedErrorHandler');
     expect(mockApp.listen).toHaveBeenCalledWith('3001', expect.any(Function));
   });
@@ -86,14 +92,14 @@ describe('Express App Initialization', () => {
   test('should use default port 3001 if PORT environment variable is not set', async () => {
     // Arrange
     delete process.env.PORT;
-    
+
     // Act - Import the index module to trigger the app initialization
     // Using dynamic import instead of require
     await import('../src/index');
-    
+
     // Get the mock Express app
     const mockApp = mockExpress();
-    
+
     // Assert
     expect(mockApp.listen).toHaveBeenCalledWith(3001, expect.any(Function));
   });
@@ -101,21 +107,21 @@ describe('Express App Initialization', () => {
   test('should log when server starts', async () => {
     // Arrange
     const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
-    
+
     // Act - Import the index module to trigger the app initialization
     // Using dynamic import instead of require
     await import('../src/index');
-    
+
     // Get the mock Express app
     const mockApp = mockExpress();
     const listenCallback = mockApp.listen.mock.calls[0][1];
-    
+
     // Manually call the listen callback to simulate server start
     listenCallback();
-    
+
     // Assert
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('3001'));
-    
+
     // Clean up
     consoleSpy.mockRestore();
   });

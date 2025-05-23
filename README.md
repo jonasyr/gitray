@@ -11,30 +11,42 @@ pnpm install
 Build the Project
 
 ```bash
-pnpm run build
+pnpm build
 ```
 
 Run the Application
 
 ```bash
-pnpm run dev
+pnpm dev
 ```
 
 ## Scripts Overview
 
-- **`pnpm run dev`**: Runs the frontend and backend in development mode.
-- **`pnpm run dev:frontend`**: Runs only the frontend in development mode.
-- **`pnpm run dev:backend`**: Runs only the backend in development mode.
-- **`pnpm run build`**: Builds the shared types, backend, and frontend.
-- **`pnpm run test`**: Runs all tests.
-- **`pnpm run test:frontend`**: Runs tests for the frontend only.
-- **`pnpm run test:backend`**: Runs tests for the backend only.
-- **`pnpm run test:watch`**: Runs tests in watch mode.
-- **`pnpm run test:coverage`**: Runs tests and generates a coverage report.
-- **`pnpm run lint`**: Lints all JavaScript/TypeScript files.
-- **`pnpm run lint:md`**: Lints all Markdown files.
-- **`pnpm run lint:fix`**: Fixes linting issues in JavaScript/TypeScript files.
-- **`pnpm run format`**: Formats all files using Prettier.
+- **pnpm install**: Installs dependencies _and_ runs `pnpm prepare` to set up Husky Git hooks.
+- **pnpm prepare**: Installs Husky Git hooks (auto on `pnpm install`).
+- **pnpm dev**: Runs frontend + backend in development mode.
+- **pnpm dev:frontend**: Runs only the frontend in development mode.
+- **pnpm dev:backend**: Runs only the backend in development mode.
+- **pnpm build**: Builds shared-types, backend, and frontend.
+- **pnpm test**: Runs all tests.
+- **pnpm test:frontend**: Runs frontend tests only.
+- **pnpm test:backend**: Runs backend tests only.
+- **pnpm test:watch**: Runs tests in watch mode.
+- **pnpm test:coverage**: Runs tests and generates a coverage report.
+- **pnpm lint**: Lints all JavaScript/TypeScript files.
+- **pnpm lint:md**: Lints all Markdown files.
+- **pnpm lint:fix**: Applies fixes to lint errors.
+- **pnpm format**: Formats all files using Prettier.
+
+### Pre-commit Checks
+
+Husky is installed via the `"prepare": "husky install"` script in `package.json`
+(runs automatically on `pnpm install`).  
+
+On each commit, Husky runs:
+
+- `pnpm lint-staged`  
+  Applies ESLint, Prettier and markdownlint fixes to staged files.
 
 ## **1. Zielsetzung und Use Cases**
 

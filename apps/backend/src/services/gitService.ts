@@ -1,44 +1,24 @@
-import simpleGit, {
-  SimpleGit,
-  SimpleGitOptions,
-  DefaultLogFields,
-} from 'simple-git'; // Import necessary types
+import simpleGit, { SimpleGit, SimpleGitOptions } from 'simple-git';
 import { mkdtemp, rm } from 'fs/promises';
 import path from 'path';
 import os from 'os';
-
-// Define the Commit interface directly since we're having issues with shared-types
-interface Commit {
-  sha: string;
-  message: string;
-  date: string;
-  authorName: string;
-  authorEmail: string;
-}
-
-// Optional: Define more specific options if needed
-const gitOptions: Partial<SimpleGitOptions> = {
-  baseDir: process.cwd(),
-  binary: 'git',
-  maxConcurrentProcesses: 6,
-};
-
-// Define the fields we expect from simple-git log based on the default structure
-// Note: simple-git types might evolve, adjust if needed.
-// This interface helps ensure we handle the expected log data.
-interface GitLogEntry extends DefaultLogFields {
-  hash: string;
-  date: string; // ISO 8601 format string
-  message: string;
-  author_name: string;
-  author_email: string;
-  // refs, body, etc. are also available if needed later
-}
+import {
+  Commit,
+  CommitFilterOptions,
+  CommitAggregation,
+  CommitHeatmapData,
+} from '../../../../packages/shared-types/src';
 
 class GitService {
   private git: SimpleGit;
 
   constructor() {
+    const gitOptions: Partial<SimpleGitOptions> = {
+      baseDir: process.cwd(),
+      binary: 'git',
+      maxConcurrentProcesses: 6,
+    };
+
     this.git = simpleGit(gitOptions);
     console.log('GitService initialized.');
   }
@@ -61,13 +41,8 @@ class GitService {
 
       const localGit = simpleGit(tempDir);
 
-      const cloneOptions = {
-        '--depth': 50,
-      };
-      await localGit.clone(repoUrl, '.', cloneOptions);
-      console.log(
-        `Successfully cloned ${repoUrl} into ${tempDir} with depth 50.`
-      );
+      await localGit.clone(repoUrl, '.');
+      console.log(`Successfully cloned ${repoUrl} into ${tempDir}.`);
 
       return tempDir;
     } catch (error) {
@@ -95,53 +70,32 @@ class GitService {
   /**
    * Retrieves the commit history from a local repository path.
    * @param localRepoPath The file system path to the cloned repository.
-   * @param maxCount The maximum number of commits to retrieve (default: 100).
    * @returns A promise that resolves with an array of Commit objects.
    * @throws Will throw an error if reading the commit log fails.
    */
-  async getCommits(
-    localRepoPath: string,
-    maxCount: number = 100
-  ): Promise<Commit[]> {
-    console.log(
-      `Attempting to read commits from: ${localRepoPath}, maxCount: ${maxCount}`
-    );
+  async getCommits(localRepoPath: string): Promise<Commit[]> {
+    console.log(`Attempting to read commits from: ${localRepoPath}`);
     try {
-      // Create a simple-git instance specifically for the repo path
       const localGit: SimpleGit = simpleGit(localRepoPath);
 
-      // Use git.log to retrieve commits.
-      // The default log format includes the necessary fields.
-      // We limit the number of commits using maxCount.
-      const logOptions = {
-        maxCount: maxCount,
-      };
+      const raw = await localGit.raw([
+        'log',
+        '--pretty=format:%H|%cI|%an|%ae|%s',
+      ]);
 
-      const log = await localGit.log<GitLogEntry>(logOptions); // Specify expected type
-
-      // Map the result from simple-git log to our shared Commit interface
-      const commits: Commit[] = log.all
-        .map((entry: GitLogEntry) => {
-          // Basic validation (optional, but good practice)
-          if (
-            !entry.hash ||
-            !entry.message ||
-            !entry.date ||
-            !entry.author_name ||
-            !entry.author_email
-          ) {
-            console.warn('Skipping commit with missing data:', entry);
-            return null; // Skip this entry if essential data is missing
+      const commits: Commit[] = raw
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => {
+          const [hash, date, authorName, authorEmail, message] =
+            line.split('|');
+          if (!hash || !date || !authorName || !authorEmail || !message) {
+            console.warn('Skipping commit with missing data:', line);
+            return null;
           }
-          return {
-            sha: entry.hash,
-            message: entry.message,
-            date: entry.date, // Already in ISO 8601 string format
-            authorName: entry.author_name,
-            authorEmail: entry.author_email,
-          };
+          return { sha: hash, message, date, authorName, authorEmail };
         })
-        .filter((commit): commit is Commit => commit !== null); // Filter out any null entries
+        .filter((commit): commit is Commit => commit !== null);
 
       console.log(
         `Successfully retrieved ${commits.length} commits from ${localRepoPath}.`
@@ -156,6 +110,79 @@ class GitService {
         `Failed to get commits from repository: ${localRepoPath}. Reason: ${error instanceof Error ? error.message : String(error)}`
       );
     }
+  }
+
+  /**
+   * Aggregates commit data by time periods.
+   * @param commits Array of commits to aggregate
+   * @param timePeriod The time period to aggregate by (day, week, month, year)
+   * @param filterOptions Optional filter options
+   * @returns Aggregated commit data for visualization
+   */
+  async aggregateCommitsByTime(
+    commits: Commit[],
+    filterOptions?: CommitFilterOptions
+  ): Promise<CommitHeatmapData> {
+    console.log('Aggregating commits by day', filterOptions);
+
+    let filtered = [...commits];
+    const filterAuthors =
+      filterOptions?.authors ??
+      (filterOptions?.author ? [filterOptions.author] : undefined);
+    if (filterAuthors && filterAuthors.length > 0) {
+      filtered = filtered.filter((c) =>
+        filterAuthors.some(
+          (a) => c.authorName.includes(a) || c.authorEmail.includes(a)
+        )
+      );
+    }
+    const endDate = filterOptions?.toDate
+      ? new Date(filterOptions.toDate)
+      : new Date();
+    const startDate = filterOptions?.fromDate
+      ? new Date(filterOptions.fromDate)
+      : new Date(endDate.getTime() - 86400000 * 364);
+
+    if (filterOptions?.fromDate) {
+      filtered = filtered.filter((c) => new Date(c.date) >= startDate);
+    }
+    if (filterOptions?.toDate) {
+      filtered = filtered.filter((c) => new Date(c.date) <= endDate);
+    }
+
+    const map = new Map<string, CommitAggregation>();
+    for (
+      let d = new Date(startDate);
+      d <= endDate;
+      d.setUTCDate(d.getUTCDate() + 1)
+    ) {
+      const key = d.toISOString().split('T')[0];
+      map.set(key, { periodStart: key, commitCount: 0, authors: [] });
+    }
+
+    let maxCommitCount = 0;
+    filtered.forEach((c) => {
+      const key = new Date(c.date).toISOString().split('T')[0];
+      const bucket = map.get(key);
+      if (!bucket) return;
+      bucket.commitCount += 1;
+      if (!bucket.authors!.includes(c.authorName)) {
+        bucket.authors!.push(c.authorName);
+      }
+      if (bucket.commitCount > maxCommitCount) {
+        maxCommitCount = bucket.commitCount;
+      }
+    });
+
+    const aggregatedData = Array.from(map.values());
+    return {
+      timePeriod: 'day',
+      data: aggregatedData,
+      metadata: {
+        maxCommitCount,
+        totalCommits: filtered.length,
+      },
+    };
   }
 
   /**
@@ -178,4 +205,3 @@ class GitService {
 }
 
 export const gitService = new GitService();
-// export default GitService; // Uncomment if you prefer exporting the class

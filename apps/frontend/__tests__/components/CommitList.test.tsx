@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import CommitList from '../components/CommitList';
+import CommitList from '../../src/components/CommitList';
 import { Commit } from '../../../../packages/shared-types/src';
 
 describe('CommitList Component', () => {
@@ -11,13 +11,13 @@ describe('CommitList Component', () => {
         message: 'Test commit message',
         date: '2023-05-01T12:00:00Z',
         authorName: 'Test User',
-        authorEmail: 'test@example.com'
-      }
+        authorEmail: 'test@example.com',
+      },
     ];
-    
+
     // Act
     render(<CommitList commits={mockCommits} />);
-    
+
     // Assert
     expect(screen.getByText('Repository Commits')).toBeDefined();
     expect(screen.getByText('123abc4')).toBeDefined(); // First 7 chars of SHA
@@ -28,10 +28,10 @@ describe('CommitList Component', () => {
   test('should render nothing when commits array is empty', () => {
     // Arrange
     const emptyCommits: Commit[] = [];
-    
+
     // Act
     const { container } = render(<CommitList commits={emptyCommits} />);
-    
+
     // Assert
     expect(container.firstChild).toBeNull();
   });

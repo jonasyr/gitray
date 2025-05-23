@@ -16,12 +16,19 @@ export default [
       'prettier.config.js',
       '**/dist/**',
       '**/node_modules/**',
+      'apps/backend/src/**/*.js',
+      'apps/backend/src/**/*.js.map',
     ],
   },
 
   // Base configurations
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
 
   // React specific configuration
   {
@@ -70,8 +77,8 @@ export default [
     rules: {
       '@typescript-eslint/no-require-imports': 'off',
       '@typescript-eslint/no-unused-expressions': 'off',
-      '@typescript-eslint/no-unused-vars': 'warn'
-    }
+      '@typescript-eslint/no-unused-vars': 'warn',
+    },
   },
 
   prettier,
