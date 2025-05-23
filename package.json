@@ -17,8 +17,7 @@
     "lint": "eslint . --ext .js,.ts,.jsx,.tsx,.cjs,.mjs",
     "lint:md": "markdownlint-cli2",
     "lint:fix": "eslint . --ext .js,.ts,.jsx,.tsx,.cjs,.mjs --fix",
-    "format": "prettier --write .",
-    "prepare": "husky"
+    "format": "prettier --write ."
   },
   "lint-staged": {
     "**/*.{ts,tsx,js,jsx}": [

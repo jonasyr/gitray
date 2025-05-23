@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-. "$(dirname "$0")/_/h"
+. "$(dirname "$0")/_/husky.sh"
 
 # Format codebase and add changes
 pnpm format
@@ -11,5 +11,4 @@ pnpm lint:md
 
 # Run staged linting and formatting
 pnpm lint-staged
-
 

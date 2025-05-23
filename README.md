@@ -39,10 +39,9 @@ pnpm run dev
 ### Pre-commit Checks
 
 The repository uses **husky** to run several checks before a commit is
-created. Running `pnpm install` triggers Husky's *prepare* script, which
-sets up the Git hooks so you'll see these commands run automatically:
+created:
 
-- `pnpm format` – formats the entire codebase.
+- `pnpm format` – formats the entire codebase using Prettier.
 - `pnpm lint` – lints all JavaScript/TypeScript files.
 - `pnpm lint:md` – lints Markdown files.
 - `pnpm lint-staged` – applies fixes to staged files.
