@@ -26,13 +26,17 @@ const CommitList: React.FC<CommitListProps> = ({ commits }) => {
           <tbody>
             {commits.map((commit) => (
               <tr key={commit.sha} className="hover:bg-gray-50">
-                <td className="py-2 px-4 border-b font-mono text-sm">{commit.sha.substring(0, 7)}</td>
+                <td className="py-2 px-4 border-b font-mono text-sm">
+                  {commit.sha.substring(0, 7)}
+                </td>
                 <td className="py-2 px-4 border-b">
                   {new Date(commit.date).toLocaleDateString()}
                 </td>
                 <td className="py-2 px-4 border-b">
                   {commit.authorName}
-                  <span className="text-gray-500 text-xs block">{commit.authorEmail}</span>
+                  <span className="text-gray-500 text-xs block">
+                    {commit.authorEmail}
+                  </span>
                 </td>
                 <td className="py-2 px-4 border-b">{commit.message}</td>
               </tr>

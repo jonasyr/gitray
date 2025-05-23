@@ -40,11 +40,10 @@ describe('aggregateCommitsByTime', () => {
     });
 
     expect(result.data).toHaveLength(365);
-    const first = result.data.find(b => b.periodStart === '2023-06-01');
-    const second = result.data.find(b => b.periodStart === '2023-06-02');
+    const first = result.data.find((b) => b.periodStart === '2023-06-01');
+    const second = result.data.find((b) => b.periodStart === '2023-06-02');
     expect(first?.commitCount).toBe(2);
     expect(second?.commitCount).toBe(1);
     expect(result.metadata?.totalCommits).toBe(3);
   });
 });
-

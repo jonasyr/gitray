@@ -29,13 +29,15 @@ describe('GitService', () => {
       // Arrange
       const repoUrl = 'https://github.com/user/repo.git';
       mockGit.clone.mockResolvedValue(undefined);
-      
+
       // Act
       const result = await gitService.cloneRepository(repoUrl);
-      
+
       // Assert
       expect(result).toBe('/tmp/git-visualizer-test');
-      expect(mkdtemp).toHaveBeenCalledWith(expect.stringContaining(path.join(os.tmpdir(), 'git-visualizer-')));
+      expect(mkdtemp).toHaveBeenCalledWith(
+        expect.stringContaining(path.join(os.tmpdir(), 'git-visualizer-'))
+      );
       expect(simpleGit).toHaveBeenCalledWith('/tmp/git-visualizer-test');
       expect(mockGit.clone).toHaveBeenCalledWith(repoUrl, '.');
     });
@@ -45,14 +47,15 @@ describe('GitService', () => {
     test('should retrieve and transform commits from a repository', async () => {
       // Arrange
       const localRepoPath = '/tmp/git-visualizer-test';
-      
-      const mockRaw = `abc123|2023-01-01T12:00:00Z|Test User|test@example.com|Initial commit\n` +
+
+      const mockRaw =
+        `abc123|2023-01-01T12:00:00Z|Test User|test@example.com|Initial commit\n` +
         `def456|2023-01-02T14:00:00Z|Another User|another@example.com|Add feature X`;
       mockGit.raw.mockResolvedValue(mockRaw);
-      
+
       // Act
       const commits = await gitService.getCommits(localRepoPath);
-      
+
       // Assert
       expect(commits).toHaveLength(2);
       expect(commits[0]).toEqual({
@@ -74,12 +77,15 @@ describe('GitService', () => {
     test('should remove the temporary repository directory', async () => {
       // Arrange
       const repoPath = '/tmp/git-visualizer-test';
-      
+
       // Act
       await gitService.cleanupRepository(repoPath);
-      
+
       // Assert
-      expect(rm).toHaveBeenCalledWith(repoPath, { recursive: true, force: true });
+      expect(rm).toHaveBeenCalledWith(repoPath, {
+        recursive: true,
+        force: true,
+      });
     });
   });
 });
@@ -104,10 +110,15 @@ describe('GitService Extended Tests', () => {
       const mockError = new Error('Clone failed');
       const mockTempDir = '/tmp/git-visualizer-test';
       mockGit.clone.mockRejectedValue(mockError);
-      await expect(gitService.cloneRepository(repoUrl)).rejects.toThrow('Failed to clone repository');
+      await expect(gitService.cloneRepository(repoUrl)).rejects.toThrow(
+        'Failed to clone repository'
+      );
       expect(mkdtemp).toHaveBeenCalled();
       expect(mockGit.clone).toHaveBeenCalled();
-      expect(rm).toHaveBeenCalledWith(mockTempDir, { recursive: true, force: true });
+      expect(rm).toHaveBeenCalledWith(mockTempDir, {
+        recursive: true,
+        force: true,
+      });
     });
 
     test('should handle clone error and cleanup error', async () => {
@@ -117,11 +128,18 @@ describe('GitService Extended Tests', () => {
       const mockTempDir = '/tmp/git-visualizer-test';
       mockGit.clone.mockRejectedValue(mockCloneError);
       (rm as jest.Mock).mockRejectedValueOnce(mockCleanupError);
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-      await expect(gitService.cloneRepository(repoUrl)).rejects.toThrow('Failed to clone repository');
+      const consoleSpy = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => {});
+      await expect(gitService.cloneRepository(repoUrl)).rejects.toThrow(
+        'Failed to clone repository'
+      );
       expect(mkdtemp).toHaveBeenCalled();
       expect(mockGit.clone).toHaveBeenCalled();
-      expect(rm).toHaveBeenCalledWith(mockTempDir, { recursive: true, force: true });
+      expect(rm).toHaveBeenCalledWith(mockTempDir, {
+        recursive: true,
+        force: true,
+      });
       expect(consoleSpy).toHaveBeenCalled();
       consoleSpy.mockRestore();
     });
@@ -132,7 +150,9 @@ describe('GitService Extended Tests', () => {
       const localRepoPath = '/tmp/git-visualizer-test';
       const mockError = new Error('Failed to get log');
       mockGit.raw.mockRejectedValue(mockError);
-      await expect(gitService.getCommits(localRepoPath)).rejects.toThrow('Failed to get commits from repository');
+      await expect(gitService.getCommits(localRepoPath)).rejects.toThrow(
+        'Failed to get commits from repository'
+      );
       expect(simpleGit).toHaveBeenCalledWith(localRepoPath);
       expect(mockGit.raw).toHaveBeenCalled();
     });
@@ -152,7 +172,6 @@ describe('GitService Extended Tests', () => {
       expect(warnSpy).toHaveBeenCalledTimes(2);
       warnSpy.mockRestore();
     });
-
   });
 
   describe('cleanupRepository error handling', () => {
@@ -160,8 +179,13 @@ describe('GitService Extended Tests', () => {
       const repoPath = '/tmp/git-visualizer-test';
       const mockError = new Error('Cleanup failed');
       (rm as jest.Mock).mockRejectedValue(mockError);
-      await expect(gitService.cleanupRepository(repoPath)).rejects.toThrow('Failed to clean up repository directory');
-      expect(rm).toHaveBeenCalledWith(repoPath, { recursive: true, force: true });
+      await expect(gitService.cleanupRepository(repoPath)).rejects.toThrow(
+        'Failed to clean up repository directory'
+      );
+      expect(rm).toHaveBeenCalledWith(repoPath, {
+        recursive: true,
+        force: true,
+      });
     });
   });
 });

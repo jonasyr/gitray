@@ -10,13 +10,16 @@ import { TimePeriod } from '../../../../packages/shared-types/src';
  * @param timePeriod The time period format
  * @returns Formatted date string
  */
-export const formatDateByPeriod = (date: Date, timePeriod: TimePeriod): string => {
+export const formatDateByPeriod = (
+  date: Date,
+  timePeriod: TimePeriod
+): string => {
   switch (timePeriod) {
     case 'day':
-      return date.toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric' 
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
       });
     case 'week': {
       // Get start of the week
@@ -29,16 +32,20 @@ export const formatDateByPeriod = (date: Date, timePeriod: TimePeriod): string =
       endOfWeek.setDate(startOfWeek.getDate() + 6);
 
       // Format as "Apr 1 - Apr 7, 2023"
-      return `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${
-        endOfWeek.toLocaleDateString('en-US', {
+      return `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${endOfWeek.toLocaleDateString(
+        'en-US',
+        {
           month: 'short',
           day: 'numeric',
-          year: 'numeric'
-        })
-      }`;
+          year: 'numeric',
+        }
+      )}`;
     }
     case 'month':
-      return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+      });
     case 'year':
       return date.toLocaleDateString('en-US', { year: 'numeric' });
     default:
@@ -54,13 +61,13 @@ export const formatDateByPeriod = (date: Date, timePeriod: TimePeriod): string =
  * @returns Array of date strings formatted according to the time period
  */
 export const generateDateRange = (
-  startDate: Date, 
-  endDate: Date, 
+  startDate: Date,
+  endDate: Date,
   timePeriod: TimePeriod
 ): string[] => {
   const dates: string[] = [];
   const currentDate = new Date(startDate);
-  
+
   // Ensure dates are at the start of their respective periods
   switch (timePeriod) {
     case 'day':
@@ -81,11 +88,11 @@ export const generateDateRange = (
       currentDate.setMonth(0, 1);
       break;
   }
-  
+
   // Generate the date range
   while (currentDate <= endDate) {
     dates.push(formatDateByPeriod(new Date(currentDate), timePeriod));
-    
+
     // Move to the next period
     switch (timePeriod) {
       case 'day':
@@ -102,7 +109,7 @@ export const generateDateRange = (
         break;
     }
   }
-  
+
   return dates;
 };
 
@@ -112,15 +119,18 @@ export const generateDateRange = (
  * @param maxCommitCount Maximum number of commits in the dataset
  * @returns CSS color value in the green spectrum
  */
-export const getColorShade = (commitCount: number, maxCommitCount: number): string => {
+export const getColorShade = (
+  commitCount: number,
+  maxCommitCount: number
+): string => {
   if (commitCount === 0) return '#ebedf0'; // Light gray for no commits
-  
+
   // Calculate intensity (0-1)
   const intensity = Math.min(commitCount / maxCommitCount, 1);
-  
+
   // Use a green color spectrum with 5 intensity levels
   if (intensity < 0.2) return '#9be9a8'; // Lightest green
-  if (intensity < 0.4) return '#40c463'; 
+  if (intensity < 0.4) return '#40c463';
   if (intensity < 0.6) return '#30a14e';
   if (intensity < 0.8) return '#216e39';
   return '#0d4620'; // Darkest green
@@ -134,21 +144,22 @@ export const getColorShade = (commitCount: number, maxCommitCount: number): stri
  * @returns Formatted tooltip text
  */
 export const createTooltipText = (
-  commitCount: number, 
-  periodText: string, 
+  commitCount: number,
+  periodText: string,
   authors?: string[]
 ): string => {
   const commitText = commitCount === 1 ? '1 commit' : `${commitCount} commits`;
   let tooltip = `${commitText} on ${periodText}`;
-  
+
   if (authors && authors.length > 0) {
     const uniqueAuthors = [...new Set(authors)];
-    const authorText = uniqueAuthors.length === 1 
-      ? `by ${uniqueAuthors[0]}` 
-      : `by ${uniqueAuthors.length} authors`;
-    
+    const authorText =
+      uniqueAuthors.length === 1
+        ? `by ${uniqueAuthors[0]}`
+        : `by ${uniqueAuthors.length} authors`;
+
     tooltip += ` ${authorText}`;
   }
-  
+
   return tooltip;
 };

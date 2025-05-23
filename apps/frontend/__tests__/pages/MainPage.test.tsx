@@ -9,7 +9,8 @@ jest.mock('../../src/services/api', () => ({
   getHeatmapData: jest.fn(),
 }));
 
-const mockedGetRepositoryFullData = getRepositoryFullData as jest.MockedFunction<typeof getRepositoryFullData>;
+const mockedGetRepositoryFullData =
+  getRepositoryFullData as jest.MockedFunction<typeof getRepositoryFullData>;
 
 describe('MainPage Component', () => {
   test('should fetch and display commits when repository URL is submitted', async () => {
@@ -20,23 +21,29 @@ describe('MainPage Component', () => {
         message: 'Test commit message',
         date: '2023-05-01T12:00:00Z',
         authorName: 'Test User',
-        authorEmail: 'test@example.com'
-      }
+        authorEmail: 'test@example.com',
+      },
     ];
-    
+
     mockedGetRepositoryFullData.mockResolvedValue({
       commits: mockCommits,
-      heatmapData: { timePeriod: 'day', data: [], metadata: { maxCommitCount: 0, totalCommits: 0 } },
+      heatmapData: {
+        timePeriod: 'day',
+        data: [],
+        metadata: { maxCommitCount: 0, totalCommits: 0 },
+      },
     });
     render(<MainPage />);
-    
+
     const input = screen.getByRole('textbox');
     const button = screen.getByRole('button', { name: /visualize/i });
-    
+
     // Act
-    fireEvent.change(input, { target: { value: 'https://github.com/test/repo.git' } });
+    fireEvent.change(input, {
+      target: { value: 'https://github.com/test/repo.git' },
+    });
     fireEvent.click(button);
-    
+
     // Assert
     await waitFor(() => {
       expect(mockedGetRepositoryFullData).toHaveBeenCalledWith(

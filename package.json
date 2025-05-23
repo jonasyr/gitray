@@ -22,11 +22,14 @@
   },
   "lint-staged": {
     "**/*.{ts,tsx,js,jsx}": [
-      "eslint --fix"
-
+      "eslint --fix",
+      "prettier --write"
     ],
     "**/*.{md,markdown}": [
       "markdownlint-cli2 --fix"
+    ],
+    "**/*.{json,yml,yaml}": [
+      "prettier --write"
     ]
   },
   "keywords": [],

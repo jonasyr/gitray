@@ -20,9 +20,15 @@ We created a simple but effective solution using Jest's built-in mocking:
    // jest.setup.cjs
    // Mock ansi-styles with a CommonJS version
    jest.mock('ansi-styles', () => ({
-     modifier: { /* ... */ },
-     color:    { /* ... */ },
-     bgColor:  { /* ... */ },
+     modifier: {
+       /* ... */
+     },
+     color: {
+       /* ... */
+     },
+     bgColor: {
+       /* ... */
+     },
      // etc.
    }));
    ```
@@ -43,10 +49,10 @@ We created a simple but effective solution using Jest's built-in mocking:
 
 ## Why This Works
 
-- **Direct Approach**: No transformers required.  
-- **Consistent**: Works locally and in CI.  
-- **Fast**: Zero transformation overhead.  
-- **Simple**: Minimal config changes.  
+- **Direct Approach**: No transformers required.
+- **Consistent**: Works locally and in CI.
+- **Fast**: Zero transformation overhead.
+- **Simple**: Minimal config changes.
 - **Targeted**: Only mocks the problematic modules.
 
 By pre-mocking modules in CommonJS, Jest never encounters the ESM `export` syntax directly.

@@ -11,7 +11,7 @@ module.exports = {
     '/node_modules/',
     '<rootDir>/packages/*/dist/',
     'main.tsx$',
-    '\\.d\\.ts$'
+    '\\.d\\.ts$',
   ],
 
   projects: [
@@ -49,12 +49,18 @@ module.exports = {
 
       moduleNameMapper: {
         '\\.css$': 'identity-obj-proxy',
-        '\\.(svg|jpg|jpeg|png|gif|webp)$': '<rootDir>/apps/frontend/__mocks__/fileMock.cjs',
+        '\\.(svg|jpg|jpeg|png|gif|webp)$':
+          '<rootDir>/apps/frontend/__mocks__/fileMock.cjs',
         '^/vite\\.svg$': '<rootDir>/apps/frontend/__mocks__/fileMock.cjs',
         '^ansi-styles$': '<rootDir>/apps/frontend/__mocks__/ansi-styles.cjs',
       },
       setupFilesAfterEnv: ['<rootDir>/apps/frontend/jest.setup.ts'],
-      moduleDirectories: ['node_modules', '<rootDir>/apps/frontend/node_modules', '<rootDir>/node_modules', '../../node_modules'],
+      moduleDirectories: [
+        'node_modules',
+        '<rootDir>/apps/frontend/node_modules',
+        '<rootDir>/node_modules',
+        '../../node_modules',
+      ],
       moduleFileExtensions: ['ts', 'tsx', 'js', 'json', 'node'],
       testPathIgnorePatterns: ['/node_modules/'],
       extensionsToTreatAsEsm: ['.ts', '.tsx'],

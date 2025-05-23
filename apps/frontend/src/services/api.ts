@@ -1,9 +1,9 @@
 import axios from 'axios';
-import { 
-  Commit, 
-  TimePeriod, 
-  CommitFilterOptions, 
-  CommitHeatmapData 
+import {
+  Commit,
+  TimePeriod,
+  CommitFilterOptions,
+  CommitHeatmapData,
 } from '../../../../packages/shared-types/src';
 
 // Define the base URL for the API
@@ -23,7 +23,9 @@ const apiClient = axios.create({
  * @param repoUrl The URL of the git repository
  * @returns Promise containing an array of commits
  */
-export const getWorkspaceCommits = async (repoUrl: string): Promise<Commit[]> => {
+export const getWorkspaceCommits = async (
+  repoUrl: string
+): Promise<Commit[]> => {
   try {
     const response = await apiClient.post('/api/repositories', { repoUrl });
     return response.data.commits;
@@ -32,10 +34,14 @@ export const getWorkspaceCommits = async (repoUrl: string): Promise<Commit[]> =>
       if (error.response) {
         // The request was made and the server responded with a status code
         // that falls out of the range of 2xx
-        throw new Error(`Server error: ${error.response.data?.error ?? error.message}`);
+        throw new Error(
+          `Server error: ${error.response.data?.error ?? error.message}`
+        );
       } else if (error.request) {
         // The request was made but no response was received
-        throw new Error('No response from server. Please check your network connection.');
+        throw new Error(
+          'No response from server. Please check your network connection.'
+        );
       } else {
         // Something happened in setting up the request
         throw new Error(`Error: ${error.message}`);
@@ -65,7 +71,8 @@ export const getHeatmapData = async (
     } else if (filterOptions?.author) {
       params.append('author', filterOptions.author);
     }
-    if (filterOptions?.fromDate) params.append('fromDate', filterOptions.fromDate);
+    if (filterOptions?.fromDate)
+      params.append('fromDate', filterOptions.fromDate);
     if (filterOptions?.toDate) params.append('toDate', filterOptions.toDate);
 
     const response = await apiClient.get('/api/commits/heatmap', { params });
@@ -73,9 +80,13 @@ export const getHeatmapData = async (
   } catch (error) {
     if (axios.isAxiosError(error)) {
       if (error.response) {
-        throw new Error(`Server error: ${error.response.data?.error ?? error.message}`);
+        throw new Error(
+          `Server error: ${error.response.data?.error ?? error.message}`
+        );
       } else if (error.request) {
-        throw new Error('No response from server. Please check your network connection.');
+        throw new Error(
+          'No response from server. Please check your network connection.'
+        );
       } else {
         throw new Error(`Error: ${error.message}`);
       }
@@ -95,24 +106,28 @@ export const getRepositoryFullData = async (
   repoUrl: string,
   timePeriod: TimePeriod = 'month',
   filterOptions?: CommitFilterOptions
-): Promise<{commits: Commit[], heatmapData: CommitHeatmapData}> => {
+): Promise<{ commits: Commit[]; heatmapData: CommitHeatmapData }> => {
   try {
     const response = await apiClient.post('/api/repositories/full-data', {
       repoUrl,
       timePeriod,
-      filterOptions
+      filterOptions,
     });
-    
+
     return {
       commits: response.data.commits,
-      heatmapData: response.data.heatmapData
+      heatmapData: response.data.heatmapData,
     };
   } catch (error) {
     if (axios.isAxiosError(error)) {
       if (error.response) {
-        throw new Error(`Server error: ${error.response.data?.error ?? error.message}`);
+        throw new Error(
+          `Server error: ${error.response.data?.error ?? error.message}`
+        );
       } else if (error.request) {
-        throw new Error('No response from server. Please check your network connection.');
+        throw new Error(
+          'No response from server. Please check your network connection.'
+        );
       } else {
         throw new Error(`Error: ${error.message}`);
       }
@@ -124,5 +139,5 @@ export const getRepositoryFullData = async (
 export default {
   getWorkspaceCommits,
   getHeatmapData,
-  getRepositoryFullData
+  getRepositoryFullData,
 };

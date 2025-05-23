@@ -6,6 +6,8 @@ export default defineConfig({
   plugins: [react()],
   define: {
     // Define environment variables with default values
-    'import.meta.env.VITE_API_BASE_URL': JSON.stringify(process.env.VITE_API_BASE_URL || 'http://localhost:3000'),
+    'import.meta.env.VITE_API_BASE_URL': JSON.stringify(
+      process.env.VITE_API_BASE_URL || 'http://localhost:3000'
+    ),
   },
 });

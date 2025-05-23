@@ -1,15 +1,12 @@
-import simpleGit, {
-  SimpleGit,
-  SimpleGitOptions,
-} from 'simple-git';
+import simpleGit, { SimpleGit, SimpleGitOptions } from 'simple-git';
 import { mkdtemp, rm } from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { 
-  Commit, 
+import {
+  Commit,
   CommitFilterOptions,
   CommitAggregation,
-  CommitHeatmapData
+  CommitHeatmapData,
 } from '../../../../packages/shared-types/src';
 
 class GitService {
@@ -21,7 +18,7 @@ class GitService {
       binary: 'git',
       maxConcurrentProcesses: 6,
     };
-    
+
     this.git = simpleGit(gitOptions);
     console.log('GitService initialized.');
   }
@@ -89,8 +86,9 @@ class GitService {
       const commits: Commit[] = raw
         .split('\n')
         .filter(Boolean)
-        .map(line => {
-          const [hash, date, authorName, authorEmail, message] = line.split('|');
+        .map((line) => {
+          const [hash, date, authorName, authorEmail, message] =
+            line.split('|');
           if (!hash || !date || !authorName || !authorEmail || !message) {
             console.warn('Skipping commit with missing data:', line);
             return null;
@@ -128,12 +126,13 @@ class GitService {
     console.log('Aggregating commits by day', filterOptions);
 
     let filtered = [...commits];
-    const filterAuthors = filterOptions?.authors ??
+    const filterAuthors =
+      filterOptions?.authors ??
       (filterOptions?.author ? [filterOptions.author] : undefined);
     if (filterAuthors && filterAuthors.length > 0) {
-      filtered = filtered.filter(c =>
-        filterAuthors.some(a =>
-          c.authorName.includes(a) || c.authorEmail.includes(a)
+      filtered = filtered.filter((c) =>
+        filterAuthors.some(
+          (a) => c.authorName.includes(a) || c.authorEmail.includes(a)
         )
       );
     }
@@ -145,10 +144,10 @@ class GitService {
       : new Date(endDate.getTime() - 86400000 * 364);
 
     if (filterOptions?.fromDate) {
-      filtered = filtered.filter(c => new Date(c.date) >= startDate);
+      filtered = filtered.filter((c) => new Date(c.date) >= startDate);
     }
     if (filterOptions?.toDate) {
-      filtered = filtered.filter(c => new Date(c.date) <= endDate);
+      filtered = filtered.filter((c) => new Date(c.date) <= endDate);
     }
 
     const map = new Map<string, CommitAggregation>();
@@ -162,7 +161,7 @@ class GitService {
     }
 
     let maxCommitCount = 0;
-    filtered.forEach(c => {
+    filtered.forEach((c) => {
       const key = new Date(c.date).toISOString().split('T')[0];
       const bucket = map.get(key);
       if (!bucket) return;

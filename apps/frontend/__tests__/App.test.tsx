@@ -15,7 +15,9 @@ describe('App Component (ohne jest-dom)', () => {
 
   test('rendert exakt drei Explanation-Buttons', () => {
     render(<App />);
-    const explainBtns = screen.getAllByRole('button', { name: /explanation \d+/i });
+    const explainBtns = screen.getAllByRole('button', {
+      name: /explanation \d+/i,
+    });
     expect(explainBtns.length).toBe(3);
   });
 

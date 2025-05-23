@@ -3,7 +3,11 @@ import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 import '../styles/heatmap.css';
 import Select from 'react-select';
-import { CommitFilterOptions, CommitHeatmapData, Commit } from '../../../../packages/shared-types/src';
+import {
+  CommitFilterOptions,
+  CommitHeatmapData,
+  Commit,
+} from '../../../../packages/shared-types/src';
 import { getHeatmapData } from '../services/api';
 
 interface ActivityHeatmapProps {
@@ -59,7 +63,10 @@ const customStyles = {
   }),
 };
 
-const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) => {
+const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
+  repoUrl,
+  commits,
+}) => {
   const [filterOptions, setFilterOptions] = useState<CommitFilterOptions>({});
   const [data, setData] = useState<CommitHeatmapData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -73,7 +80,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
   // Count commits per author in that range
   const authorCommitCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    commits.forEach(c => {
+    commits.forEach((c) => {
       const d = new Date(c.date);
       if (d >= startDate && d <= endDate) {
         counts.set(c.authorName, (counts.get(c.authorName) || 0) + 1);
@@ -85,7 +92,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
   // Build dropdown options including the count
   const authorOptions = useMemo(
     () =>
-      Array.from(new Set(commits.map(c => c.authorName))).map(a => ({
+      Array.from(new Set(commits.map((c) => c.authorName))).map((a) => ({
         value: a,
         label: `${a} (${authorCommitCounts.get(a) || 0})`,
       })),
@@ -115,7 +122,9 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
     const weeks = 53;
     const gutterSize = 2;
     const availableWidth = containerWidth - padding;
-    const calculatedSize = Math.floor((availableWidth - (weeks * gutterSize)) / weeks);
+    const calculatedSize = Math.floor(
+      (availableWidth - weeks * gutterSize) / weeks
+    );
     // Limit the size to reasonable bounds
     return Math.min(Math.max(calculatedSize, 8), 20);
   }, [containerWidth]);
@@ -160,7 +169,11 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
   }, [repoUrl]);
 
   const values: HeatmapValue[] = data
-    ? data.data.map(b => ({ date: b.periodStart, count: b.commitCount, authors: b.authors }))
+    ? data.data.map((b) => ({
+        date: b.periodStart,
+        count: b.commitCount,
+        authors: b.authors,
+      }))
     : [];
   const max = data?.metadata?.maxCommitCount ?? 0;
 
@@ -177,7 +190,9 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
   return (
     <div className="w-full bg-gray-800 rounded-lg shadow-lg">
       <div className="p-6">
-        <h2 className="text-2xl font-bold mb-6 text-white">Repository Activity</h2>
+        <h2 className="text-2xl font-bold mb-6 text-white">
+          Repository Activity
+        </h2>
 
         {/* Author selector with proper spacing */}
         <div className="mb-8 relative">
@@ -192,12 +207,12 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
             onMenuClose={handleMenuClose}
             styles={customStyles}
             value={
-              filterOptions.authors?.map(a => ({ value: a, label: a })) ?? []
+              filterOptions.authors?.map((a) => ({ value: a, label: a })) ?? []
             }
-            onChange={vals =>
+            onChange={(vals) =>
               setFilterOptions({
                 ...filterOptions,
-                authors: vals.map(v => v.value),
+                authors: vals.map((v) => v.value),
               })
             }
             placeholder="Select author(s) to filter..."
@@ -225,9 +240,12 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
                 cellSize={cellSize}
                 gutterSize={2}
                 classForValue={classForValue as (v?: HeatmapValue) => string}
-                titleForValue={titleForValue as (v?: HeatmapValue) => string | null}
+                titleForValue={
+                  titleForValue as (v?: HeatmapValue) => string | null
+                }
                 onClick={(v: HeatmapValue | undefined) =>
-                  v && window.open(`${repoUrl}/commits?until=${v.date}`, '_blank')
+                  v &&
+                  window.open(`${repoUrl}/commits?until=${v.date}`, '_blank')
                 }
               />
             </div>

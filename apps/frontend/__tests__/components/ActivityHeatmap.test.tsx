@@ -6,7 +6,9 @@ jest.mock('../../src/services/api', () => ({
   getHeatmapData: jest.fn(),
 }));
 
-const mockedGetHeatmapData = getHeatmapData as jest.MockedFunction<typeof getHeatmapData>;
+const mockedGetHeatmapData = getHeatmapData as jest.MockedFunction<
+  typeof getHeatmapData
+>;
 
 describe('ActivityHeatmap (happy path, AAA)', () => {
   test('renders tooltip title with correct commit count', async () => {
@@ -31,7 +33,7 @@ describe('ActivityHeatmap (happy path, AAA)', () => {
 
     // Assert
     const titles = Array.from(container.querySelectorAll('title')).map(
-      t => t.textContent
+      (t) => t.textContent
     );
     expect(titles).toContain(`3 commits on ${date}`);
   });

@@ -17,18 +17,17 @@ const MainPage: React.FC = () => {
     setRepoUrl(inputRepoUrl);
     setIsLoading(true);
     setError(null);
-    
+
     try {
       // Use the optimized endpoint to fetch both commits and heatmap data at once
-      const { commits } = await getRepositoryFullData(
-        inputRepoUrl,
-        'day'
-      );
+      const { commits } = await getRepositoryFullData(inputRepoUrl, 'day');
 
       setCommits(commits);
       setShowHeatmap(true); // Show heatmap by default after fetching
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An unknown error occurred');
+      setError(
+        err instanceof Error ? err.message : 'An unknown error occurred'
+      );
       setCommits([]);
       setShowHeatmap(false);
     } finally {
@@ -61,7 +60,9 @@ const MainPage: React.FC = () => {
 
         {error && (
           <div className="mt-8 p-4 bg-red-900 border border-red-700 text-red-200 rounded-md">
-            <p><strong>Error:</strong> {error}</p>
+            <p>
+              <strong>Error:</strong> {error}
+            </p>
           </div>
         )}
 
@@ -71,7 +72,9 @@ const MainPage: React.FC = () => {
             <div className="flex flex-wrap gap-2 mt-6 mb-2 justify-center">
               <button
                 className={`px-4 py-2 rounded-md font-medium ${
-                  !showHeatmap ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'
+                  !showHeatmap
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-700 text-gray-300'
                 }`}
                 onClick={() => setShowHeatmap(false)}
               >
@@ -79,14 +82,16 @@ const MainPage: React.FC = () => {
               </button>
               <button
                 className={`px-4 py-2 rounded-md font-medium ${
-                  showHeatmap ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'
+                  showHeatmap
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-700 text-gray-300'
                 }`}
                 onClick={() => setShowHeatmap(true)}
               >
                 Activity Heatmap
               </button>
             </div>
-            
+
             {/* Show either commit list or heatmap based on selection */}
             {showHeatmap ? (
               <ActivityHeatmap repoUrl={repoUrl} commits={commits} />
@@ -115,7 +120,8 @@ const MainPage: React.FC = () => {
       <footer className="w-full container mx-auto px-4 border-t border-gray-800 py-4 text-center text-gray-500 text-sm">
         <p>Nach dem runterscrollen:</p>
         <div>
-          Links: Impressum; Datenschutzerklärung; "Über Uns"-Seite; created by "Namen von uns"
+          Links: Impressum; Datenschutzerklärung; "Über Uns"-Seite; created by
+          "Namen von uns"
         </div>
       </footer>
     </div>

@@ -6,12 +6,16 @@ const router = express.Router();
 
 // GET /api/commits/heatmap?repoUrl=...&author=...&fromDate=...&toDate=...
 router.get('/heatmap', (async (req, res, next) => {
-  const { repoUrl, author, authors, fromDate, toDate } =
-    req.query as Record<string, string>;
+  const { repoUrl, author, authors, fromDate, toDate } = req.query as Record<
+    string,
+    string
+  >;
 
   // Basic validation
   if (!repoUrl) {
-    return res.status(400).json({ error: 'repoUrl query parameter is required' });
+    return res
+      .status(400)
+      .json({ error: 'repoUrl query parameter is required' });
   }
 
   let tempDir: string | undefined;
@@ -25,7 +29,10 @@ router.get('/heatmap', (async (req, res, next) => {
       toDate: toDate || undefined,
     };
 
-    const heatmapData = await gitService.aggregateCommitsByTime(commits, filters);
+    const heatmapData = await gitService.aggregateCommitsByTime(
+      commits,
+      filters
+    );
     res.json(heatmapData);
   } catch (error) {
     next(error);
@@ -41,4 +48,3 @@ router.get('/heatmap', (async (req, res, next) => {
 }) as express.RequestHandler);
 
 export default router;
-

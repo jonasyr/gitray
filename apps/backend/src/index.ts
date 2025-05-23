@@ -25,4 +25,3 @@ app.use(errorHandler);
 app.listen(PORT, () => {
   console.log(`Backend läuft auf Port ${PORT}`);
 });
-

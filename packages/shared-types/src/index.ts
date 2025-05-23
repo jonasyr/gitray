@@ -45,19 +45,19 @@ export interface CommitFilterOptions {
 export interface CommitAggregation {
   // The start date of this time period (ISO 8601 format)
   periodStart: string;
-  
+
   // Number of commits in this time period
   commitCount: number;
-  
+
   // Optional: unique authors who committed in this period
   authors?: string[];
-  
+
   // Optional: files changed in this period
   filesChanged?: number;
-  
+
   // Optional: lines added in this period
   linesAdded?: number;
-  
+
   // Optional: lines deleted in this period
   linesDeleted?: number;
 }
@@ -68,18 +68,18 @@ export interface CommitAggregation {
 export interface CommitHeatmapData {
   // The time period used for aggregation
   timePeriod: TimePeriod;
-  
+
   // The aggregated commit data
   data: CommitAggregation[];
-  
+
   // Optional metadata about the aggregation
   metadata?: {
     // Maximum commit count in any single period
     maxCommitCount: number;
-    
+
     // Total commits in the entire dataset
     totalCommits: number;
-    
+
     // Filter options used for this aggregation
     filterOptions?: CommitFilterOptions;
   };
