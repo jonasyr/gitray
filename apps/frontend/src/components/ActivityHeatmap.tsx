@@ -120,6 +120,22 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
     return Math.min(Math.max(calculatedSize, 8), 20);
   }, [containerWidth]);
 
+  // Helper to compare author arrays
+  const isFilterOptionsEqual = (
+    a: CommitFilterOptions,
+    b: CommitFilterOptions
+  ) => {
+    const A = a.authors ?? [];
+    const B = b.authors ?? [];
+    if (A.length !== B.length) return false;
+    const sortedA = [...A].sort();
+    const sortedB = [...B].sort();
+    return sortedA.every((v, i) => v === sortedB[i]);
+  };
+
+  // Ref to hold last‐used filters
+  const prevFilters = useRef<CommitFilterOptions>({ authors: [] });
+
   const fetchData = async () => {
     if (!repoUrl) return;
     setLoading(true);
@@ -128,6 +144,14 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
       setData(d);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Only call fetchData when filters changed
+  const handleMenuClose = () => {
+    if (!isFilterOptionsEqual(filterOptions, prevFilters.current)) {
+      fetchData();
+      prevFilters.current = filterOptions;
     }
   };
 
@@ -156,7 +180,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
         <h2 className="text-2xl font-bold mb-6 text-white">Repository Activity</h2>
 
         {/* Author selector with proper spacing */}
-        <div className="mb-8">
+        <div className="mb-8 relative">
           <label className="block text-sm font-medium text-gray-300 mb-2">
             Filter by Authors
           </label>
@@ -165,7 +189,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
             options={authorOptions}
             className="w-full max-w-md text-sm"
             closeMenuOnSelect={false}
-            onMenuClose={fetchData}
+            onMenuClose={handleMenuClose}
             styles={customStyles}
             value={
               filterOptions.authors?.map(a => ({ value: a, label: a })) ?? []
@@ -178,13 +202,18 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
             }
             placeholder="Select author(s) to filter..."
           />
+          {loading && (
+            <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+              <div className="animate-spin h-5 w-5 border-2 border-green-500 border-t-transparent rounded-full" />
+            </div>
+          )}
         </div>
         <br></br>
         {/* Heatmap container with dynamic sizing */}
         <div ref={containerRef} className="w-full overflow-x-auto">
           {loading ? (
             <div className="flex justify-center items-center h-40">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
+              <span className="text-white text-lg">Loading commits...</span>
             </div>
           ) : (
             <div className="min-w-fit">
@@ -201,8 +230,6 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
                   v && window.open(`${repoUrl}/commits?until=${v.date}`, '_blank')
                 }
               />
-              
-
             </div>
           )}
         </div>
