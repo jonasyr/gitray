@@ -1,7 +1,14 @@
 #!/usr/bin/env sh
 . "$(dirname "$0")/_/husky.sh"
 
-# run markdownlint on all .md, then lint-staged for code
+# Format codebase and add changes
+pnpm format
+git add -A
+
+# Run full linting and markdown linting
+pnpm lint
 pnpm lint:md
+
+# Run staged linting and formatting
 pnpm lint-staged
 
