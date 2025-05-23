@@ -41,7 +41,7 @@ pnpm run dev
 The repository uses **husky** to run several checks before a commit is
 created:
 
-- `pnpm format` – formats the entire codebase.
+- `pnpm format` – formats the entire codebase using Prettier.
 - `pnpm lint` – lints all JavaScript/TypeScript files.
 - `pnpm lint:md` – lints Markdown files.
 - `pnpm lint-staged` – applies fixes to staged files.
