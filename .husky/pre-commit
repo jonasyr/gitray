@@ -3,5 +3,4 @@
 
 echo "🔧 Husky pre-commit hook running..."
 
-# pnpm format
 pnpm lint-staged
