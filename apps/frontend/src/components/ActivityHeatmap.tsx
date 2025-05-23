@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 import '../styles/heatmap.css';
@@ -17,10 +17,54 @@ interface HeatmapValue {
   authors?: string[];
 }
 
+const customStyles = {
+  control: (base: any) => ({
+    ...base,
+    backgroundColor: '#1f2937', // Maintains dark background for the control
+  }),
+  placeholder: (base: any) => ({
+    ...base,
+    color: 'white', // Only placeholder text in white
+  }),
+  input: (base: any) => ({
+    ...base,
+    color: 'white', // Input text remains white
+  }),
+  menu: (base: any) => ({
+    ...base,
+    backgroundColor: '#1f2937', // Set dropdown menu background to dark
+  }),
+  option: (base: any, state: any) => ({
+    ...base,
+    backgroundColor: state.isFocused ? '#374151' : '#1f2937',
+    color: 'white',
+    cursor: 'pointer',
+  }),
+  multiValue: (base: any) => ({
+    ...base,
+    backgroundColor: '#065f46',
+    color: 'white',
+  }),
+  multiValueLabel: (base: any) => ({
+    ...base,
+    color: 'white',
+  }),
+  multiValueRemove: (base: any) => ({
+    ...base,
+    color: 'white',
+    ':hover': {
+      backgroundColor: '#064e3b',
+      color: 'white',
+    },
+  }),
+};
+
 const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) => {
   const [filterOptions, setFilterOptions] = useState<CommitFilterOptions>({});
   const [data, setData] = useState<CommitHeatmapData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const authorOptions = useMemo(
     () =>
@@ -30,6 +74,34 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
       })),
     [commits]
   );
+
+  // Calculate dynamic cell size based on container width
+  useEffect(() => {
+    const updateWidth = () => {
+      if (containerRef.current) {
+        const width = containerRef.current.offsetWidth;
+        setContainerWidth(width);
+      }
+    };
+
+    updateWidth();
+    window.addEventListener('resize', updateWidth);
+    return () => window.removeEventListener('resize', updateWidth);
+  }, []);
+
+  // Calculate cell size dynamically
+  // We have 53 weeks (columns) + some padding
+  // Formula: (containerWidth - padding) / (weeks + gaps)
+  const cellSize = useMemo(() => {
+    if (containerWidth === 0) return 12; // Default size
+    const padding = 40; // Space for labels
+    const weeks = 53;
+    const gutterSize = 2;
+    const availableWidth = containerWidth - padding;
+    const calculatedSize = Math.floor((availableWidth - (weeks * gutterSize)) / weeks);
+    // Limit the size to reasonable bounds
+    return Math.min(Math.max(calculatedSize, 8), 20);
+  }, [containerWidth]);
 
   const fetchData = async () => {
     if (!repoUrl) return;
@@ -65,86 +137,62 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
   const endDate = new Date();
 
   return (
-    <div className="w-full p-4 bg-gray-800 rounded-md">
-      <h2 className="text-xl font-bold mb-3">Repository Activity</h2>
+    <div className="w-full bg-gray-800 rounded-lg shadow-lg">
+      <div className="p-6">
+        <h2 className="text-2xl font-bold mb-6 text-white">Repository Activity</h2>
 
-      {/* author selector & trigger fetch on close */}
-      <div className="flex items-center mb-100">
-        <Select
-          isMulti
-          options={authorOptions}
-          className="min-w-[150px] text-sm"
-          closeMenuOnSelect={false}
-          onMenuClose={fetchData}
-          styles={{
-            control: base => ({
-              ...base,
-              backgroundColor: '#1f2937', // gray-800
-              borderColor: '#374151', // gray-700
-            }),
-            menu: base => ({ ...base, backgroundColor: '#1f2937', color: 'white' }),
-            option: (base, state) => ({
-              ...base,
-              backgroundColor: state.isSelected
-                ? '#10b981'
-                : state.isFocused
-                ? '#374151'
-                : '#1f2937',
-              color: 'white',
-              cursor: 'pointer',
-            }),
-            multiValue: base => ({ ...base, backgroundColor: '#065f46', color: 'white' }),
-            multiValueLabel: base => ({ ...base, color: 'white' }),
-            multiValueRemove: base => ({
-              ...base,
-              color: 'white',
-              ':hover': { backgroundColor: '#064e3b', color: 'white' },
-            }),
-          }}
-          value={
-            filterOptions.authors?.map(a => ({ value: a, label: a })) ?? []
-          }
-          onChange={vals =>
-            setFilterOptions({
-              ...filterOptions,
-              authors: vals.map(v => v.value),
-            })
-          }
-          placeholder="Author(s)"
-          
-        />
+        {/* Author selector with proper spacing */}
+        <div className="mb-8">
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            Filter by Authors
+          </label>
+          <Select
+            isMulti
+            options={authorOptions}
+            className="w-full max-w-md text-sm"
+            closeMenuOnSelect={false}
+            onMenuClose={fetchData}
+            styles={customStyles}
+            value={
+              filterOptions.authors?.map(a => ({ value: a, label: a })) ?? []
+            }
+            onChange={vals =>
+              setFilterOptions({
+                ...filterOptions,
+                authors: vals.map(v => v.value),
+              })
+            }
+            placeholder="Select author(s) to filter..."
+          />
+        </div>
+
+        {/* Heatmap container with dynamic sizing */}
+        <div ref={containerRef} className="w-full overflow-x-auto">
+          {loading ? (
+            <div className="flex justify-center items-center h-40">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
+            </div>
+          ) : (
+            <div className="min-w-fit">
+              <CalendarHeatmap
+                startDate={startDate}
+                endDate={endDate}
+                values={values}
+                showWeekdayLabels
+                cellSize={cellSize}
+                gutterSize={2}
+                classForValue={classForValue as (v?: HeatmapValue) => string}
+                titleForValue={titleForValue as (v?: HeatmapValue) => string | null}
+                onClick={(v: HeatmapValue | undefined) =>
+                  v && window.open(`${repoUrl}/commits?until=${v.date}`, '_blank')
+                }
+              />
+              
+
+            </div>
+          )}
+        </div>
       </div>
-
-      {loading ? (
-        <div className="text-center">Loading...</div>
-      ) : (
-        <>
-          {/* now a real MT and no CSS scale */}
-          <div className="mx-auto mt-8">
-            <CalendarHeatmap
-              startDate={startDate}
-              endDate={endDate}
-              values={values}
-              showWeekdayLabels
-              cellSize={60} // ↑ bump this up instead of using CSS scale
-              gutterSize={3}
-              classForValue={classForValue as (v?: HeatmapValue) => string}
-              titleForValue={titleForValue as (v?: HeatmapValue) => string | null}
-              onClick={(v: HeatmapValue | undefined) =>
-                v && window.open(`${repoUrl}/commits?until=${v.date}`, '_blank')
-              }
-            />
-          </div>
-          <div className="flex items-center text-xs mt-2 space-x-1 justify-end">
-            <span>Less</span>
-            <div className="w-3 h-3 color-empty" />
-            {[1, 2, 3, 4].map((l: number) => (
-              <div key={l} className={`w-3 h-3 color-scale-${l}`} />
-            ))}
-            <span>More</span>
-          </div>
-        </>
-      )}
     </div>
   );
 };
