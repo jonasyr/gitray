@@ -1,6 +1,19 @@
 /** @type {import('jest').Config} */
 module.exports = {
-  
+  collectCoverageFrom: [
+    '<rootDir>/apps/*/src/**/*.{ts,tsx}',
+    '!<rootDir>/apps/*/src/**/*.d.ts',
+    '!<rootDir>/apps/frontend/src/main.tsx',
+    '<rootDir>/packages/*/src/**/*.{ts,tsx}',
+    '!<rootDir>/packages/*/src/**/*.d.ts',
+  ],
+  coveragePathIgnorePatterns: [
+    '/node_modules/',
+    '<rootDir>/packages/*/dist/',
+    'main.tsx$',
+    '\\.d\\.ts$'
+  ],
+
   projects: [
     {
       displayName: 'backend',
@@ -8,6 +21,7 @@ module.exports = {
       testEnvironment: 'node',
       testMatch: ['<rootDir>/apps/backend/**/__tests__/**/*.test.ts'],
       moduleDirectories: ['node_modules', 'node_modules', '../../node_modules'],
+      moduleFileExtensions: ['ts', 'tsx', 'js', 'json', 'node'],
       rootDir: './',
       testPathIgnorePatterns: ['/node_modules/'],
       globals: {
@@ -41,6 +55,7 @@ module.exports = {
       },
       setupFilesAfterEnv: ['<rootDir>/apps/frontend/jest.setup.ts'],
       moduleDirectories: ['node_modules', '<rootDir>/apps/frontend/node_modules', '<rootDir>/node_modules', '../../node_modules'],
+      moduleFileExtensions: ['ts', 'tsx', 'js', 'json', 'node'],
       testPathIgnorePatterns: ['/node_modules/'],
       extensionsToTreatAsEsm: ['.ts', '.tsx'],
     },

@@ -24,6 +24,11 @@ export default [
   // Base configurations
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
 
   // React specific configuration
   {
