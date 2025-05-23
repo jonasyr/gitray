@@ -66,13 +66,30 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
   const [containerWidth, setContainerWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Define the period for the last 365 days
+  const startDate = new Date(Date.now() - 364 * 24 * 60 * 60 * 1000);
+  const endDate = new Date();
+
+  // Count commits per author in that range
+  const authorCommitCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    commits.forEach(c => {
+      const d = new Date(c.date);
+      if (d >= startDate && d <= endDate) {
+        counts.set(c.authorName, (counts.get(c.authorName) || 0) + 1);
+      }
+    });
+    return counts;
+  }, [commits, startDate, endDate]);
+
+  // Build dropdown options including the count
   const authorOptions = useMemo(
     () =>
       Array.from(new Set(commits.map(c => c.authorName))).map(a => ({
         value: a,
-        label: a,
+        label: `${a} (${authorCommitCounts.get(a) || 0})`,
       })),
-    [commits]
+    [commits, authorCommitCounts]
   );
 
   // Calculate dynamic cell size based on container width
@@ -133,9 +150,6 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
   const titleForValue = (v?: HeatmapValue) =>
     v ? `${v.count} commit${v.count === 1 ? '' : 's'} on ${v.date}` : null;
 
-  const startDate = new Date(Date.now() - 364 * 24 * 60 * 60 * 1000);
-  const endDate = new Date();
-
   return (
     <div className="w-full bg-gray-800 rounded-lg shadow-lg">
       <div className="p-6">
@@ -165,7 +179,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({ repoUrl, commits }) =
             placeholder="Select author(s) to filter..."
           />
         </div>
-
+        <br></br>
         {/* Heatmap container with dynamic sizing */}
         <div ref={containerRef} className="w-full overflow-x-auto">
           {loading ? (
