@@ -1,6 +1,6 @@
 import express from 'express';
 import { gitService } from '../services/gitService';
-import { CommitFilterOptions } from '../../../../packages/shared-types/src';
+import { CommitFilterOptions } from '@gitray/shared-types';
 
 const router = express.Router();
 

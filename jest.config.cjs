@@ -24,6 +24,9 @@ module.exports = {
       moduleFileExtensions: ['ts', 'tsx', 'js', 'json', 'node'],
       rootDir: './',
       testPathIgnorePatterns: ['/node_modules/'],
+      moduleNameMapper: {
+        '^@gitray/shared-types$': '<rootDir>/packages/shared-types/src/index.ts',
+      },
       globals: {
         'ts-jest': {
           tsconfig: 'apps/backend/tsconfig.json',
@@ -53,6 +56,7 @@ module.exports = {
           '<rootDir>/apps/frontend/__mocks__/fileMock.cjs',
         '^/vite\\.svg$': '<rootDir>/apps/frontend/__mocks__/fileMock.cjs',
         '^ansi-styles$': '<rootDir>/apps/frontend/__mocks__/ansi-styles.cjs',
+        '^@gitray/shared-types$': '<rootDir>/packages/shared-types/src/index.ts',
       },
       setupFilesAfterEnv: ['<rootDir>/apps/frontend/jest.setup.ts'],
       moduleDirectories: [

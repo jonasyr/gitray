@@ -5,13 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "npx vite",
-    "build": "../../node_modules/.bin/tsc -b",
+    "build": "tsc -b",
     "preview": "npx vite preview",
     "test": "jest --config=jest.config.cjs",
     "test:watch": "jest --config=jest.config.cjs --watch",
     "test:coverage": "jest --config=jest.config.cjs --coverage"
   },
   "dependencies": {
+    "@gitray/shared-types": "workspace:*",
     "apexcharts": "^4.7.0",
     "axios": "^1.9.0",
     "date-fns": "^4.1.0",

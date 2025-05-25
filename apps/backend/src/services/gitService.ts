@@ -7,7 +7,7 @@ import {
   CommitFilterOptions,
   CommitAggregation,
   CommitHeatmapData,
-} from '../../../../packages/shared-types/src';
+} from '@gitray/shared-types';
 
 class GitService {
   private git: SimpleGit;

@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { getHeatmapData, getRepositoryFullData } from '../../src/services/api';
-import { CommitHeatmapData } from '../../../../packages/shared-types/src';
+import { CommitHeatmapData } from '@gitray/shared-types';
 
 jest.mock('axios', () => {
   const mock = {

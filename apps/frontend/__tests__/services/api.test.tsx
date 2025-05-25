@@ -1,6 +1,6 @@
 import axios, { AxiosRequestConfig } from 'axios';
 import { getWorkspaceCommits } from '../../src/services/api';
-import { Commit } from '../../../../packages/shared-types/src';
+import { Commit } from '@gitray/shared-types';
 
 // Define type for our mock axios
 type MockAxios = {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Commit } from '../../../../packages/shared-types/src';
+import { Commit } from '@gitray/shared-types';
 
 interface CommitListProps {
   commits: Commit[];

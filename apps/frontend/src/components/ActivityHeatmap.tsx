@@ -7,7 +7,7 @@ import {
   CommitFilterOptions,
   CommitHeatmapData,
   Commit,
-} from '../../../../packages/shared-types/src';
+} from '@gitray/shared-types';
 import { getHeatmapData } from '../services/api';
 
 interface ActivityHeatmapProps {

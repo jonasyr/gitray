@@ -1,6 +1,6 @@
 import request from 'supertest';
 import express, { Application } from 'express';
-import { CommitHeatmapData } from '../../../../packages/shared-types/src';
+import { CommitHeatmapData } from '@gitray/shared-types';
 import commitRoutes from '../../src/routes/commitRoutes';
 import { gitService } from '../../src/services/gitService';
 

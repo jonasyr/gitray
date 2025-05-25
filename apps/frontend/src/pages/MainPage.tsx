@@ -3,7 +3,7 @@ import RepoInput from '../components/RepoInput';
 import CommitList from '../components/CommitList';
 import ActivityHeatmap from '../components/ActivityHeatmap';
 import { getRepositoryFullData } from '../services/api';
-import { Commit } from '../../../../packages/shared-types/src';
+import { Commit } from '@gitray/shared-types';
 
 const MainPage: React.FC = () => {
   const [commits, setCommits] = useState<Commit[]>([]);

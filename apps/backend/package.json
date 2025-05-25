@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon --watch src --exec ts-node src/index.ts",
-    "build": "../../node_modules/.bin/tsc",
+    "build": "tsc",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
@@ -14,6 +14,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@gitray/shared-types": "workspace:*",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
@@ -21,7 +22,6 @@
     "express-validator": "^7.2.1",
     "helmet": "^8.1.0",
     "ioredis": "^5.6.1",
-    "shared-types": "^1.0.0",
     "simple-git": "^3.27.0",
     "winston": "^3.17.0",
     "zod": "^3.25.28"
