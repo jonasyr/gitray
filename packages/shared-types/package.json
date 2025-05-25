@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "build": "rimraf dist && tsc",
-    "dev": "tsc --watch --preserveWatchOutput",
+    "dev": "tsc",
     "watch": "tsc --watch"
   },
   "main": "./dist/index.js",

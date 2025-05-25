@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon --watch src --exec ts-node src/index.ts",
+    "dev": "nodemon --watch src --exec \"ts-node -r tsconfig-paths/register src/index.ts\"",
     "build": "tsc",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -34,6 +34,7 @@
     "nodemon": "^3.1.10",
     "supertest": "^7.1.1",
     "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
     "typescript": "~5.7.3"
   }
 }

@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "dev": "pnpm run build:shared-types && pnpm run '/^dev:.*/' --parallel",
+    "dev": "pnpm run build:shared-types && pnpm -r run dev",
     "dev:frontend": "pnpm --filter frontend run dev",
     "dev:backend": "pnpm --filter backend run dev",
     "build": "pnpm run build:shared-types && pnpm run build:apps",

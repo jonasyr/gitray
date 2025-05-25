@@ -7,7 +7,11 @@ import {
   CommitFilterOptions,
   CommitAggregation,
   CommitHeatmapData,
+  GIT_SERVICE,
+  ERROR_MESSAGES,
+  RepositoryError,
 } from '@gitray/shared-types';
+import logger from '../services/logger';
 
 class GitService {
   private git: SimpleGit;
@@ -16,11 +20,11 @@ class GitService {
     const gitOptions: Partial<SimpleGitOptions> = {
       baseDir: process.cwd(),
       binary: 'git',
-      maxConcurrentProcesses: 6,
+      maxConcurrentProcesses: GIT_SERVICE.MAX_CONCURRENT_PROCESSES,
     };
 
     this.git = simpleGit(gitOptions);
-    console.log('GitService initialized.');
+    logger.info('GitService initialized.');
   }
 
   /**
@@ -32,37 +36,38 @@ class GitService {
    */
   async cloneRepository(repoUrl: string): Promise<string> {
     let tempDir: string | undefined = undefined;
-    console.log(`Attempting to clone repository: ${repoUrl}`);
+    logger.info(`Attempting to clone repository: ${repoUrl}`);
 
     try {
-      const tempDirPrefix = path.join(os.tmpdir(), 'git-visualizer-');
+      const tempDirPrefix = path.join(os.tmpdir(), GIT_SERVICE.TEMP_DIR_PREFIX);
       tempDir = await mkdtemp(tempDirPrefix);
-      console.log(`Created temporary directory: ${tempDir}`);
+      logger.info(`Created temporary directory: ${tempDir}`);
 
       const localGit = simpleGit(tempDir);
 
       await localGit.clone(repoUrl, '.');
-      console.log(`Successfully cloned ${repoUrl} into ${tempDir}.`);
+      logger.info(`Successfully cloned ${repoUrl} into ${tempDir}.`);
 
       return tempDir;
     } catch (error) {
-      console.error(`Error cloning repository ${repoUrl}:`, error);
+      logger.error(`Error cloning repository ${repoUrl}`, { error, repoUrl });
       if (tempDir) {
         try {
-          console.log(
+          logger.info(
             `Attempting cleanup of failed clone directory: ${tempDir}`
           );
           await rm(tempDir, { recursive: true, force: true });
-          console.log(`Cleaned up temporary directory: ${tempDir}`);
+          logger.info(`Cleaned up temporary directory: ${tempDir}`);
         } catch (cleanupError) {
-          console.error(
-            `Failed to cleanup temporary directory ${tempDir}:`,
-            cleanupError
-          );
+          logger.error(`Failed to cleanup temporary directory ${tempDir}`, {
+            cleanupError,
+            tempDir,
+          });
         }
       }
-      throw new Error(
-        `Failed to clone repository: ${repoUrl}. Reason: ${error instanceof Error ? error.message : String(error)}`
+      throw new RepositoryError(
+        `${ERROR_MESSAGES.REPO_CLONE_FAILED}: ${error instanceof Error ? error.message : String(error)}`,
+        repoUrl
       );
     }
   }
@@ -74,13 +79,13 @@ class GitService {
    * @throws Will throw an error if reading the commit log fails.
    */
   async getCommits(localRepoPath: string): Promise<Commit[]> {
-    console.log(`Attempting to read commits from: ${localRepoPath}`);
+    logger.info(`Attempting to read commits from: ${localRepoPath}`);
     try {
       const localGit: SimpleGit = simpleGit(localRepoPath);
 
       const raw = await localGit.raw([
         'log',
-        '--pretty=format:%H|%cI|%an|%ae|%s',
+        '--pretty=format:' + GIT_SERVICE.LOG_FORMAT,
       ]);
 
       const commits: Commit[] = raw
@@ -90,24 +95,25 @@ class GitService {
           const [hash, date, authorName, authorEmail, message] =
             line.split('|');
           if (!hash || !date || !authorName || !authorEmail || !message) {
-            console.warn('Skipping commit with missing data:', line);
+            logger.warn('Skipping commit with missing data', { line });
             return null;
           }
           return { sha: hash, message, date, authorName, authorEmail };
         })
         .filter((commit): commit is Commit => commit !== null);
 
-      console.log(
+      logger.info(
         `Successfully retrieved ${commits.length} commits from ${localRepoPath}.`
       );
       return commits;
     } catch (error) {
-      console.error(
-        `Error reading commits from repository ${localRepoPath}:`,
-        error
-      );
-      throw new Error(
-        `Failed to get commits from repository: ${localRepoPath}. Reason: ${error instanceof Error ? error.message : String(error)}`
+      logger.error(`Error reading commits from repository ${localRepoPath}`, {
+        error,
+        localRepoPath,
+      });
+      throw new RepositoryError(
+        `${ERROR_MESSAGES.COMMITS_FETCH_FAILED}: ${error instanceof Error ? error.message : String(error)}`,
+        localRepoPath
       );
     }
   }
@@ -123,7 +129,7 @@ class GitService {
     commits: Commit[],
     filterOptions?: CommitFilterOptions
   ): Promise<CommitHeatmapData> {
-    console.log('Aggregating commits by day', filterOptions);
+    logger.info('Aggregating commits by day', { filterOptions });
 
     let filtered = [...commits];
     const filterAuthors =
@@ -191,14 +197,18 @@ class GitService {
    * @returns A promise that resolves when cleanup is complete.
    */
   async cleanupRepository(repoPath: string): Promise<void> {
-    console.log(`Attempting cleanup of directory: ${repoPath}`);
+    logger.info(`Attempting cleanup of directory: ${repoPath}`);
     try {
       await rm(repoPath, { recursive: true, force: true });
-      console.log(`Successfully cleaned up directory: ${repoPath}`);
+      logger.info(`Successfully cleaned up directory: ${repoPath}`);
     } catch (error) {
-      console.error(`Error cleaning up directory ${repoPath}:`, error);
-      throw new Error(
-        `Failed to clean up repository directory: ${repoPath}. Reason: ${error instanceof Error ? error.message : String(error)}`
+      logger.error(`Error cleaning up directory ${repoPath}`, {
+        error,
+        repoPath,
+      });
+      throw new RepositoryError(
+        `${ERROR_MESSAGES.CLEANUP_FAILED}: ${error instanceof Error ? error.message : String(error)}`,
+        repoPath
       );
     }
   }
