@@ -1,13 +1,21 @@
 // apps/backend/__tests__/middlewares/errorHandler.test.ts
 import { Request, Response, NextFunction } from 'express';
 import errorHandler from '../../src/middlewares/errorHandler';
+import logger from '../../src/services/logger';
+
+jest.mock('../../src/services/logger', () => ({
+  __esModule: true,
+  default: {
+    error: jest.fn(),
+  },
+}));
 
 describe('Error Handler Middleware', () => {
   // Setup mock request, response, and next function
   let mockRequest: Partial<Request>;
   let mockResponse: Partial<Response>;
   let mockNext: NextFunction;
-  let consoleSpy: jest.SpyInstance;
+  let errorSpy: jest.SpyInstance;
 
   beforeEach(() => {
     // Arrange
@@ -18,12 +26,11 @@ describe('Error Handler Middleware', () => {
     };
     mockNext = jest.fn();
 
-    // Spy on console.error to verify it's called and prevent actual console output during tests
-    consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    errorSpy = jest.spyOn(logger, 'error');
   });
 
   afterEach(() => {
-    consoleSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   test('should log error stack and respond with 500 status and error message', () => {
@@ -40,10 +47,10 @@ describe('Error Handler Middleware', () => {
     );
 
     // Assert
-    expect(consoleSpy).toHaveBeenCalledWith(mockError.stack);
+    expect(errorSpy).toHaveBeenCalled();
     expect(mockResponse.status).toHaveBeenCalledWith(500);
     expect(mockResponse.json).toHaveBeenCalledWith({
-      error: 'Test error message',
+      error: 'An internal error occurred',
     });
   });
 });

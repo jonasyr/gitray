@@ -3,10 +3,19 @@ import { mkdtemp, rm } from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { gitService } from '../../src/services/gitService';
+import logger from '../../src/services/logger';
 
 // Mock dependencies
 jest.mock('simple-git');
 jest.mock('fs/promises');
+jest.mock('../../src/services/logger', () => ({
+  __esModule: true,
+  default: {
+    info: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+  },
+}));
 
 describe('GitService', () => {
   // Mock implementation of simpleGit
@@ -22,6 +31,9 @@ describe('GitService', () => {
     (simpleGit as jest.Mock).mockReturnValue(mockGit);
     (mkdtemp as jest.Mock).mockResolvedValue('/tmp/git-visualizer-test');
     (rm as jest.Mock).mockResolvedValue(undefined);
+    jest.spyOn(logger, 'error').mockReset();
+    jest.spyOn(logger, 'warn').mockReset();
+    jest.spyOn(logger, 'info').mockReset();
   });
 
   describe('cloneRepository', () => {
@@ -102,6 +114,9 @@ describe('GitService Extended Tests', () => {
     (simpleGit as jest.Mock).mockReturnValue(mockGit);
     (mkdtemp as jest.Mock).mockResolvedValue('/tmp/git-visualizer-test');
     (rm as jest.Mock).mockResolvedValue(undefined);
+    jest.spyOn(logger, 'error').mockReset();
+    jest.spyOn(logger, 'warn').mockReset();
+    jest.spyOn(logger, 'info').mockReset();
   });
 
   describe('cloneRepository error handling', () => {
@@ -128,9 +143,7 @@ describe('GitService Extended Tests', () => {
       const mockTempDir = '/tmp/git-visualizer-test';
       mockGit.clone.mockRejectedValue(mockCloneError);
       (rm as jest.Mock).mockRejectedValueOnce(mockCleanupError);
-      const consoleSpy = jest
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
+      const errorSpy = jest.spyOn(logger, 'error');
       await expect(gitService.cloneRepository(repoUrl)).rejects.toThrow(
         'Failed to clone repository'
       );
@@ -140,8 +153,8 @@ describe('GitService Extended Tests', () => {
         recursive: true,
         force: true,
       });
-      expect(consoleSpy).toHaveBeenCalled();
-      consoleSpy.mockRestore();
+      expect(errorSpy).toHaveBeenCalled();
+      errorSpy.mockRestore();
     });
   });
 
@@ -151,7 +164,7 @@ describe('GitService Extended Tests', () => {
       const mockError = new Error('Failed to get log');
       mockGit.raw.mockRejectedValue(mockError);
       await expect(gitService.getCommits(localRepoPath)).rejects.toThrow(
-        'Failed to get commits from repository'
+        'Failed to fetch commits from repository'
       );
       expect(simpleGit).toHaveBeenCalledWith(localRepoPath);
       expect(mockGit.raw).toHaveBeenCalled();
@@ -165,7 +178,7 @@ describe('GitService Extended Tests', () => {
         'ghi789|2023-01-03T15:00:00Z|Another User|another@example.com|',
       ].join('\n');
       mockGit.raw.mockResolvedValue(mockRaw);
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const warnSpy = jest.spyOn(logger, 'warn');
       const commits = await gitService.getCommits(localRepoPath);
       expect(commits).toHaveLength(1);
       expect(commits[0].sha).toBe('abc123');

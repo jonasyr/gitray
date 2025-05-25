@@ -4,6 +4,8 @@ import request from 'supertest';
 import express, { Application } from 'express';
 import { gitService } from '../../src/services/gitService';
 import repositoryRoutes from '../../src/routes/repositoryRoutes';
+import errorHandler from '../../src/middlewares/errorHandler';
+import logger from '../../src/services/logger';
 
 // Mock des gitService
 jest.mock('../../src/services/gitService', () => ({
@@ -12,6 +14,12 @@ jest.mock('../../src/services/gitService', () => ({
     getCommits: jest.fn(),
     cleanupRepository: jest.fn(),
     aggregateCommitsByTime: jest.fn(),
+  },
+}));
+jest.mock('../../src/services/logger', () => ({
+  __esModule: true,
+  default: {
+    error: jest.fn(),
   },
 }));
 
@@ -38,6 +46,8 @@ describe('Repository API Extended Tests', () => {
     app = express();
     app.use(express.json());
     app.use('/', repositoryRoutes);
+    app.use(errorHandler);
+    jest.spyOn(logger, 'error').mockReset();
   });
 
   test('sollte Fehler bei getCommits korrekt behandeln', async () => {
@@ -57,10 +67,11 @@ describe('Repository API Extended Tests', () => {
 
     // Assert
     expect(response.status).toBe(500);
-    expect(response.body.error).toBe(mockError.message);
+    expect(response.body.error).toBe('An internal error occurred');
     expect(mockCloneRepository).toHaveBeenCalledWith(validRepoUrl);
     expect(mockGetCommits).toHaveBeenCalledWith(tempDir);
     expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
+    expect(logger.error).toHaveBeenCalled();
   });
 
   test('sollte Commits zurückgeben, auch wenn Cleanup fehlschlägt', async () => {
@@ -82,10 +93,7 @@ describe('Repository API Extended Tests', () => {
     mockGetCommits.mockResolvedValue(mockCommits);
     mockCleanupRepository.mockRejectedValue(cleanupError);
 
-    // Spy on console.error to verify it's called
-    const consoleSpy = jest
-      .spyOn(console, 'error')
-      .mockImplementation(() => {});
+    const errorSpy = jest.spyOn(logger, 'error');
 
     // Act
     const response = await request(app)
@@ -98,17 +106,14 @@ describe('Repository API Extended Tests', () => {
     expect(mockCloneRepository).toHaveBeenCalledWith(validRepoUrl);
     expect(mockGetCommits).toHaveBeenCalledWith(tempDir);
     expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
-    expect(consoleSpy).toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalled();
 
     // Clean up
-    consoleSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   test('sollte mit verschiedenen URL-Formaten umgehen können', async () => {
-    // Spy on console.error to prevent output pollution during tests
-    const consoleSpy = jest
-      .spyOn(console, 'error')
-      .mockImplementation(() => {});
+    const errorSpy = jest.spyOn(logger, 'error');
 
     // Test with empty string
     await request(app).post('/').send({ repoUrl: '' });
@@ -128,7 +133,7 @@ describe('Repository API Extended Tests', () => {
     expect(mockCloneRepository).toHaveBeenCalledWith(validUrl);
 
     // Clean up
-    consoleSpy.mockRestore();
+    errorSpy.mockRestore();
   });
   test('should return heatmap data', async () => {
     const repoUrl = 'https://github.com/user/repo.git';
