@@ -37,6 +37,10 @@ pnpm dev
 - **pnpm lint:md**: Lints all Markdown files.
 - **pnpm lint:fix**: Applies fixes to lint errors.
 - **pnpm format**: Formats all files using Prettier.
+- **pnpm clean**: Removes build artifacts and dependencies.
+- **pnpm clean:dist**: Cleans output directories and `.tsbuildinfo` files.
+- **pnpm clean:node_modules**: Deletes all `node_modules` folders and the lockfile.
+- **pnpm rebuild**: Runs `clean`, reinstalls dependencies, and then builds.
 
 ### Pre-commit Checks
 
