@@ -3,6 +3,15 @@ import { mkdtemp, rm } from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import {
+  parseISO,
+  eachDayOfInterval,
+  subDays,
+  startOfDay,
+  isAfter,
+  isBefore,
+  format,
+} from 'date-fns';
+import {
   Commit,
   CommitFilterOptions,
   CommitAggregation,
@@ -118,6 +127,61 @@ class GitService {
     }
   }
 
+  private filterByAuthors(commits: Commit[], authors?: string[]): Commit[] {
+    if (!authors || authors.length === 0) {
+      return commits;
+    }
+    return commits.filter((c) =>
+      authors.some((a) => c.authorName.includes(a) || c.authorEmail.includes(a))
+    );
+  }
+
+  private filterByDateRange(
+    commits: Commit[],
+    startDate: Date,
+    endDate: Date
+  ): Commit[] {
+    return commits.filter((c) => {
+      const commitDate = parseISO(c.date);
+      return !isBefore(commitDate, startDate) && !isAfter(commitDate, endDate);
+    });
+  }
+
+  private createDateBuckets(
+    startDate: Date,
+    endDate: Date
+  ): Map<string, CommitAggregation> {
+    const buckets = new Map<string, CommitAggregation>();
+    eachDayOfInterval({
+      start: startOfDay(startDate),
+      end: startOfDay(endDate),
+    }).forEach((d) => {
+      const key = format(d, 'yyyy-MM-dd');
+      buckets.set(key, { periodStart: key, commitCount: 0, authors: [] });
+    });
+    return buckets;
+  }
+
+  private tallyCommits(
+    commits: Commit[],
+    buckets: Map<string, CommitAggregation>
+  ): number {
+    let max = 0;
+    commits.forEach((c) => {
+      const key = format(parseISO(c.date), 'yyyy-MM-dd');
+      const bucket = buckets.get(key);
+      if (!bucket) return;
+      bucket.commitCount += 1;
+      if (!bucket.authors!.includes(c.authorName)) {
+        bucket.authors!.push(c.authorName);
+      }
+      if (bucket.commitCount > max) {
+        max = bucket.commitCount;
+      }
+    });
+    return max;
+  }
+
   /**
    * Aggregates commit data by time periods.
    * @param commits Array of commits to aggregate
@@ -131,56 +195,24 @@ class GitService {
   ): Promise<CommitHeatmapData> {
     logger.info('Aggregating commits by day', { filterOptions });
 
-    let filtered = [...commits];
-    const filterAuthors =
-      filterOptions?.authors ??
-      (filterOptions?.author ? [filterOptions.author] : undefined);
-    if (filterAuthors && filterAuthors.length > 0) {
-      filtered = filtered.filter((c) =>
-        filterAuthors.some(
-          (a) => c.authorName.includes(a) || c.authorEmail.includes(a)
-        )
-      );
-    }
     const endDate = filterOptions?.toDate
-      ? new Date(filterOptions.toDate)
+      ? parseISO(filterOptions.toDate)
       : new Date();
     const startDate = filterOptions?.fromDate
-      ? new Date(filterOptions.fromDate)
-      : new Date(endDate.getTime() - 86400000 * 364);
+      ? parseISO(filterOptions.fromDate)
+      : subDays(endDate, 364);
 
-    if (filterOptions?.fromDate) {
-      filtered = filtered.filter((c) => new Date(c.date) >= startDate);
-    }
-    if (filterOptions?.toDate) {
-      filtered = filtered.filter((c) => new Date(c.date) <= endDate);
-    }
+    const authors =
+      filterOptions?.authors ??
+      (filterOptions?.author ? [filterOptions.author] : undefined);
 
-    const map = new Map<string, CommitAggregation>();
-    for (
-      let d = new Date(startDate);
-      d <= endDate;
-      d.setUTCDate(d.getUTCDate() + 1)
-    ) {
-      const key = d.toISOString().split('T')[0];
-      map.set(key, { periodStart: key, commitCount: 0, authors: [] });
-    }
+    let filtered = this.filterByAuthors(commits, authors);
+    filtered = this.filterByDateRange(filtered, startDate, endDate);
 
-    let maxCommitCount = 0;
-    filtered.forEach((c) => {
-      const key = new Date(c.date).toISOString().split('T')[0];
-      const bucket = map.get(key);
-      if (!bucket) return;
-      bucket.commitCount += 1;
-      if (!bucket.authors!.includes(c.authorName)) {
-        bucket.authors!.push(c.authorName);
-      }
-      if (bucket.commitCount > maxCommitCount) {
-        maxCommitCount = bucket.commitCount;
-      }
-    });
+    const buckets = this.createDateBuckets(startDate, endDate);
+    const maxCommitCount = this.tallyCommits(filtered, buckets);
 
-    const aggregatedData = Array.from(map.values());
+    const aggregatedData = Array.from(buckets.values());
     return {
       timePeriod: 'day',
       data: aggregatedData,
