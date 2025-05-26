@@ -1,11 +1,11 @@
 import simpleGit from 'simple-git';
 import { mkdtemp, rm } from 'fs/promises';
-import path from 'path';
-import os from 'os';
+import * as path from 'path';
+import * as os from 'os';
 import { gitService } from '../../src/services/gitService';
 import logger from '../../src/services/logger';
+import { GIT_SERVICE } from '@gitray/shared-types';
 
-// Mock dependencies
 jest.mock('simple-git');
 jest.mock('fs/promises');
 jest.mock('ioredis');
@@ -19,14 +19,12 @@ jest.mock('../../src/services/logger', () => ({
 }));
 
 describe('GitService', () => {
-  // Mock implementation of simpleGit
   const mockGit = {
     clone: jest.fn(),
     log: jest.fn(),
     raw: jest.fn(),
   };
 
-  // Reset all mocks before each test
   beforeEach(() => {
     jest.clearAllMocks();
     (simpleGit as jest.Mock).mockReturnValue(mockGit);
@@ -54,7 +52,7 @@ describe('GitService', () => {
       expect(simpleGit).toHaveBeenCalledWith('/tmp/git-visualizer-test');
       expect(mockGit.clone).toHaveBeenCalledWith(repoUrl, '.', [
         '--depth',
-        '1000',
+        String(GIT_SERVICE.CLONE_DEPTH),
         '--no-single-branch',
       ]);
     });
