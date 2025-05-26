@@ -2,6 +2,7 @@ import simpleGit, { SimpleGit, SimpleGitOptions } from 'simple-git';
 import { mkdtemp, rm } from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import Redis from 'ioredis';
 import {
   parseISO,
   eachDayOfInterval,
@@ -21,9 +22,11 @@ import {
   RepositoryError,
 } from '@gitray/shared-types';
 import logger from '../services/logger';
+import { config } from '../config';
 
 class GitService {
   private git: SimpleGit;
+  private redis: Redis;
 
   constructor() {
     const gitOptions: Partial<SimpleGitOptions> = {
@@ -33,6 +36,7 @@ class GitService {
     };
 
     this.git = simpleGit(gitOptions);
+    this.redis = new Redis(config.redis);
     logger.info('GitService initialized.');
   }
 
@@ -54,7 +58,11 @@ class GitService {
 
       const localGit = simpleGit(tempDir);
 
-      await localGit.clone(repoUrl, '.');
+      await localGit.clone(repoUrl, '.', [
+        '--depth',
+        String(GIT_SERVICE.CLONE_DEPTH),
+        '--no-single-branch',
+      ]);
       logger.info(`Successfully cloned ${repoUrl} into ${tempDir}.`);
 
       return tempDir;

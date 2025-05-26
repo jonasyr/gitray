@@ -1,12 +1,14 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { query } from 'express-validator';
 import { gitService } from '../services/gitService';
+import redis from '../services/cache';
 import { withTempRepository } from '../utils/withTempRepository';
 import { handleValidationErrors } from '../middlewares/validation';
 import {
   CommitFilterOptions,
   ERROR_MESSAGES,
   HTTP_STATUS,
+  TIME,
 } from '@gitray/shared-types';
 
 const router = express.Router();
@@ -41,10 +43,22 @@ router.get(
     };
 
     try {
+      const cacheKey = `heatmap:${repoUrl}:${JSON.stringify(filters)}`;
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        res.status(HTTP_STATUS.OK).json(JSON.parse(cached));
+        return;
+      }
       const heatmapData = await withTempRepository(repoUrl, async (tempDir) => {
         const commits = await gitService.getCommits(tempDir);
         return gitService.aggregateCommitsByTime(commits, filters);
       });
+      await redis.set(
+        cacheKey,
+        JSON.stringify(heatmapData),
+        'EX',
+        TIME.HOUR / 1000
+      );
       res.status(HTTP_STATUS.OK).json(heatmapData);
       return;
     } catch (error) {

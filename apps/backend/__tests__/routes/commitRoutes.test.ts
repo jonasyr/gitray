@@ -14,6 +14,10 @@ jest.mock('../../src/services/gitService', () => ({
     cleanupRepository: jest.fn(),
   },
 }));
+jest.mock('../../src/services/cache', () => ({
+  __esModule: true,
+  default: { get: jest.fn(), set: jest.fn() },
+}));
 
 const mockClone = gitService.cloneRepository as jest.MockedFunction<
   typeof gitService.cloneRepository

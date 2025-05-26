@@ -37,4 +37,20 @@ describe('ActivityHeatmap (happy path, AAA)', () => {
     );
     expect(titles).toContain(`3 commits on ${date}`);
   });
+
+  test('applies color class based on commit count', async () => {
+    const date = new Date().toISOString().slice(0, 10);
+    mockedGetHeatmapData.mockResolvedValue({
+      timePeriod: 'day',
+      data: [{ periodStart: date, commitCount: 8 }],
+      metadata: { maxCommitCount: 8, totalCommits: 8 },
+    });
+
+    const { container } = render(
+      <ActivityHeatmap repoUrl="url" commits={[]} />
+    );
+    await waitFor(() => expect(mockedGetHeatmapData).toHaveBeenCalled());
+    const rects = container.querySelectorAll('rect.color-scale-4');
+    expect(rects.length).toBeGreaterThan(0);
+  });
 });

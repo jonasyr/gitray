@@ -22,6 +22,10 @@ jest.mock('../../src/services/logger', () => ({
     error: jest.fn(),
   },
 }));
+jest.mock('../../src/services/cache', () => ({
+  __esModule: true,
+  default: { get: jest.fn(), set: jest.fn() },
+}));
 
 // Typ-Casting für gemockte Funktionen
 const mockCloneRepository = gitService.cloneRepository as jest.MockedFunction<

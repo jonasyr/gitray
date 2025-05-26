@@ -8,6 +8,7 @@ import logger from '../../src/services/logger';
 // Mock dependencies
 jest.mock('simple-git');
 jest.mock('fs/promises');
+jest.mock('ioredis');
 jest.mock('../../src/services/logger', () => ({
   __esModule: true,
   default: {
@@ -51,7 +52,11 @@ describe('GitService', () => {
         expect.stringContaining(path.join(os.tmpdir(), 'git-visualizer-'))
       );
       expect(simpleGit).toHaveBeenCalledWith('/tmp/git-visualizer-test');
-      expect(mockGit.clone).toHaveBeenCalledWith(repoUrl, '.');
+      expect(mockGit.clone).toHaveBeenCalledWith(repoUrl, '.', [
+        '--depth',
+        '1000',
+        '--no-single-branch',
+      ]);
     });
   });
 
