@@ -3,6 +3,7 @@ import express, { Application } from 'express';
 import { CommitHeatmapData } from '@gitray/shared-types';
 import commitRoutes from '../../src/routes/commitRoutes';
 import { gitService } from '../../src/services/gitService';
+import errorHandler from '../../src/middlewares/errorHandler';
 
 // Mock gitService methods used in the route
 jest.mock('../../src/services/gitService', () => ({
@@ -34,6 +35,7 @@ describe('commitRoutes /heatmap', () => {
     jest.clearAllMocks();
     app = express();
     app.use('/api/commits', commitRoutes);
+    app.use(errorHandler);
   });
 
   test('returns heatmap data for a valid request', async () => {
@@ -70,7 +72,8 @@ describe('commitRoutes /heatmap', () => {
 
     // Assert
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/repoUrl/);
+    expect(res.body.error).toBe('Validation failed');
+    expect(res.body.code).toBe('VALIDATION_ERROR');
     expect(mockClone).not.toHaveBeenCalled();
   });
 

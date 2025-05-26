@@ -1,27 +1,38 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
+import { query } from 'express-validator';
 import { gitService } from '../services/gitService';
-import { CommitFilterOptions } from '@gitray/shared-types';
+import { withTempRepository } from '../utils/withTempRepository';
+import { handleValidationErrors } from '../middlewares/validation';
+import {
+  CommitFilterOptions,
+  ERROR_MESSAGES,
+  HTTP_STATUS,
+} from '@gitray/shared-types';
 
 const router = express.Router();
 
+// Validation rules for query parameters
+const repoUrlValidation = [
+  query('repoUrl')
+    .isURL({ protocols: ['http', 'https'] })
+    .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
+    .matches(/\.git$|github\.com|gitlab\.com|bitbucket\.org/)
+    .withMessage(ERROR_MESSAGES.INVALID_REPO_URL),
+  query('fromDate').optional().isISO8601(),
+  query('toDate').optional().isISO8601(),
+  handleValidationErrors,
+];
+
 // GET /api/commits/heatmap?repoUrl=...&author=...&fromDate=...&toDate=...
-router.get('/heatmap', (async (req, res, next) => {
-  const { repoUrl, author, authors, fromDate, toDate } = req.query as Record<
-    string,
-    string
-  >;
+router.get(
+  '/heatmap',
+  repoUrlValidation,
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { repoUrl, author, authors, fromDate, toDate } = req.query as Record<
+      string,
+      string
+    >;
 
-  // Basic validation
-  if (!repoUrl) {
-    return res
-      .status(400)
-      .json({ error: 'repoUrl query parameter is required' });
-  }
-
-  let tempDir: string | undefined;
-  try {
-    tempDir = await gitService.cloneRepository(repoUrl);
-    const commits = await gitService.getCommits(tempDir);
     const filters: CommitFilterOptions = {
       author: author || undefined,
       authors: authors ? authors.split(',') : undefined,
@@ -29,22 +40,17 @@ router.get('/heatmap', (async (req, res, next) => {
       toDate: toDate || undefined,
     };
 
-    const heatmapData = await gitService.aggregateCommitsByTime(
-      commits,
-      filters
-    );
-    res.json(heatmapData);
-  } catch (error) {
-    next(error);
-  } finally {
-    if (tempDir) {
-      try {
-        await gitService.cleanupRepository(tempDir);
-      } catch (cleanupError) {
-        console.error('Error during repository cleanup:', cleanupError);
-      }
+    try {
+      const heatmapData = await withTempRepository(repoUrl, async (tempDir) => {
+        const commits = await gitService.getCommits(tempDir);
+        return gitService.aggregateCommitsByTime(commits, filters);
+      });
+      res.status(HTTP_STATUS.OK).json(heatmapData);
+      return;
+    } catch (error) {
+      next(error);
     }
   }
-}) as express.RequestHandler);
+);
 
 export default router;

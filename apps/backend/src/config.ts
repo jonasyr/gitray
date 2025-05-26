@@ -1,4 +1,4 @@
-import { RATE_LIMIT } from '@gitray/shared-types';
+import { RATE_LIMIT, GIT_SERVICE } from '@gitray/shared-types';
 
 export const config = {
   port: process.env.PORT || 3001,
@@ -16,7 +16,7 @@ export const config = {
     port: parseInt(process.env.REDIS_PORT || '6379'),
   },
   git: {
-    maxConcurrentProcesses: 6,
-    cloneDepth: 1000,
+    maxConcurrentProcesses: GIT_SERVICE.MAX_CONCURRENT_PROCESSES,
+    cloneDepth: GIT_SERVICE.CLONE_DEPTH,
   },
 };
