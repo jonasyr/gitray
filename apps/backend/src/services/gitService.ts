@@ -23,6 +23,7 @@ import {
 } from '@gitray/shared-types';
 import logger from '../services/logger';
 import { config } from '../config';
+import { shallowClone } from '../utils/gitUtils';
 
 class GitService {
   private git: SimpleGit;
@@ -56,13 +57,7 @@ class GitService {
       tempDir = await mkdtemp(tempDirPrefix);
       logger.info(`Created temporary directory: ${tempDir}`);
 
-      const localGit = simpleGit(tempDir);
-
-      await localGit.clone(repoUrl, '.', [
-        '--depth',
-        String(GIT_SERVICE.CLONE_DEPTH),
-        '--no-single-branch',
-      ]);
+      await shallowClone(repoUrl, tempDir);
       logger.info(`Successfully cloned ${repoUrl} into ${tempDir}.`);
 
       return tempDir;
@@ -95,15 +90,23 @@ class GitService {
    * @returns A promise that resolves with an array of Commit objects.
    * @throws Will throw an error if reading the commit log fails.
    */
-  async getCommits(localRepoPath: string): Promise<Commit[]> {
+  async getCommits(
+    localRepoPath: string,
+    options?: { skip?: number; limit?: number }
+  ): Promise<Commit[]> {
     logger.info(`Attempting to read commits from: ${localRepoPath}`);
     try {
       const localGit: SimpleGit = simpleGit(localRepoPath);
 
-      const raw = await localGit.raw([
-        'log',
-        '--pretty=format:' + GIT_SERVICE.LOG_FORMAT,
-      ]);
+      const args = ['log', '--pretty=format:' + GIT_SERVICE.LOG_FORMAT];
+      if (options?.skip) {
+        args.push(`--skip=${options.skip}`);
+      }
+      if (options?.limit) {
+        args.push('-n', String(options.limit));
+      }
+
+      const raw = await localGit.raw(args);
 
       const commits: Commit[] = raw
         .split('\n')

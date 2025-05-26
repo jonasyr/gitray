@@ -22,8 +22,40 @@ const repoUrlValidation = [
     .withMessage(ERROR_MESSAGES.INVALID_REPO_URL),
   query('fromDate').optional().isISO8601(),
   query('toDate').optional().isISO8601(),
+  query('page').optional().isInt({ min: 1 }).toInt(),
+  query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
   handleValidationErrors,
 ];
+
+// GET /api/commits?repoUrl=...&page=...&limit=...
+router.get(
+  '/',
+  repoUrlValidation,
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { repoUrl } = req.query as Record<string, string>;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 100;
+    const skip = (page - 1) * limit;
+
+    try {
+      const cacheKey = `commits:${repoUrl}:${page}:${limit}`;
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        res.status(HTTP_STATUS.OK).json(JSON.parse(cached));
+        return;
+      }
+      const commits = await withTempRepository(repoUrl, (tempDir) =>
+        gitService.getCommits(tempDir, { skip, limit })
+      );
+      const result = { commits, page, limit };
+      await redis.set(cacheKey, JSON.stringify(result), 'EX', TIME.HOUR / 1000);
+      res.status(HTTP_STATUS.OK).json(result);
+      return;
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 // GET /api/commits/heatmap?repoUrl=...&author=...&fromDate=...&toDate=...
 router.get(

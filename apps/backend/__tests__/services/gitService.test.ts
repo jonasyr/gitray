@@ -52,7 +52,7 @@ describe('GitService', () => {
       expect(simpleGit).toHaveBeenCalledWith('/tmp/git-visualizer-test');
       expect(mockGit.clone).toHaveBeenCalledWith(repoUrl, '.', [
         '--depth',
-        String(GIT_SERVICE.CLONE_DEPTH),
+        GIT_SERVICE.CLONE_DEPTH.toString(),
         '--no-single-branch',
       ]);
     });
@@ -84,6 +84,19 @@ describe('GitService', () => {
       expect(mockGit.raw).toHaveBeenCalledWith([
         'log',
         '--pretty=format:%H|%cI|%an|%ae|%s',
+      ]);
+    });
+
+    test('should support pagination arguments', async () => {
+      const localRepoPath = '/tmp/git-visualizer-test';
+      mockGit.raw.mockResolvedValue('');
+      await gitService.getCommits(localRepoPath, { skip: 10, limit: 5 });
+      expect(mockGit.raw).toHaveBeenCalledWith([
+        'log',
+        '--pretty=format:%H|%cI|%an|%ae|%s',
+        '--skip=10',
+        '-n',
+        '5',
       ]);
     });
   });

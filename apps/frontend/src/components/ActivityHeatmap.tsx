@@ -19,6 +19,7 @@ import {
   CommitFilterOptions,
   CommitHeatmapData,
   Commit,
+  TIME,
 } from '@gitray/shared-types';
 import { getHeatmapData } from '../services/api';
 
@@ -103,10 +104,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // memoize start/end dates to avoid unstable deps
-  const startDate = useMemo(
-    () => new Date(Date.now() - 364 * 24 * 60 * 60 * 1000),
-    []
-  );
+  const startDate = useMemo(() => new Date(Date.now() - TIME.DAY * 364), []);
   const endDate = useMemo(() => new Date(), []);
 
   // Count commits per author in that range

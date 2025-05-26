@@ -6,6 +6,7 @@ import { gitService } from '../../src/services/gitService';
 import repositoryRoutes from '../../src/routes/repositoryRoutes';
 import errorHandler from '../../src/middlewares/errorHandler';
 import logger from '../../src/services/logger';
+import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
 
 // Mock des gitService
 jest.mock('../../src/services/gitService', () => ({
@@ -74,6 +75,7 @@ describe('Repository API Extended Tests', () => {
     expect(response.body.error).toBe('An internal error occurred');
     expect(mockCloneRepository).toHaveBeenCalledWith(validRepoUrl);
     expect(mockGetCommits).toHaveBeenCalledWith(tempDir);
+    await runCleanupQueue();
     expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
     expect(logger.error).toHaveBeenCalled();
   });
@@ -109,6 +111,7 @@ describe('Repository API Extended Tests', () => {
     expect(response.body).toEqual({ commits: mockCommits });
     expect(mockCloneRepository).toHaveBeenCalledWith(validRepoUrl);
     expect(mockGetCommits).toHaveBeenCalledWith(tempDir);
+    await runCleanupQueue();
     expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
     expect(errorSpy).toHaveBeenCalled();
 
@@ -149,6 +152,7 @@ describe('Repository API Extended Tests', () => {
 
     const res = await request(app).post('/heatmap').send({ repoUrl });
     expect(res.status).toBe(200);
+    await runCleanupQueue();
     expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
   });
 
@@ -162,6 +166,7 @@ describe('Repository API Extended Tests', () => {
 
     const res = await request(app).post('/full-data').send({ repoUrl });
     expect(res.status).toBe(200);
+    await runCleanupQueue();
     expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
   });
 });

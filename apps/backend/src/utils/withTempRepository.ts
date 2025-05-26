@@ -1,5 +1,5 @@
 import { gitService } from '../services/gitService';
-import logger from '../services/logger';
+import { scheduleCleanup } from './cleanupScheduler';
 
 export async function withTempRepository<T>(
   repoUrl: string,
@@ -12,11 +12,7 @@ export async function withTempRepository<T>(
     return await callback(tempDir);
   } finally {
     if (tempDir) {
-      try {
-        await gitService.cleanupRepository(tempDir);
-      } catch (error) {
-        logger.error('Failed to cleanup repository', { tempDir, error });
-      }
+      scheduleCleanup(tempDir);
     }
   }
 }
