@@ -2,7 +2,6 @@ import simpleGit, { SimpleGit, SimpleGitOptions } from 'simple-git';
 import { mkdtemp, rm } from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import Redis from 'ioredis';
 import {
   parseISO,
   eachDayOfInterval,
@@ -22,12 +21,10 @@ import {
   RepositoryError,
 } from '@gitray/shared-types';
 import logger from '../services/logger';
-import { config } from '../config';
 import { shallowClone } from '../utils/gitUtils';
 
 class GitService {
   private git: SimpleGit;
-  private redis: Redis;
 
   constructor() {
     const gitOptions: Partial<SimpleGitOptions> = {
@@ -37,7 +34,6 @@ class GitService {
     };
 
     this.git = simpleGit(gitOptions);
-    this.redis = new Redis(config.redis);
     logger.info('GitService initialized.');
   }
 
