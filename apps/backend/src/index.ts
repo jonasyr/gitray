@@ -8,7 +8,9 @@ import logger from './services/logger';
 import routes from './routes';
 import repositoryRoutes from './routes/repositoryRoutes';
 import commitRoutes from './routes/commitRoutes';
+import healthRoutes from './routes/healthRoutes';
 import errorHandler from './middlewares/errorHandler';
+import { setupGracefulShutdown } from './utils/gracefulShutdown';
 
 dotenv.config();
 
@@ -26,12 +28,15 @@ app.use(express.json());
 
 // API routes
 app.use('/api', routes);
+app.use('/', healthRoutes);
 app.use('/api/repositories', repositoryRoutes);
 app.use('/api/commits', commitRoutes);
 
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
-app.listen(config.port, () => {
+const server = app.listen(config.port, () => {
   logger.info(`Backend running on port ${config.port}`);
 });
+
+setupGracefulShutdown(server);

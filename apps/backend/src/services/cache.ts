@@ -3,17 +3,40 @@ import { config } from '../config';
 import logger from './logger';
 
 let redis: Redis | null = null;
-try {
-  redis = new Redis(config.redis);
-  redis.on('error', (err) => {
-    logger.warn('Redis error, falling back to in-memory cache', { err });
-    redis?.disconnect();
+let redisHealthy = false;
+
+function initRedis(): void {
+  try {
+    redis = new Redis({
+      ...config.redis,
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+    });
+
+    redis.on('ready', () => {
+      redisHealthy = true;
+      logger.info('Redis connection established');
+    });
+
+    redis.on('error', (err) => {
+      redisHealthy = false;
+      logger.warn('Redis error, falling back to in-memory cache', { err });
+      redis?.disconnect();
+      redis = null;
+    });
+
+    redis.on('end', () => {
+      redisHealthy = false;
+      logger.warn('Redis connection closed');
+    });
+  } catch (err) {
+    logger.warn('Redis init failed, using in-memory cache', { err });
     redis = null;
-  });
-} catch (err) {
-  logger.warn('Redis init failed, using in-memory cache', { err });
-  redis = null;
+    redisHealthy = false;
+  }
 }
+
+initRedis();
 
 const memoryCache = new Map<string, string>();
 
@@ -46,6 +69,19 @@ const cache = {
       return;
     }
     memoryCache.delete(key);
+  },
+  async quit(): Promise<void> {
+    if (redis) {
+      try {
+        await redis.quit();
+      } catch (err) {
+        logger.warn('Error closing Redis connection', { err });
+      }
+    }
+    redisHealthy = false;
+  },
+  isHealthy(): boolean {
+    return redisHealthy || redis === null;
   },
 };
 
