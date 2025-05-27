@@ -24,6 +24,7 @@ Before committing changes, run:
 pnpm lint && pnpm lint:md
 pnpm build
 pnpm test # or pnpm test:frontend / test:backend
+pnpm dev # for example for 5 seconds to check if it runs cleanly, maybe make a request to the url
 ```
 
 CI runs these steps and SonarCloud analysis. All must pass without errors.
