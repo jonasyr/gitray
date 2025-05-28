@@ -81,7 +81,7 @@ const cache = {
     redisHealthy = false;
   },
   isHealthy(): boolean {
-    return redisHealthy || redis === null;
+    return redisHealthy;
   },
 };
 
