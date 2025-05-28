@@ -316,7 +316,3 @@ dist
 # Kompilierte JavaScript-Dateien
 apps/backend/src/**/*.js
 apps/backend/src/**/*.js.map
-
-# Performance
-apps/backend/perf/
-apps/backend/perf/+
