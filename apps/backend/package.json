@@ -9,8 +9,10 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "test:perf": "artillery run perf/load-test.yml",
-    "test:perf:report": "artillery run perf/load-test.yml -o perf/report.json && artillery report --output perf/report.html perf/report.json"
+    "test:perf": "k6 run perf/load-test.ts",
+    "test:perf:report": "k6 run perf/load-test.ts",
+    "test:perf:smoke": "k6 run --vus 5 --duration 30s perf/load-test.ts",
+    "test:perf:stress": "k6 run --env MULTIPLIER=2 perf/load-test.ts"
   },
   "keywords": [],
   "author": "",
