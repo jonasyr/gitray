@@ -81,6 +81,12 @@ const cache = {
     redisHealthy = false;
   },
   isHealthy(): boolean {
+    // If redis is null, it means we're using the memory cache due to init failure or error,
+    // which is considered a healthy operational state for the cache service.
+    if (redis === null) {
+      return true;
+    }
+    // Otherwise, health depends on the Redis connection state.
     return redisHealthy;
   },
 };
