@@ -20,6 +20,7 @@ jest.mock('../../src/services/gitService', () => ({
 jest.mock('../../src/services/logger', () => ({
   __esModule: true,
   default: {
+    info: jest.fn(),
     error: jest.fn(),
   },
 }));

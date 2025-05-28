@@ -1,4 +1,5 @@
 import winston from 'winston';
+import { Request } from 'express';
 
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
@@ -7,6 +8,7 @@ const logger = winston.createLogger({
     winston.format.errors({ stack: true }),
     winston.format.json()
   ),
+  defaultMeta: { service: 'gitray-backend' },
   transports: [
     new winston.transports.Console({
       format: winston.format.combine(
@@ -16,5 +18,14 @@ const logger = winston.createLogger({
     }),
   ],
 });
+
+export const createRequestLogger = (req: Request) => {
+  return logger.child({
+    requestId: req.id,
+    method: req.method,
+    path: req.path,
+    ip: req.ip,
+  });
+};
 
 export default logger;

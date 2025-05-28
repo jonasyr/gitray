@@ -8,7 +8,9 @@
     "build": "tsc",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "test:perf": "artillery run perf/load-test.yml",
+    "test:perf:report": "artillery run perf/load-test.yml -o perf/report.json && artillery report --output perf/report.html perf/report.json"
   },
   "keywords": [],
   "author": "",
