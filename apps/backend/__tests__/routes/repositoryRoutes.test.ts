@@ -121,6 +121,7 @@ describe('Repository API Extended Tests', () => {
   });
 
   test('sollte mit verschiedenen URL-Formaten umgehen können', async () => {
+    // Arrange
     const errorSpy = jest.spyOn(logger, 'error');
 
     // Test with empty string
@@ -134,9 +135,11 @@ describe('Repository API Extended Tests', () => {
     mockCloneRepository.mockResolvedValueOnce('/tmp/valid-repo');
     mockGetCommits.mockResolvedValueOnce([]);
 
+    // Act
     await request(app).post('/').send({ repoUrl: validUrl });
 
     // Assert that cloneRepository was called exactly once, and only with the valid URL
+    // Assert
     expect(mockCloneRepository).toHaveBeenCalledTimes(1);
     expect(mockCloneRepository).toHaveBeenCalledWith(validUrl);
 
@@ -144,6 +147,7 @@ describe('Repository API Extended Tests', () => {
     errorSpy.mockRestore();
   });
   test('should return heatmap data', async () => {
+    // Arrange
     const repoUrl = 'https://github.com/user/repo.git';
     const tempDir = '/tmp/repo';
     mockCloneRepository.mockResolvedValue(tempDir);
@@ -151,13 +155,17 @@ describe('Repository API Extended Tests', () => {
     (gitService.aggregateCommitsByTime as jest.Mock).mockResolvedValue({});
     mockCleanupRepository.mockResolvedValue();
 
+    // Act
     const res = await request(app).post('/heatmap').send({ repoUrl });
+
+    // Assert
     expect(res.status).toBe(200);
     await runCleanupQueue();
     expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
   });
 
   test('should return full data', async () => {
+    // Arrange
     const repoUrl = 'https://github.com/user/repo.git';
     const tempDir = '/tmp/repo';
     mockCloneRepository.mockResolvedValue(tempDir);
@@ -165,7 +173,10 @@ describe('Repository API Extended Tests', () => {
     (gitService.aggregateCommitsByTime as jest.Mock).mockResolvedValue({});
     mockCleanupRepository.mockResolvedValue();
 
+    // Act
     const res = await request(app).post('/full-data').send({ repoUrl });
+
+    // Assert
     expect(res.status).toBe(200);
     await runCleanupQueue();
     expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);

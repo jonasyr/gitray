@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+
+// Main application page orchestrating repository input and visualizations
 import RepoInput from '../components/RepoInput';
 import CommitList from '../components/CommitList';
 import ActivityHeatmap from '../components/ActivityHeatmap';
@@ -13,6 +15,7 @@ const MainPage: React.FC = () => {
   const [showHeatmap, setShowHeatmap] = useState<boolean>(false);
 
   const handleVisualize = async (inputRepoUrl: string) => {
+    // Trigger data fetch for the entered repository URL
     console.log('Visualizing:', inputRepoUrl);
     setRepoUrl(inputRepoUrl);
     setIsLoading(true);

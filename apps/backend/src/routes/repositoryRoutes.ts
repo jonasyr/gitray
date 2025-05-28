@@ -11,9 +11,12 @@ import {
   TIME,
 } from '@gitray/shared-types';
 
+// Router handling repository related endpoints
 const router = express.Router();
 
+// ---------------------------------------------------------------------------
 // Validation rules
+// ---------------------------------------------------------------------------
 const repoUrlValidation = [
   body('repoUrl')
     .isURL({ protocols: ['http', 'https'] })
@@ -23,6 +26,7 @@ const repoUrlValidation = [
   handleValidationErrors,
 ];
 
+// Additional validation for heatmap and full-data routes
 const heatmapValidation = [
   ...repoUrlValidation,
   body('filterOptions')
@@ -33,7 +37,9 @@ const heatmapValidation = [
 ];
 const fullDataValidation = heatmapValidation;
 
-// POST endpoint to get repository data (commits and heatmap in a single call)
+// ---------------------------------------------------------------------------
+// POST endpoint to get repository commit data only
+// ---------------------------------------------------------------------------
 router.post(
   '/',
   repoUrlValidation,
@@ -63,7 +69,9 @@ router.post(
   }
 );
 
+// ---------------------------------------------------------------------------
 // POST endpoint to get commit heatmap data
+// ---------------------------------------------------------------------------
 router.post(
   '/heatmap',
   heatmapValidation,
@@ -98,7 +106,9 @@ router.post(
   }
 );
 
-// NEW ENDPOINT: Get both commits and heatmap data in a single request
+// ---------------------------------------------------------------------------
+// POST endpoint to fetch both commits and heatmap data in a single request
+// ---------------------------------------------------------------------------
 router.post(
   '/full-data',
   fullDataValidation,

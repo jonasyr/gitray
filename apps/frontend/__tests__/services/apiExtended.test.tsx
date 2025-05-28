@@ -38,6 +38,7 @@ describe('API Service extended', () => {
   });
 
   test('getHeatmapData handles network error', async () => {
+    // Arrange
     const error = {
       request: {},
       message: 'Network',
@@ -45,6 +46,7 @@ describe('API Service extended', () => {
     mockedAxios.get.mockRejectedValueOnce(error);
     mockedAxios.isAxiosError.mockReturnValueOnce(true);
 
+    // Act & Assert
     await expect(getHeatmapData('url', 'day')).rejects.toThrow(
       'No response from server'
     );
@@ -79,12 +81,14 @@ describe('API Service extended', () => {
   });
 
   test('getRepositoryFullData handles server error', async () => {
+    // Arrange
     const error = {
       response: { data: { error: 'fail' } },
     } as any;
     mockedAxios.post.mockRejectedValueOnce(error);
     mockedAxios.isAxiosError.mockReturnValueOnce(true);
 
+    // Act & Assert
     await expect(getRepositoryFullData('url')).rejects.toThrow(
       'Server error: fail'
     );

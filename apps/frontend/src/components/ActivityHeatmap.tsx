@@ -8,6 +8,8 @@ import React, {
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 import '../styles/heatmap.css';
+
+// Displays a calendar-style heatmap of commit activity with optional filters
 import Select, {
   StylesConfig,
   GroupBase,

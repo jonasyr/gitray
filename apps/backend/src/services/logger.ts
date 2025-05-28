@@ -1,6 +1,8 @@
 import winston from 'winston';
 import { Request } from 'express';
 
+// Base application logger configured with timestamp and colorized output
+
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: winston.format.combine(
@@ -20,6 +22,7 @@ const logger = winston.createLogger({
 });
 
 export const createRequestLogger = (req: Request) => {
+  // Attach request specific metadata to each log entry
   return logger.child({
     requestId: req.id,
     method: req.method,

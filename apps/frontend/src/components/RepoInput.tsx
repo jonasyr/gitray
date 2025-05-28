@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 
+// Simple input + button for submitting a repository URL
+
 interface RepoInputProps {
   onVisualize: (repoUrl: string) => void;
 }
 
 const RepoInput: React.FC<RepoInputProps> = ({ onVisualize }) => {
   const [repoUrl, setRepoUrl] = useState<string>(
+    // Placeholder text shown on first render
     'https://github.com/username/Repository'
   );
 
@@ -14,6 +17,7 @@ const RepoInput: React.FC<RepoInputProps> = ({ onVisualize }) => {
   };
 
   const handleVisualizeClick = () => {
+    // Bubble the entered repo URL up to the parent component
     onVisualize(repoUrl);
   };
 

@@ -49,8 +49,14 @@ Husky is installed via the `"prepare": "husky install"` script in `package.json`
 
 On each commit, Husky runs:
 
-- `pnpm lint-staged`  
+- `pnpm lint-staged`
   Applies ESLint, Prettier and markdownlint fixes to staged files.
+
+### Coding & Testing Guidelines
+
+- Keep code well-commented, explaining any non-trivial logic.
+- Write tests following the **Arrange – Act – Assert** and **Happy Path** principles.
+  Each phase should be commented in the test body.
 
 ## **1. Zielsetzung und Use Cases**
 

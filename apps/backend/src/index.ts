@@ -16,19 +16,26 @@ import { metricsMiddleware, metricsHandler } from './services/metrics';
 
 dotenv.config();
 
+// Initialize the Express application
 const app = express();
 
+// Security middlewares
 app.use(helmet());
 app.use(cors(config.cors));
 
+// Rate limiting for all API routes
 const limiter = rateLimit(config.rateLimit);
 app.use('/api', limiter);
 
+// Attach request ID and metrics collection
 app.use(requestIdMiddleware);
 app.use(metricsMiddleware);
+// Parse incoming JSON bodies
 app.use(express.json());
 
+// Expose Prometheus metrics endpoint
 app.use('/metrics', metricsHandler);
+// Application routes
 app.use('/api', routes);
 app.use('/', healthRoutes);
 app.use('/api/repositories', repositoryRoutes);
@@ -36,8 +43,10 @@ app.use('/api/commits', commitRoutes);
 
 app.use(errorHandler);
 
+// Start the server
 const server = app.listen(config.port, () => {
   logger.info(`Backend running on port ${config.port}`);
 });
 
+// Handle graceful shutdown signals
 setupGracefulShutdown(server);

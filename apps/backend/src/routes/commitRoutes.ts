@@ -13,8 +13,12 @@ import {
   TIME,
 } from '@gitray/shared-types';
 
+// Router serving commit related data
 const router = express.Router();
 
+// ---------------------------------------------------------------------------
+// Query parameter validation
+// ---------------------------------------------------------------------------
 const repoUrlValidation = [
   query('repoUrl')
     .isURL({ protocols: ['http', 'https'] })
@@ -28,6 +32,9 @@ const repoUrlValidation = [
   handleValidationErrors,
 ];
 
+// ---------------------------------------------------------------------------
+// GET /commits - paginated list of commits
+// ---------------------------------------------------------------------------
 router.get(
   '/',
   repoUrlValidation,
@@ -75,6 +82,9 @@ router.get(
   }
 );
 
+// ---------------------------------------------------------------------------
+// GET /commits/heatmap - aggregated commit activity
+// ---------------------------------------------------------------------------
 router.get(
   '/heatmap',
   repoUrlValidation,

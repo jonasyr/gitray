@@ -7,6 +7,7 @@ import {
 } from 'prom-client';
 import { Request, Response, NextFunction } from 'express';
 
+// Initialize default Prometheus metrics
 collectDefaultMetrics({ register });
 
 export const httpRequestsTotal = new Counter({
@@ -52,11 +53,13 @@ export const tempDirectories = new Gauge({
   help: 'Number of temporary directories currently in use',
 });
 
+// Tracks how many directories are queued for cleanup operations
 export const cleanupQueueSize = new Gauge({
   name: 'cleanup_queue_size',
   help: 'Number of directories waiting for cleanup',
 });
 
+// Express middleware that records metrics about each HTTP request
 export const metricsMiddleware = (
   req: Request,
   res: Response,
@@ -83,6 +86,7 @@ export const metricsMiddleware = (
   next();
 };
 
+// Endpoint that exposes all collected metrics in Prometheus format
 export const metricsHandler = async (_req: Request, res: Response) => {
   res.set('Content-Type', register.contentType);
   res.end(await register.metrics());

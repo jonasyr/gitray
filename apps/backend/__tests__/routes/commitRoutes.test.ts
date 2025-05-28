@@ -116,6 +116,7 @@ describe('commitRoutes / list commits', () => {
   });
 
   test('returns paginated commits', async () => {
+    // Arrange
     const repoUrl = 'https://github.com/user/repo.git';
     const tempDir = '/tmp/repo';
     const commits = [
@@ -131,10 +132,12 @@ describe('commitRoutes / list commits', () => {
     mockGetCommits.mockResolvedValue(commits);
     mockCleanup.mockResolvedValue();
 
+    // Act
     const res = await request(app)
       .get('/api/commits')
       .query({ repoUrl, page: 2, limit: 1 });
 
+    // Assert
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ commits, page: 2, limit: 1 });
     expect(mockGetCommits).toHaveBeenCalledWith(tempDir, { skip: 1, limit: 1 });

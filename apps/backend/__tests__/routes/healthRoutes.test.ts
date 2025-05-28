@@ -26,8 +26,10 @@ describe('Health Routes', () => {
 
   describe('GET /health', () => {
     test('returns healthy status', async () => {
+      // Act
       const res = await request(app).get('/health');
 
+      // Assert
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({
         status: 'healthy',
@@ -39,10 +41,13 @@ describe('Health Routes', () => {
 
   describe('GET /health/detailed', () => {
     test('returns detailed health status when all services are healthy', async () => {
+      // Arrange
       (redis.isHealthy as jest.Mock).mockReturnValue(true);
 
+      // Act
       const res = await request(app).get('/health/detailed');
 
+      // Assert
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({
         status: 'healthy',
@@ -62,10 +67,13 @@ describe('Health Routes', () => {
     });
 
     test('returns unhealthy status when Redis is down', async () => {
+      // Arrange
       (redis.isHealthy as jest.Mock).mockReturnValue(false);
 
+      // Act
       const res = await request(app).get('/health/detailed');
 
+      // Assert
       expect(res.status).toBe(503);
       expect(res.body.status).toBe('unhealthy');
       expect(res.body.checks.redis).toBe('unhealthy');
@@ -74,8 +82,10 @@ describe('Health Routes', () => {
 
   describe('GET /health/live', () => {
     test('returns alive status', async () => {
+      // Act
       const res = await request(app).get('/health/live');
 
+      // Assert
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ status: 'alive' });
     });
@@ -83,19 +93,25 @@ describe('Health Routes', () => {
 
   describe('GET /health/ready', () => {
     test('returns ready when Redis is healthy', async () => {
+      // Arrange
       (redis.isHealthy as jest.Mock).mockReturnValue(true);
 
+      // Act
       const res = await request(app).get('/health/ready');
 
+      // Assert
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ status: 'ready' });
     });
 
     test('returns not ready when Redis is unhealthy', async () => {
+      // Arrange
       (redis.isHealthy as jest.Mock).mockReturnValue(false);
 
+      // Act
       const res = await request(app).get('/health/ready');
 
+      // Assert
       expect(res.status).toBe(503);
       expect(res.body).toEqual({ status: 'not_ready' });
     });

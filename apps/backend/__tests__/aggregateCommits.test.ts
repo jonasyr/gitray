@@ -10,6 +10,7 @@ interface Commit {
 
 describe('aggregateCommitsByTime', () => {
   test('returns 365 buckets with correct counts', async () => {
+    // Arrange
     const commits: Commit[] = [
       {
         sha: 'a',
@@ -34,11 +35,13 @@ describe('aggregateCommitsByTime', () => {
       },
     ];
 
+    // Act
     const result = await gitService.aggregateCommitsByTime(commits, {
       fromDate: '2023-01-01',
       toDate: '2023-12-31',
     });
 
+    // Assert
     expect(result.data).toHaveLength(365);
     const first = result.data.find((b) => b.periodStart === '2023-06-01');
     const second = result.data.find((b) => b.periodStart === '2023-06-02');

@@ -3,6 +3,8 @@ import { gitService } from '../services/gitService';
 import logger from '../services/logger';
 import { cleanupQueueSize, tempDirectories } from '../services/metrics';
 
+// Manages async cleanup of temporary repositories using a simple queue
+
 const queue: string[] = [];
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -13,6 +15,7 @@ export function scheduleCleanup(path: string): void {
 }
 
 export async function runCleanupQueue(): Promise<void> {
+  // Process the cleanup queue in small batches to avoid blocking the event loop
   const batchSize = 10;
   const toCleanup = queue.splice(0, batchSize);
 
@@ -35,6 +38,7 @@ export async function runCleanupQueue(): Promise<void> {
 }
 
 export function startCleanupScheduler(): void {
+  // Begin interval loop if not already running
   if (intervalId) return;
 
   intervalId = setInterval(() => {
@@ -45,6 +49,7 @@ export function startCleanupScheduler(): void {
 }
 
 export function stopCleanupScheduler(): void {
+  // Gracefully stop the interval when shutting down the server
   if (intervalId) {
     clearInterval(intervalId);
     intervalId = null;
@@ -53,10 +58,12 @@ export function stopCleanupScheduler(): void {
 }
 
 export function getQueueStatus(): { size: number; items: string[] } {
+  // Expose queue metrics for testing and monitoring
   return {
     size: queue.length,
     items: [...queue],
   };
 }
 
+// Kick off cleanup processing on startup
 startCleanupScheduler();

@@ -3,10 +3,15 @@ import simpleGit from 'simple-git';
 import redis from '../services/cache';
 import logger from '../services/logger';
 import { isServerShuttingDown } from '../utils/gracefulShutdown';
+
+// Health check endpoints used by Kubernetes and monitoring tools
 import os from 'os';
 
 const router = express.Router();
 
+// ---------------------------------------------------------------------------
+// Liveness and readiness endpoints
+// ---------------------------------------------------------------------------
 router.get('/health', (req: Request, res: Response) => {
   if (isServerShuttingDown()) {
     res.status(503).json({
@@ -23,6 +28,7 @@ router.get('/health', (req: Request, res: Response) => {
   });
 });
 
+// Detailed health information including system stats
 router.get('/health/detailed', async (_req: Request, res: Response) => {
   const checks: Record<string, string> = {
     server: 'healthy',
@@ -76,10 +82,12 @@ router.get('/health/detailed', async (_req: Request, res: Response) => {
   });
 });
 
+// Kubernetes liveness probe
 router.get('/health/live', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'alive' });
 });
 
+// Kubernetes readiness probe
 router.get('/health/ready', (_req: Request, res: Response) => {
   if (isServerShuttingDown() || !redis.isHealthy()) {
     res.status(503).json({ status: 'not_ready' });

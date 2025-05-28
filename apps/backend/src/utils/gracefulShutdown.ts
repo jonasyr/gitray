@@ -3,9 +3,13 @@ import logger from '../services/logger';
 import redis from '../services/cache';
 import { runCleanupQueue } from './cleanupScheduler';
 
+// Handles SIGINT/SIGTERM signals and ensures resources are cleaned up
+
+// Guard to prevent running shutdown sequence multiple times
 let isShuttingDown = false;
 
 export function setupGracefulShutdown(server: Server): void {
+  // Register signal handlers for graceful shutdown
   const shutdown = async (signal: string) => {
     if (isShuttingDown) return;
     isShuttingDown = true;

@@ -1,11 +1,14 @@
 import React from 'react';
 import { Commit } from '@gitray/shared-types';
 
+// Renders a simple table of commit metadata
+
 interface CommitListProps {
   commits: Commit[];
 }
 
 const CommitList: React.FC<CommitListProps> = ({ commits }) => {
+  // Nothing to render if there are no commits
   if (commits.length === 0) {
     return null;
   }
