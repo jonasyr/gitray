@@ -2,7 +2,7 @@
  * Utility functions for working with dates in the heatmap visualization
  */
 
-import { TimePeriod } from '../../../../packages/shared-types/src';
+import { TimePeriod } from '@gitray/shared-types';
 
 /**
  * Formats a date according to the specified time period

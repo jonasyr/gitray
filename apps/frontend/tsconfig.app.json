@@ -15,6 +15,13 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* Path mapping */
+    "baseUrl": ".",
+    "paths": {
+      "@gitray/shared-types": ["../../packages/shared-types/src"],
+      "@gitray/shared-types/*": ["../../packages/shared-types/src/*"]
+    },
+
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,
@@ -23,5 +30,6 @@
     "noUncheckedSideEffectImports": true,
     "types": ["jest", "@testing-library/jest-dom"]
   },
-  "include": ["src", "__tests__"]
+  "include": ["src", "__tests__"],
+  "references": [{ "path": "../../packages/shared-types" }]
 }

@@ -1,13 +1,28 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, {
+  useEffect,
+  useState,
+  useMemo,
+  useRef,
+  useCallback,
+} from 'react';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 import '../styles/heatmap.css';
-import Select from 'react-select';
+
+// Displays a calendar-style heatmap of commit activity with optional filters
+import Select, {
+  StylesConfig,
+  GroupBase,
+  ControlProps,
+  CSSObjectWithLabel,
+  OptionProps,
+} from 'react-select';
 import {
   CommitFilterOptions,
   CommitHeatmapData,
   Commit,
-} from '../../../../packages/shared-types/src';
+  TIME,
+} from '@gitray/shared-types';
 import { getHeatmapData } from '../services/api';
 
 interface ActivityHeatmapProps {
@@ -21,39 +36,56 @@ interface HeatmapValue {
   authors?: string[];
 }
 
-const customStyles = {
-  control: (base: any) => ({
+// add this below HeatmapValue
+interface AuthorOption {
+  value: string;
+  label: string;
+}
+
+const customStyles: StylesConfig<
+  AuthorOption,
+  true,
+  GroupBase<AuthorOption>
+> = {
+  control: (
+    base: CSSObjectWithLabel,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _props: ControlProps<AuthorOption, true, GroupBase<AuthorOption>>
+  ) => ({
     ...base,
     backgroundColor: '#1f2937', // Maintains dark background for the control
   }),
-  placeholder: (base: any) => ({
+  placeholder: (base: CSSObjectWithLabel) => ({
     ...base,
     color: 'white', // Only placeholder text in white
   }),
-  input: (base: any) => ({
+  input: (base: CSSObjectWithLabel) => ({
     ...base,
     color: 'white', // Input text remains white
   }),
-  menu: (base: any) => ({
+  menu: (base: CSSObjectWithLabel) => ({
     ...base,
     backgroundColor: '#1f2937', // Set dropdown menu background to dark
   }),
-  option: (base: any, state: any) => ({
+  option: (
+    base: CSSObjectWithLabel,
+    state: OptionProps<AuthorOption, true, GroupBase<AuthorOption>>
+  ) => ({
     ...base,
     backgroundColor: state.isFocused ? '#374151' : '#1f2937',
     color: 'white',
     cursor: 'pointer',
   }),
-  multiValue: (base: any) => ({
+  multiValue: (base: CSSObjectWithLabel) => ({
     ...base,
     backgroundColor: '#065f46',
     color: 'white',
   }),
-  multiValueLabel: (base: any) => ({
+  multiValueLabel: (base: CSSObjectWithLabel) => ({
     ...base,
     color: 'white',
   }),
-  multiValueRemove: (base: any) => ({
+  multiValueRemove: (base: CSSObjectWithLabel) => ({
     ...base,
     color: 'white',
     ':hover': {
@@ -73,9 +105,9 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
   const [containerWidth, setContainerWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Define the period for the last 365 days
-  const startDate = new Date(Date.now() - 364 * 24 * 60 * 60 * 1000);
-  const endDate = new Date();
+  // memoize start/end dates to avoid unstable deps
+  const startDate = useMemo(() => new Date(Date.now() - TIME.DAY * 364), []);
+  const endDate = useMemo(() => new Date(), []);
 
   // Count commits per author in that range
   const authorCommitCounts = useMemo(() => {
@@ -145,7 +177,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
   // Ref to hold last‐used filters
   const prevFilters = useRef<CommitFilterOptions>({ authors: [] });
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (!repoUrl) return;
     setLoading(true);
     try {
@@ -154,7 +186,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [repoUrl, filterOptions]);
 
   // Only call fetchData when filters changed
   const handleMenuClose = () => {
@@ -164,9 +196,10 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
     }
   };
 
+  // initial fetch on repoUrl change
   useEffect(() => {
     fetchData().catch(console.error);
-  }, [repoUrl]);
+  }, [fetchData]);
 
   const values: HeatmapValue[] = data
     ? data.data.map((b) => ({

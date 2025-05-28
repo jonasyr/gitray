@@ -1,8 +1,10 @@
 import request from 'supertest';
 import express, { Application } from 'express';
-import { CommitHeatmapData } from '../../../../packages/shared-types/src';
+import { CommitHeatmapData } from '@gitray/shared-types';
 import commitRoutes from '../../src/routes/commitRoutes';
 import { gitService } from '../../src/services/gitService';
+import errorHandler from '../../src/middlewares/errorHandler';
+import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
 
 // Mock gitService methods used in the route
 jest.mock('../../src/services/gitService', () => ({
@@ -12,6 +14,10 @@ jest.mock('../../src/services/gitService', () => ({
     aggregateCommitsByTime: jest.fn(),
     cleanupRepository: jest.fn(),
   },
+}));
+jest.mock('../../src/services/cache', () => ({
+  __esModule: true,
+  default: { get: jest.fn(), set: jest.fn() },
 }));
 
 const mockClone = gitService.cloneRepository as jest.MockedFunction<
@@ -34,6 +40,7 @@ describe('commitRoutes /heatmap', () => {
     jest.clearAllMocks();
     app = express();
     app.use('/api/commits', commitRoutes);
+    app.use(errorHandler);
   });
 
   test('returns heatmap data for a valid request', async () => {
@@ -61,6 +68,7 @@ describe('commitRoutes /heatmap', () => {
     expect(mockClone).toHaveBeenCalledWith(repoUrl);
     expect(mockGetCommits).toHaveBeenCalledWith(tempDir);
     expect(mockAggregate).toHaveBeenCalled();
+    await runCleanupQueue();
     expect(mockCleanup).toHaveBeenCalledWith(tempDir);
   });
 
@@ -70,7 +78,8 @@ describe('commitRoutes /heatmap', () => {
 
     // Assert
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/repoUrl/);
+    expect(res.body.error).toBe('Validation failed');
+    expect(res.body.code).toBe('VALIDATION_ERROR');
     expect(mockClone).not.toHaveBeenCalled();
   });
 
@@ -91,6 +100,48 @@ describe('commitRoutes /heatmap', () => {
     expect(res.status).toBe(500);
     expect(mockClone).toHaveBeenCalledWith(repoUrl);
     expect(mockGetCommits).toHaveBeenCalledWith(tempDir);
+    await runCleanupQueue();
+    expect(mockCleanup).toHaveBeenCalledWith(tempDir);
+  });
+});
+
+describe('commitRoutes / list commits', () => {
+  let app: Application;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = express();
+    app.use('/api/commits', commitRoutes);
+    app.use(errorHandler);
+  });
+
+  test('returns paginated commits', async () => {
+    // Arrange
+    const repoUrl = 'https://github.com/user/repo.git';
+    const tempDir = '/tmp/repo';
+    const commits = [
+      {
+        sha: 'a',
+        message: 'msg',
+        date: '2020-01-01T00:00:00Z',
+        authorName: 'User',
+        authorEmail: 'u@example.com',
+      },
+    ];
+    mockClone.mockResolvedValue(tempDir);
+    mockGetCommits.mockResolvedValue(commits);
+    mockCleanup.mockResolvedValue();
+
+    // Act
+    const res = await request(app)
+      .get('/api/commits')
+      .query({ repoUrl, page: 2, limit: 1 });
+
+    // Assert
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ commits, page: 2, limit: 1 });
+    expect(mockGetCommits).toHaveBeenCalledWith(tempDir, { skip: 1, limit: 1 });
+    await runCleanupQueue();
     expect(mockCleanup).toHaveBeenCalledWith(tempDir);
   });
 });

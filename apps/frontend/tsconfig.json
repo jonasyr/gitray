@@ -7,6 +7,7 @@
   "compilerOptions": {
     // … deine bestehenden Optionen …
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "composite": true
   }
 }

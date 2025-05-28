@@ -72,6 +72,8 @@ describe('Main Entry Point', () => {
   });
 
   test('should render App component into root element', () => {
+    // Arrange is handled in beforeEach
+
     // Act
     jest.requireMock('../main.tsx');
 

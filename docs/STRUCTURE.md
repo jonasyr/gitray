@@ -20,3 +20,4 @@ Jede Datei behandelt:
 - **Wichtige Funktionen & Variablen**
 - **Abhängigkeiten**
 - (Optional) Diagramme / Flowcharts für komplexe Abläufe
+- Kommentare im Code beachten; Tests nach dem Arrange–Act–Assert-Muster schreiben

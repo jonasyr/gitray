@@ -37,6 +37,10 @@ pnpm dev
 - **pnpm lint:md**: Lints all Markdown files.
 - **pnpm lint:fix**: Applies fixes to lint errors.
 - **pnpm format**: Formats all files using Prettier.
+- **pnpm clean**: Removes build artifacts and dependencies.
+- **pnpm clean:dist**: Cleans output directories and `.tsbuildinfo` files.
+- **pnpm clean:node_modules**: Deletes all `node_modules` folders and the lockfile.
+- **pnpm rebuild**: Runs `clean`, reinstalls dependencies, and then builds.
 
 ### Pre-commit Checks
 
@@ -45,8 +49,14 @@ Husky is installed via the `"prepare": "husky install"` script in `package.json`
 
 On each commit, Husky runs:
 
-- `pnpm lint-staged`  
+- `pnpm lint-staged`
   Applies ESLint, Prettier and markdownlint fixes to staged files.
+
+### Coding & Testing Guidelines
+
+- Keep code well-commented, explaining any non-trivial logic.
+- Write tests following the **Arrange – Act – Assert** and **Happy Path** principles.
+  Each phase should be commented in the test body.
 
 ## **1. Zielsetzung und Use Cases**
 

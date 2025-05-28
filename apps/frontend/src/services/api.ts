@@ -4,7 +4,7 @@ import {
   TimePeriod,
   CommitFilterOptions,
   CommitHeatmapData,
-} from '../../../../packages/shared-types/src';
+} from '@gitray/shared-types';
 
 // Define the base URL for the API
 // In a production app, this would typically come from an environment variable

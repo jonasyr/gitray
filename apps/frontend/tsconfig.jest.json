@@ -4,7 +4,11 @@
     "allowJs": true,
     "jsx": "react-jsx",
     "esModuleInterop": true,
-    "types": ["jest", "node", "@testing-library/jest-dom"]
+    "types": ["jest", "node", "@testing-library/jest-dom"],
+    "paths": {
+      "@gitray/shared-types": ["../../packages/shared-types/src"],
+      "@gitray/shared-types/*": ["../../packages/shared-types/src/*"]
+    }
   },
   "include": ["src", "**/__tests__/**/*"]
 }

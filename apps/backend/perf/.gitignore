@@ -1,0 +1,13 @@
+# k6 Performance Test Output
+report.html
+report.json
+raw-results.json
+metrics.csv
+*.log
+
+# k6 temporary files
+.k6/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -35,6 +35,17 @@ jest.mock('dotenv', () => ({ config: jest.fn() }));
 jest.mock('../src/routes', () => 'mockedRoutes');
 jest.mock('../src/routes/repositoryRoutes', () => 'mockedRepositoryRoutes');
 jest.mock('../src/middlewares/errorHandler', () => 'mockedErrorHandler');
+jest.mock('express-rate-limit', () =>
+  jest.fn(() => (req: any, res: any, next: any) => next())
+);
+jest.mock('../src/services/logger', () => ({
+  __esModule: true,
+  default: {
+    info: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+  },
+}));
 
 // Mocking process.env
 const originalEnv = process.env;
@@ -106,7 +117,8 @@ describe('Express App Initialization', () => {
 
   test('should log when server starts', async () => {
     // Arrange
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+    const logger = (await import('../src/services/logger')).default;
+    const infoSpy = jest.spyOn(logger, 'info');
 
     // Act - Import the index module to trigger the app initialization
     // Using dynamic import instead of require
@@ -120,9 +132,9 @@ describe('Express App Initialization', () => {
     listenCallback();
 
     // Assert
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('3001'));
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('3001'));
 
     // Clean up
-    consoleSpy.mockRestore();
+    infoSpy.mockRestore();
   });
 });

@@ -5,10 +5,16 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "dev": "pnpm -r run dev",
+    "dev": "pnpm run build:shared-types && pnpm -r run dev",
     "dev:frontend": "pnpm --filter frontend run dev",
     "dev:backend": "pnpm --filter backend run dev",
-    "build": "pnpm --filter shared-types build && pnpm --filter backend build && pnpm --filter frontend build",
+    "build": "pnpm run build:shared-types && pnpm run build:apps",
+    "build:shared-types": "pnpm --filter @gitray/shared-types build",
+    "build:apps": "pnpm --filter backend build && pnpm --filter frontend build",
+    "clean": "pnpm run clean:dist && pnpm run clean:node_modules",
+    "clean:dist": "rimraf 'packages/*/dist' 'apps/*/dist' '**/.tsbuildinfo'",
+    "clean:node_modules": "rimraf 'node_modules' 'packages/*/node_modules' 'apps/*/node_modules' pnpm-lock.yaml",
+    "rebuild": "pnpm run clean && pnpm install && pnpm build",
     "test": "jest --config=jest.config.cjs",
     "test:frontend": "jest --config=jest.config.cjs --selectProjects=frontend",
     "test:backend": "jest --config=jest.config.cjs --selectProjects=backend",
@@ -56,8 +62,5 @@
     "ts-jest": "^29.3.4",
     "typescript": "~5.7.3",
     "typescript-eslint": "^8.32.1"
-  },
-  "dependencies": {
-    "shared-types": "workspace:*"
   }
 }

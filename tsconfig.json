@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "skipLibCheck": true
+  },
+  "references": [
+    { "path": "./packages/shared-types" },
+    { "path": "./apps/backend" },
+    { "path": "./apps/frontend" }
+  ]
+}

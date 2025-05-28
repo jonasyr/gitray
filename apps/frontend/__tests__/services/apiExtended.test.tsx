@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { getHeatmapData, getRepositoryFullData } from '../../src/services/api';
-import { CommitHeatmapData } from '../../../../packages/shared-types/src';
+import { CommitHeatmapData } from '@gitray/shared-types';
 
 jest.mock('axios', () => {
   const mock = {
@@ -37,6 +37,21 @@ describe('API Service extended', () => {
     expect(result).toEqual(heatmap);
   });
 
+  test('getHeatmapData handles network error', async () => {
+    // Arrange
+    const error = {
+      request: {},
+      message: 'Network',
+    };
+    mockedAxios.get.mockRejectedValueOnce(error);
+    mockedAxios.isAxiosError.mockReturnValueOnce(true);
+
+    // Act & Assert
+    await expect(getHeatmapData('url', 'day')).rejects.toThrow(
+      'No response from server'
+    );
+  });
+
   test('getRepositoryFullData posts payload and returns commits and heatmap', async () => {
     // Arrange
     const response = {
@@ -63,5 +78,19 @@ describe('API Service extended', () => {
       commits: [],
       heatmapData: response.data.heatmapData,
     });
+  });
+
+  test('getRepositoryFullData handles server error', async () => {
+    // Arrange
+    const error = {
+      response: { data: { error: 'fail' } },
+    } as any;
+    mockedAxios.post.mockRejectedValueOnce(error);
+    mockedAxios.isAxiosError.mockReturnValueOnce(true);
+
+    // Act & Assert
+    await expect(getRepositoryFullData('url')).rejects.toThrow(
+      'Server error: fail'
+    );
   });
 });

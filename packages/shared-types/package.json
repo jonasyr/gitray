@@ -1,11 +1,20 @@
 {
-  "name": "shared-types",
+  "name": "@gitray/shared-types",
   "version": "1.0.0",
   "scripts": {
-    "build": "rimraf dist && ../../node_modules/.bin/tsc"
+    "build": "rimraf dist && tsc -p tsconfig.json && tsc -p tsconfig.esm.json",
+    "dev": "tsc",
+    "watch": "tsc --watch"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/cjs/index.js",
+  "types": "./dist/cjs/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/cjs/index.d.ts",
+      "require": "./dist/cjs/index.js",
+      "default": "./dist/esm/index.js"
+    }
+  },
   "devDependencies": {
     "rimraf": "^5.0.10",
     "typescript": "~5.7.3"

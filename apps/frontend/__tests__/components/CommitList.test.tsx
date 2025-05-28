@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import CommitList from '../../src/components/CommitList';
-import { Commit } from '../../../../packages/shared-types/src';
+import { Commit } from '@gitray/shared-types';
 
 describe('CommitList Component', () => {
   test('should render commit list with data', () => {

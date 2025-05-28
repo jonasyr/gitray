@@ -2,28 +2,40 @@
 import { render, screen } from '@testing-library/react';
 import App from '../src/App';
 
-describe('App Component (ohne jest-dom)', () => {
-  test('rendert MainPage mit Login- und Signup-Buttons', () => {
+describe('App Component', () => {
+  test('renders main page with login and signup buttons', () => {
+    // Arrange
+
+    // Act: render the component under test
     render(<App />);
-    // getByRole wirft, wenn der Button nicht da ist → Test schlägt fehl
+
+    // Assert: both buttons should be present
     const loginBtn = screen.getByRole('button', { name: /login/i });
     const signupBtn = screen.getByRole('button', { name: /signup/i });
-    // mit Standard-Matcher prüfen wir nur, dass der Wert nicht undefined ist
     expect(loginBtn).toBeDefined();
     expect(signupBtn).toBeDefined();
   });
 
-  test('rendert exakt drei Explanation-Buttons', () => {
+  test('renders exactly three explanation buttons', () => {
+    // Arrange
+
+    // Act
     render(<App />);
+
+    // Assert
     const explainBtns = screen.getAllByRole('button', {
       name: /explanation \d+/i,
     });
     expect(explainBtns.length).toBe(3);
   });
 
-  test('rendert Footer mit dem korrekten Text', () => {
+  test('renders footer with the correct text', () => {
+    // Arrange
+
+    // Act
     render(<App />);
-    // Wir suchen den Text-Content und prüfen, dass er gefunden wird
+
+    // Assert
     const preFooter = screen.getByText(/Nach dem runterscrollen:/i);
     const linkText = screen.getByText(
       /Links: Impressum; Datenschutzerklärung; "Über Uns"-Seite; created by "Namen von uns"/i

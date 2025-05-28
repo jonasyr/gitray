@@ -41,8 +41,10 @@
 - **PascalCase** for interfaces and React components (`Commit`, `App`).
 - **camelCase** for variables and functions (`gitService`, `getCommits`).
 - **kebab-case** for file names (`error-handler.ts`, `package.json`).
-- **src/** roots all source code;  
+- **src/** roots all source code;
   **dist/** holds build outputs.
+- Add concise comments explaining non-trivial logic in both code and tests.
+- Tests follow the Happy Path pattern and include commented Arrange/Act/Assert sections.
 
 ## Other Tools & Libraries
 

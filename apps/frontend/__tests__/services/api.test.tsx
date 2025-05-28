@@ -1,6 +1,6 @@
 import axios, { AxiosRequestConfig } from 'axios';
 import { getWorkspaceCommits } from '../../src/services/api';
-import { Commit } from '../../../../packages/shared-types/src';
+import { Commit } from '@gitray/shared-types';
 
 // Define type for our mock axios
 type MockAxios = {
@@ -40,6 +40,7 @@ describe('API Service', () => {
 
   describe('getWorkspaceCommits', () => {
     it('should fetch commits successfully', async () => {
+      // Arrange
       // Mock data
       const mockCommits: Commit[] = [
         {
@@ -70,11 +71,11 @@ describe('API Service', () => {
       // Create axios instance mock
       mockedAxios.create.mockReturnValue(mockedAxios);
 
-      // Call the function
+      // Act
       const repoUrl = 'https://github.com/test/repo.git';
       const result = await getWorkspaceCommits(repoUrl);
 
-      // Assertions
+      // Assert
       expect(mockedAxios.post).toHaveBeenCalledWith('/api/repositories', {
         repoUrl,
       });
@@ -84,7 +85,7 @@ describe('API Service', () => {
     });
 
     it('should handle API errors correctly', async () => {
-      // Setup mock error response
+      // Arrange: setup mock error response
       const errorResponse = {
         response: {
           data: { error: 'Invalid repository URL' },
@@ -99,7 +100,7 @@ describe('API Service', () => {
       mockedAxios.create.mockReturnValue(mockedAxios);
       mockedAxios.isAxiosError.mockReturnValueOnce(true);
 
-      // Call the function and expect it to throw
+      // Act & Assert
       const repoUrl = 'invalid-url';
       await expect(getWorkspaceCommits(repoUrl)).rejects.toThrow(
         'Server error: Invalid repository URL'
@@ -107,7 +108,7 @@ describe('API Service', () => {
     });
 
     it('should handle network errors', async () => {
-      // Setup mock network error
+      // Arrange: setup mock network error
       const networkError = {
         request: {},
         message: 'Network Error',
@@ -117,7 +118,7 @@ describe('API Service', () => {
       mockedAxios.create.mockReturnValue(mockedAxios);
       mockedAxios.isAxiosError.mockReturnValueOnce(true);
 
-      // Call the function and expect it to throw
+      // Act & Assert
       const repoUrl = 'https://github.com/test/repo.git';
       await expect(getWorkspaceCommits(repoUrl)).rejects.toThrow(
         'No response from server'
@@ -125,14 +126,14 @@ describe('API Service', () => {
     });
 
     it('should handle unexpected errors', async () => {
-      // Setup mock unexpected error
+      // Arrange: setup mock unexpected error
       const unexpectedError = new Error('Unexpected error');
 
       mockedAxios.post.mockRejectedValueOnce(unexpectedError);
       mockedAxios.create.mockReturnValue(mockedAxios);
       mockedAxios.isAxiosError.mockReturnValueOnce(false);
 
-      // Call the function and expect it to throw
+      // Act & Assert
       const repoUrl = 'https://github.com/test/repo.git';
       await expect(getWorkspaceCommits(repoUrl)).rejects.toThrow(
         'An unexpected error occurred'
