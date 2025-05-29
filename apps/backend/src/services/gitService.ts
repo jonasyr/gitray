@@ -108,8 +108,9 @@ class GitService {
         .split('\n')
         .filter(Boolean)
         .map((line) => {
-          const [hash, date, authorName, authorEmail, message] =
-            line.split('|');
+          const parts = line.split('|');
+          const [hash, date, authorName, authorEmail] = parts;
+          const message = parts.slice(4).join('|');
           if (!hash || !date || !authorName || !authorEmail || !message) {
             logger.warn('Skipping commit with missing data', { line });
             return null;
