@@ -201,6 +201,22 @@ describe('GitService Extended Tests', () => {
       expect(warnSpy).toHaveBeenCalledTimes(2);
       warnSpy.mockRestore();
     });
+
+    test('should handle commit messages containing pipe characters', async () => {
+      const localRepoPath = '/tmp/git-visualizer-test';
+      const mockRaw =
+        'abc123|2023-01-01T12:00:00Z|Test User|test@example.com|feat: use A | B';
+      mockGit.raw.mockResolvedValue(mockRaw);
+      const commits = await gitService.getCommits(localRepoPath);
+      expect(commits).toHaveLength(1);
+      expect(commits[0]).toEqual({
+        sha: 'abc123',
+        message: 'feat: use A | B',
+        date: '2023-01-01T12:00:00Z',
+        authorName: 'Test User',
+        authorEmail: 'test@example.com',
+      });
+    });
   });
 
   describe('cleanupRepository error handling', () => {
