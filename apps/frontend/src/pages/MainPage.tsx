@@ -1,12 +1,21 @@
 import React, { useState } from 'react';
 
-// Main application page orchestrating repository input and visualizations
+/**
+ * Main application page that orchestrates repository input and visualizations.
+ * Displays commit information and an optional activity heatmap for the chosen
+ * repository.
+ */
 import RepoInput from '../components/RepoInput';
 import CommitList from '../components/CommitList';
 import ActivityHeatmap from '../components/ActivityHeatmap';
 import { getRepositoryFullData } from '../services/api';
 import { Commit } from '@gitray/shared-types';
 
+/**
+ * Top-level page component combining repository input, commit list and
+ * heatmap visualizations. Maintains the state for the currently loaded
+ * repository.
+ */
 const MainPage: React.FC = () => {
   const [commits, setCommits] = useState<Commit[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -14,6 +23,10 @@ const MainPage: React.FC = () => {
   const [repoUrl, setRepoUrl] = useState<string>('');
   const [showHeatmap, setShowHeatmap] = useState<boolean>(false);
 
+  /**
+   * Fetches repository data when the user requests visualization of a new
+   * repository URL. Errors are captured and displayed to the user.
+   */
   const handleVisualize = async (inputRepoUrl: string) => {
     // Trigger data fetch for the entered repository URL
     console.log('Visualizing:', inputRepoUrl);

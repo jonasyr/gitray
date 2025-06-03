@@ -2,9 +2,15 @@ import Redis from 'ioredis';
 import { config } from '../config';
 import logger from './logger';
 
+// Connection to the Redis instance, falls back to `null` when unavailable
 let redis: Redis | null = null;
+// Tracks whether the Redis connection is currently healthy
 let redisHealthy = false;
-
+/**
+ * Initializes the Redis client and sets up connection event handlers.
+ * When the connection fails, the service gracefully degrades to an
+ * in-memory cache so the application can continue to operate.
+ */
 function initRedis(): void {
   try {
     redis = new Redis({
@@ -41,12 +47,20 @@ initRedis();
 const memoryCache = new Map<string, string>();
 
 const cache = {
+  /**
+   * Retrieves a value from the cache.
+   * Falls back to the in-memory cache when Redis is unavailable.
+   */
   async get(key: string): Promise<string | null> {
     if (redis) {
       return redis.get(key);
     }
     return memoryCache.get(key) ?? null;
   },
+  /**
+   * Stores a value in the cache.
+   * When `mode` and `duration` are provided, the key is set with an expiry.
+   */
   async set(
     key: string,
     value: string,
@@ -63,6 +77,9 @@ const cache = {
     }
     memoryCache.set(key, value);
   },
+  /**
+   * Deletes a key from the cache.
+   */
   async del(key: string): Promise<void> {
     if (redis) {
       await redis.del(key);
@@ -70,6 +87,9 @@ const cache = {
     }
     memoryCache.delete(key);
   },
+  /**
+   * Closes the Redis connection if one exists.
+   */
   async quit(): Promise<void> {
     if (redis) {
       try {
@@ -80,13 +100,14 @@ const cache = {
     }
     redisHealthy = false;
   },
+  /**
+   * Determines whether the cache backend is healthy. When Redis is disabled
+   * or has failed to initialize, the in-memory cache is considered healthy.
+   */
   isHealthy(): boolean {
-    // If redis is null, it means we're using the memory cache due to init failure or error,
-    // which is considered a healthy operational state for the cache service.
     if (redis === null) {
       return true;
     }
-    // Otherwise, health depends on the Redis connection state.
     return redisHealthy;
   },
 };

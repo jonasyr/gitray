@@ -96,6 +96,11 @@ const customStyles: StylesConfig<
   }),
 };
 
+/**
+ * Component that renders a calendar-style heatmap of commit activity.
+ * Users can filter by author and the heatmap dynamically adjusts to the
+ * container size.
+ */
 const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
   repoUrl,
   commits,

@@ -85,6 +85,10 @@ function generateRequestId(): string {
   return `k6-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
+/**
+ * Performs a simple health check against the backend's `/health` endpoint.
+ * Used by k6 to verify the service is running before executing other tests.
+ */
 export function healthCheck() {
   let res;
   try {
@@ -113,6 +117,10 @@ export function healthCheck() {
   sleep(1);
 }
 
+/**
+ * Requests the commit list for a randomly selected repository.
+ * Measures request duration and records cache hit metrics.
+ */
 export function getRepositoryCommits() {
   const repoUrl = getRandomRepo();
   const start = Date.now();
@@ -156,6 +164,10 @@ export function getRepositoryCommits() {
   sleep(Math.random() * 2 + 1);
 }
 
+/**
+ * Requests aggregated heatmap data for a randomly chosen repository.
+ * Tracks cache performance and validates the returned structure.
+ */
 export function getHeatmapData() {
   const repoUrl = getRandomRepo();
   const url = `${BASE_URL}/api/commits/heatmap?repoUrl=${encodeURIComponent(repoUrl)}`;
@@ -186,6 +198,10 @@ export function getHeatmapData() {
   sleep(Math.random() * 2 + 1);
 }
 
+/**
+ * Fetches both commit and heatmap data in a single request. Useful for
+ * exercising the most expensive backend endpoint under load.
+ */
 export function getFullData() {
   const repoUrl = getRandomRepo();
   const start = Date.now();
@@ -226,6 +242,10 @@ export function getFullData() {
   sleep(Math.random() * 3 + 2);
 }
 
+/**
+ * Generates HTML and JSON summaries after a k6 run.
+ * The reports are saved to the `perf` directory.
+ */
 export function handleSummary(data: any) {
   return {
     'perf/report.html': htmlReport(data),
