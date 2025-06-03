@@ -4,9 +4,10 @@
 <!-- markdownlint-disable MD022 -->
 <!-- markdownlint-disable MD003 -->
 <!-- markdownlint-disable MD013 -->
+
 ---
 name: Best Practice Issue Template
-about: Optimiertes Template für Features, Bugs, Enhancements und Tasks
+about: Optimized template for features, bugs, enhancements and tasks
 title: 'type(scope): brief description'
 labels: 'needs-triage'
 assignees: ''
@@ -14,110 +15,110 @@ assignees: ''
 
 ## 🎯 Issue Type
 
-<!-- Wähle den Typ aus und lösche die anderen -->
-- [ ] 🐛 **Bug** - Etwas funktioniert nicht wie erwartet
-- [ ] ✨ **Feature** - Neue Funktionalität
-- [ ] 🔧 **Enhancement** - Verbesserung bestehender Funktionalität
-- [ ] 📚 **Documentation** - Dokumentation fehlt oder ist unvollständig
-- [ ] 🧹 **Chore** - Wartung, Refactoring, Tooling
-- [ ] ❓ **Question** - Frage zur Implementierung oder Nutzung
+<!-- Select the type and delete the others -->
+- [ ] 🐛 **Bug** - Something doesn't work as expected
+- [ ] ✨ **Feature** - New functionality
+- [ ] 🔧 **Enhancement** - Improvement of existing functionality
+- [ ] 📚 **Documentation** - Documentation missing or incomplete
+- [ ] 🧹 **Chore** - Maintenance, refactoring, tooling
+- [ ] ❓ **Question** - Question about implementation or usage
 
-## 📋 Beschreibung
+## 📋 Description
 
-### Problem/Bedarf
-<!-- Beschreibe klar und präzise das Problem oder den Bedarf -->
+### Problem/Need
+<!-- Describe clearly and precisely the problem or need -->
 
-### Erwartetes Verhalten
-<!-- Was soll passieren? Wie sollte es funktionieren? -->
+### Expected Behavior
+<!-- What should happen? How should it work? -->
 
-### Aktuelles Verhalten
-<!-- Was passiert momentan? (nur bei Bugs/Enhancements) -->
+### Current Behavior
+<!-- What happens currently? (only for bugs/enhancements) -->
 
-## 🔄 Schritte zur Reproduktion
+## 🔄 Steps to Reproduce
 
-<!-- Detaillierte Schritte, um das Problem nachzuvollziehen (bei Bugs) oder um das Feature zu testen -->
+<!-- Detailed steps to reproduce the problem (for bugs) or to test the feature -->
 
-1. Gehe zu...
-2. Klicke auf...
-3. Führe aus...
-4. Beobachte...
+1. Go to...
+2. Click on...
+3. Execute...
+4. Observe...
 
 ## 🎨 Mockups/Screenshots
 
-<!-- Falls vorhanden, füge Bilder, Mockups oder Code-Beispiele hinzu -->
+<!-- If available, add images, mockups or code examples -->
 
 ```plain
-Code-Beispiel oder Screenshot hier
+Code example or screenshot here
 ```
 
-## 🧪 Akzeptanzkriterien
+## 🧪 Acceptance Criteria
 
-<!-- Definition of Done - Was muss erfüllt sein, damit das Issue als erledigt gilt? -->
+<!-- Definition of Done - What must be fulfilled for the issue to be considered completed? -->
 
-- [ ] Funktionalität implementiert und getestet
+- [ ] Functionality implemented and tested
 - [ ] Code reviewed
-- [ ] Dokumentation aktualisiert (falls notwendig)
-- [ ] Tests hinzugefügt/angepasst
-- [ ] Manuell getestet in relevanten Browsern/Umgebungen
-- [ ] In dev-Branch gemerged
+- [ ] Documentation updated (if necessary)
+- [ ] Tests added/adapted
+- [ ] Manually tested in relevant browsers/environments
+- [ ] Merged into dev branch
 
-## 🛠 Technische Details
+## 🛠 Technical Details
 
-### Betroffene Dateien/Komponenten
-<!-- Wo im Code ist die Änderung notwendig? -->
+### Affected Files/Components
+<!-- Where in the code is the change necessary? -->
 
-### Abhängigkeiten
-<!-- Gibt es andere Issues oder PRs, die zuerst abgeschlossen werden müssen? -->
+### Dependencies
+<!-- Are there other issues or PRs that need to be completed first? -->
 
 ### Breaking Changes
-- [ ] Ja, diese Änderung könnte bestehende Funktionalität beeinträchtigen
-- [ ] Nein, rückwärtskompatible Änderung
+- [ ] Yes, this change could affect existing functionality
+- [ ] No, backward compatible change
 
-## 🏷 Kategorisierung
+## 🏷 Categorization
 
 ### Scope
-- [ ] `scope:frontend` - Frontend/UI Änderungen
-- [ ] `scope:backend` - Backend/API Änderungen  
-- [ ] `scope:shared` - Geteilte Typen/Utils
-- [ ] `scope:devops` - CI/CD, Deployment, Tools
-- [ ] `scope:docs` - Dokumentation
+- [ ] `scope:frontend` - Frontend/UI changes
+- [ ] `scope:backend` - Backend/API changes  
+- [ ] `scope:shared` - Shared types/utils
+- [ ] `scope:devops` - CI/CD, deployment, tools
+- [ ] `scope:docs` - Documentation
 
 ### Priority  
-- [ ] `prio:critical` - Produktions-kritischer Bug
-- [ ] `prio:high` - Wichtiges Feature/Bug
-- [ ] `prio:medium` - Normale Priorität
+- [ ] `prio:critical` - Production-critical bug
+- [ ] `prio:high` - Important feature/bug
+- [ ] `prio:medium` - Normal priority
 - [ ] `prio:low` - Nice-to-have
 
 ### Effort
-- [ ] `effort:small` - < 2 Stunden
-- [ ] `effort:medium` - 2-8 Stunden  
-- [ ] `effort:large` - 1-3 Tage
-- [ ] `effort:xl` - > 3 Tage
+- [ ] `effort:small` - < 2 hours
+- [ ] `effort:medium` - 2-8 hours  
+- [ ] `effort:large` - 1-3 days
+- [ ] `effort:xl` - > 3 days
 
-## 🌍 Umgebung
+## 🌍 Environment
 
-<!-- Falls relevant für Bugs -->
+<!-- If relevant for bugs -->
 
-- **OS**: [z.B. Windows 11, macOS 14, Ubuntu 22.04]
-- **Browser**: [z.B. Chrome 120, Firefox 121, Safari 17]
-- **Node Version**: [z.B. 20.10.0]
-- **Repo Branch**: [z.B. main, dev, feature/xyz]
+- **OS**: [e.g. Windows 11, macOS 14, Ubuntu 22.04]
+- **Browser**: [e.g. Chrome 120, Firefox 121, Safari 17]
+- **Node Version**: [e.g. 20.10.0]
+- **Repo Branch**: [e.g. main, dev, feature/xyz]
 
-## 🔗 Verwandte Issues/PRs
+## 🔗 Related Issues/PRs
 
-<!-- Links zu anderen Issues oder Pull Requests -->
+<!-- Links to other issues or pull requests -->
 
 - Relates to #
 - Blocks #  
 - Blocked by #
 
-## 📝 Zusätzliche Notizen
+## 📝 Additional Notes
 
-<!-- Weitere Informationen, Überlegungen, alternative Ansätze -->
+<!-- Additional information, considerations, alternative approaches -->
 
-## ✅ Checklist für Reviewer
+## ✅ Checklist for Reviewer
 
-- [ ] Issue ist klar und verständlich formuliert
-- [ ] Akzeptanzkriterien sind messbar
-- [ ] Labels und Priority sind gesetzt
-- [ ] Technische Machbarkeit ist gegeben
+- [ ] Issue is clearly and understandably formulated
+- [ ] Acceptance criteria are measurable
+- [ ] Labels and priority are set
+- [ ] Technical feasibility is given

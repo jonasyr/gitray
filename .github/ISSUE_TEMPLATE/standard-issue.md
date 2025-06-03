@@ -7,9 +7,7 @@
 
 ---
 name: Standard Issue
-about: |
-Verwende dieses Template für alle typischen Aufgaben wie
-Features, Bugs, Refactoring etc.
+about: Verwende dieses Template für alle typischen Aufgaben wie Features, Bugs, Refactoring etc.
 title: 'type (scope): <Kurzbeschreibung>'
 labels: ''
 assignees: ''
