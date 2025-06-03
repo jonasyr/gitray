@@ -40,6 +40,7 @@ interface HeatmapValue {
 interface AuthorOption {
   value: string;
   label: string;
+  count?: number;
 }
 
 const customStyles: StylesConfig<
@@ -121,13 +122,16 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
     return counts;
   }, [commits, startDate, endDate]);
 
-  // Build dropdown options including the count
+  // Build dropdown options including the count and sort by commit count
   const authorOptions = useMemo(
     () =>
-      Array.from(new Set(commits.map((c) => c.authorName))).map((a) => ({
-        value: a,
-        label: `${a} (${authorCommitCounts.get(a) || 0})`,
-      })),
+      Array.from(new Set(commits.map((c) => c.authorName)))
+        .map((a) => ({
+          value: a,
+          label: `${a} (${authorCommitCounts.get(a) || 0})`,
+          count: authorCommitCounts.get(a) || 0,
+        }))
+        .sort((a, b) => b.count - a.count),
     [commits, authorCommitCounts]
   );
 
