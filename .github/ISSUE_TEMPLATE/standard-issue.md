@@ -1,8 +1,11 @@
 <!-- markdownlint-disable MD025 -->
+<!-- markdownlint-disable MD032 -->
 <!-- markdownlint-disable MD041 -->
+<!-- markdownlint-disable MD022 -->
+<!-- markdownlint-disable MD003 -->
+<!-- markdownlint-disable MD013 -->
 
-## <!-- markdownlint-disable MD003 -->
-
+---
 name: Standard Issue
 about: |
 Verwende dieses Template für alle typischen Aufgaben wie
@@ -10,7 +13,6 @@ Features, Bugs, Refactoring etc.
 title: 'type (scope): <Kurzbeschreibung>'
 labels: ''
 assignees: ''
-
 ---
 
 # 🧾 Beschreibung
