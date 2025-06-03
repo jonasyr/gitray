@@ -1,12 +1,19 @@
 import React from 'react';
 import { Commit } from '@gitray/shared-types';
 
-// Renders a simple table of commit metadata
+/**
+ * Displays a table listing commit metadata such as SHA, author and message.
+ * If no commits are provided, nothing is rendered.
+ */
 
 interface CommitListProps {
   commits: Commit[];
 }
 
+/**
+ * Presents commit data in a table layout. Designed to be lightweight and
+ * reusable across pages displaying commit lists.
+ */
 const CommitList: React.FC<CommitListProps> = ({ commits }) => {
   // Nothing to render if there are no commits
   if (commits.length === 0) {

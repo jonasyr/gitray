@@ -1,11 +1,19 @@
 import React, { useState } from 'react';
 
-// Simple input + button for submitting a repository URL
+/**
+ * Input box allowing the user to enter a repository URL and trigger the
+ * visualization of that repository.
+ */
 
 interface RepoInputProps {
   onVisualize: (repoUrl: string) => void;
 }
 
+/**
+ * Small form used on the main page for repository submission. It manages its
+ * own input state and notifies the parent when the user clicks the
+ * "Visualize" button.
+ */
 const RepoInput: React.FC<RepoInputProps> = ({ onVisualize }) => {
   const [repoUrl, setRepoUrl] = useState<string>(
     // Placeholder text shown on first render
