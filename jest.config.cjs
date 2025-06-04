@@ -40,6 +40,12 @@ module.exports = {
       resetMocks: true,
       restoreMocks: true,
       maxWorkers: 1,
+      // Memory management - use valid Jest options
+      workerIdleMemoryLimit: '256MB',
+      // Force Jest to exit
+      forceExit: true,
+      // Detect open handles
+      detectOpenHandles: true,
     },
     {
       displayName: 'frontend',
