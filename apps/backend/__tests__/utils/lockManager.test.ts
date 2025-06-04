@@ -3,14 +3,8 @@
 import { jest } from '@jest/globals';
 import fs from 'fs/promises';
 import path from 'path';
-import {
-  withKeyLock,
-  getLockMetrics,
-  getActiveLocks,
-  shutdownLockManager,
-} from '../../src/utils/lockManager';
 
-// Mock dependencies
+// Mock dependencies before importing the module
 jest.mock('fs/promises');
 jest.mock('../../src/services/logger', () => ({
   __esModule: true,
@@ -22,7 +16,6 @@ jest.mock('../../src/services/logger', () => ({
   },
 }));
 
-// Mock config
 jest.mock('../../src/config', () => ({
   lockConfig: {
     lockDir: '/tmp/test-locks',
@@ -35,31 +28,50 @@ jest.mock('../../src/config', () => ({
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 
+// Import after mocking
+let withKeyLock: any;
+let getLockMetrics: any;
+let getActiveLocks: any;
+let shutdownLockManager: any;
+
 describe('Lock Manager', () => {
   let mockFileHandle: any;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
     jest.useFakeTimers();
 
-    // Mock file handle
+    // Reset module cache to get fresh instance
+    jest.resetModules();
+
+    // Create mock file handle with proper methods
     mockFileHandle = {
-      writeFile: jest.fn(),
-      close: jest.fn(),
+      writeFile: jest.fn().mockImplementation(() => Promise.resolve()),
+      close: jest.fn().mockImplementation(() => Promise.resolve()),
     };
 
-    // Mock filesystem operations
-    mockFs.mkdir.mockResolvedValue(undefined);
-    mockFs.open.mockResolvedValue(mockFileHandle);
-    mockFs.unlink.mockResolvedValue(undefined);
-    mockFs.readdir.mockResolvedValue([]);
-    mockFs.stat.mockResolvedValue({
-      mtimeMs: Date.now() - 1000,
-    } as any);
+    // Use mockImplementation to ensure fs.open returns our mock handle
+    mockFs.mkdir.mockImplementation(() => Promise.resolve(undefined as any));
+    mockFs.open.mockImplementation(() => Promise.resolve(mockFileHandle));
+    mockFs.unlink.mockImplementation(() => Promise.resolve(undefined as any));
+    mockFs.readdir.mockImplementation(() => Promise.resolve([]));
+    mockFs.stat.mockImplementation(() =>
+      Promise.resolve({
+        mtimeMs: Date.now() - 1000,
+      } as any)
+    );
+
+    // Import fresh instances AFTER setting up mocks
+    const lockManagerModule = await import('../../src/utils/lockManager');
+    withKeyLock = lockManagerModule.withKeyLock;
+    getLockMetrics = lockManagerModule.getLockMetrics;
+    getActiveLocks = lockManagerModule.getActiveLocks;
+    shutdownLockManager = lockManagerModule.shutdownLockManager;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     jest.useRealTimers();
+    await shutdownLockManager();
   });
 
   describe('Basic Lock Operations - Happy Path', () => {
@@ -80,7 +92,10 @@ describe('Lock Manager', () => {
       };
 
       // Act
-      const result = await withKeyLock(lockKey, testFunction);
+      const resultPromise = withKeyLock(lockKey, testFunction);
+      // Advance timers to allow setTimeout to complete
+      jest.advanceTimersByTime(100);
+      const result = await resultPromise;
 
       // Assert
       expect(result).toBe('success');
@@ -107,7 +122,9 @@ describe('Lock Manager', () => {
       };
 
       // Act
-      const result = await withKeyLock(lockKey, asyncTestFunction);
+      const resultPromise = withKeyLock(lockKey, asyncTestFunction);
+      jest.advanceTimersByTime(100);
+      const result = await resultPromise;
 
       // Assert
       expect(result).toEqual({ status: 'done', value: 'completed' });
@@ -136,7 +153,6 @@ describe('Lock Manager', () => {
       // Arrange
       const lockKey = 'coalesce-test';
       let executionCount = 0;
-      let concurrentResults: any[] = [];
 
       const testFunction = async () => {
         executionCount++;
@@ -144,23 +160,20 @@ describe('Lock Manager', () => {
         return `execution-${executionCount}`;
       };
 
-      // Act - Start multiple concurrent requests
+      // Act
       const promises = [
         withKeyLock(lockKey, testFunction),
         withKeyLock(lockKey, testFunction),
         withKeyLock(lockKey, testFunction),
       ];
 
-      concurrentResults = await Promise.all(promises);
+      jest.advanceTimersByTime(200);
+      const results = await Promise.all(promises);
 
-      // Assert - Function should only execute once, all requests get same result
+      // Assert
       expect(executionCount).toBe(1);
-      expect(concurrentResults).toEqual([
-        'execution-1',
-        'execution-1',
-        'execution-1',
-      ]);
-      expect(mockFs.open).toHaveBeenCalledTimes(1); // Only one lock acquired
+      expect(results).toEqual(['execution-1', 'execution-1', 'execution-1']);
+      expect(mockFs.open).toHaveBeenCalledTimes(1);
     });
 
     test('should handle error propagation in coalesced requests', async () => {
@@ -179,6 +192,7 @@ describe('Lock Manager', () => {
         withKeyLock(lockKey, errorFunction),
       ];
 
+      jest.advanceTimersByTime(100);
       await expect(Promise.all(promises)).rejects.toThrow('Test error');
     });
 
@@ -208,7 +222,7 @@ describe('Lock Manager', () => {
       expect(execution2).toBe(true);
       expect(result1).toBe('result1');
       expect(result2).toBe('result2');
-      expect(mockFs.open).toHaveBeenCalledTimes(2); // Two different locks
+      expect(mockFs.open).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -225,7 +239,7 @@ describe('Lock Manager', () => {
       // Assert
       expect(metrics.acquisitions).toBe(1);
       expect(metrics.averageWaitTime).toBeGreaterThanOrEqual(0);
-      expect(metrics.currentLocks).toBe(0); // Should be released
+      expect(metrics.currentLocks).toBe(0);
     });
 
     test('should track multiple lock operations', async () => {
@@ -266,7 +280,6 @@ describe('Lock Manager', () => {
         hostname: expect.any(String),
       });
 
-      // Locks should be released after execution
       const currentActiveLocks = getActiveLocks();
       expect(currentActiveLocks).toHaveLength(0);
     });
@@ -280,7 +293,6 @@ describe('Lock Manager', () => {
 
       mockFs.readdir.mockResolvedValue(staleLockFiles as any);
       mockFs.stat.mockImplementation(() => {
-        // Simulate stale locks (older than staleLockAgeMs)
         return Promise.resolve({
           mtimeMs: currentTime - 60000, // 60 seconds old (stale)
         } as any);
@@ -292,7 +304,7 @@ describe('Lock Manager', () => {
 
       // Assert
       expect(mockFs.readdir).toHaveBeenCalledWith('/tmp/test-locks');
-      expect(mockFs.unlink).toHaveBeenCalledTimes(2); // Both stale locks removed
+      expect(mockFs.unlink).toHaveBeenCalledTimes(2);
     });
 
     test('should preserve recent locks during cleanup', async () => {
@@ -314,7 +326,7 @@ describe('Lock Manager', () => {
       await jest.runAllTimersAsync();
 
       // Assert
-      expect(mockFs.unlink).toHaveBeenCalledTimes(1); // Only stale lock removed
+      expect(mockFs.unlink).toHaveBeenCalledTimes(1);
       expect(mockFs.unlink).toHaveBeenCalledWith(
         path.join('/tmp/test-locks', 'stale-lock')
       );
@@ -327,12 +339,9 @@ describe('Lock Manager', () => {
       const lockKey = 'mkdir-test';
       const testFunction = async () => 'success';
 
-      // First call fails, second succeeds
-      mockFs.mkdir
-        .mockRejectedValueOnce(new Error('Permission denied'))
-        .mockResolvedValueOnce(undefined);
+      mockFs.mkdir.mockRejectedValueOnce(new Error('Permission denied'));
 
-      // Act & Assert - Should not throw
+      // Act & Assert
       await expect(withKeyLock(lockKey, testFunction)).rejects.toThrow();
     });
 
@@ -341,10 +350,9 @@ describe('Lock Manager', () => {
       const lockKey = 'cleanup-error-test';
       const testFunction = async () => 'success';
 
-      // Lock creation succeeds, but cleanup fails
       mockFs.unlink.mockRejectedValue(new Error('File in use'));
 
-      // Act - Should complete successfully despite cleanup error
+      // Act
       const result = await withKeyLock(lockKey, testFunction);
 
       // Assert
@@ -365,7 +373,6 @@ describe('Lock Manager', () => {
         'Function failed'
       );
 
-      // Lock should still be cleaned up
       expect(mockFileHandle.close).toHaveBeenCalled();
       expect(mockFs.unlink).toHaveBeenCalled();
     });
@@ -378,17 +385,17 @@ describe('Lock Manager', () => {
       const customTimeout = 2000;
       const testFunction = async () => 'success';
 
-      // Simulate lock already exists (should trigger timeout logic)
       const lockExistsError = new Error('File exists');
       (lockExistsError as any).code = 'EEXIST';
       mockFs.open.mockRejectedValue(lockExistsError);
 
-      // Act & Assert - Should timeout after custom duration
-      await expect(
-        withKeyLock(lockKey, testFunction, customTimeout)
-      ).rejects.toThrow();
+      // Act & Assert
+      jest.setTimeout(3000); // Increase test timeout
 
-      // Note: In real implementation, we'd check timing, but for unit test we verify timeout parameter usage
+      const promise = withKeyLock(lockKey, testFunction, customTimeout);
+      jest.advanceTimersByTime(customTimeout + 100);
+
+      await expect(promise).rejects.toThrow(/timeout/i);
     });
 
     test('should use default timeout when not provided', async () => {
@@ -396,7 +403,7 @@ describe('Lock Manager', () => {
       const lockKey = 'default-timeout-test';
       const testFunction = async () => 'success';
 
-      // Act - Should use default timeout from config (5000ms)
+      // Act
       const result = await withKeyLock(lockKey, testFunction);
 
       // Assert
@@ -414,8 +421,6 @@ describe('Lock Manager', () => {
 
       // Assert
       expect(clearIntervalSpy).toHaveBeenCalled();
-
-      // Should run final cleanup
       expect(mockFs.readdir).toHaveBeenCalled();
     });
 
@@ -424,7 +429,6 @@ describe('Lock Manager', () => {
       const lockKey = 'shutdown-test';
       const testFunction = async () => 'success';
 
-      // Create some lock activity
       await withKeyLock(lockKey, testFunction);
 
       // Act
@@ -456,11 +460,14 @@ describe('Lock Manager', () => {
         return 'process2-result';
       };
 
-      // Act - Simulate concurrent access (in real scenario, first would get lock)
-      const [result1, result2] = await Promise.all([
+      // Act
+      const promises = Promise.all([
         withKeyLock(lockKey, process1Function),
         withKeyLock(lockKey, process2Function),
       ]);
+
+      jest.advanceTimersByTime(200);
+      const [result1, result2] = await promises;
 
       // Assert - Both should complete with coalescing
       expect(process1Complete).toBe(true);
