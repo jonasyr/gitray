@@ -114,7 +114,7 @@ importers:
         version: 3.17.0
       zod:
         specifier: ^3.25.28
-        version: 3.25.49
+        version: 3.25.51
     devDependencies:
       '@types/cors':
         specifier: ^2.8.18
@@ -2592,10 +2592,10 @@ packages:
       }
     engines: { node: '>=10' }
 
-  caniuse-lite@1.0.30001720:
+  caniuse-lite@1.0.30001721:
     resolution:
       {
-        integrity: sha512-Ec/2yV2nNPwb4DnTANEV99ZWwm3ZWfdlfkQbWSDDt+PsXEVYwlhPH8tdMaPunYTKKmz7AnHi2oNEi1GcmKCD8g==,
+        integrity: sha512-cOuvmUVtKrtEaoKiO0rSc29jcjwMwX5tOHDy4MgVFEWiUXj4uBMJkwI8MDySkgXidpMiHUcviogAvFi4pA2hDQ==,
       }
 
   chalk@3.0.0:
@@ -3158,10 +3158,10 @@ packages:
     engines: { node: '>=0.10.0' }
     hasBin: true
 
-  electron-to-chromium@1.5.162:
+  electron-to-chromium@1.5.164:
     resolution:
       {
-        integrity: sha512-hQA+Zb5QQwoSaXJWEAGEw1zhk//O7qDzib05Z4qTqZfNju/FAkrm5ZInp0JbTp4Z18A6bilopdZWEYrFSsfllA==,
+        integrity: sha512-TXBrF2aZenRjY3wbj5Yc0mZn43lMiSHNkzwPkIxx+vWUB35Kf8Gm/uOYmOJFNQ7SUwWAinbfxX73ANIud65wSA==,
       }
 
   emittery@0.13.1:
@@ -7298,10 +7298,10 @@ packages:
       }
     engines: { node: '>=10' }
 
-  zod@3.25.49:
+  zod@3.25.51:
     resolution:
       {
-        integrity: sha512-JMMPMy9ZBk3XFEdbM3iL1brx4NUSejd6xr3ELrrGEfGb355gjhiAWtG3K5o+AViV/3ZfkIrCzXsZn6SbLwTR8Q==,
+        integrity: sha512-TQSnBldh+XSGL+opiSIq0575wvDPqu09AqWe1F7JhUMKY+M91/aGlK4MhpVNO7MgYfHcVCB1ffwAUTJzllKJqg==,
       }
 
 snapshots:
@@ -8670,7 +8670,7 @@ snapshots:
   autoprefixer@10.4.21(postcss@8.5.4):
     dependencies:
       browserslist: 4.25.0
-      caniuse-lite: 1.0.30001720
+      caniuse-lite: 1.0.30001721
       fraction.js: 4.3.7
       normalize-range: 0.1.2
       picocolors: 1.1.1
@@ -8789,8 +8789,8 @@ snapshots:
 
   browserslist@4.25.0:
     dependencies:
-      caniuse-lite: 1.0.30001720
-      electron-to-chromium: 1.5.162
+      caniuse-lite: 1.0.30001721
+      electron-to-chromium: 1.5.164
       node-releases: 2.0.19
       update-browserslist-db: 1.1.3(browserslist@4.25.0)
 
@@ -8829,7 +8829,7 @@ snapshots:
 
   camelcase@6.3.0: {}
 
-  caniuse-lite@1.0.30001720: {}
+  caniuse-lite@1.0.30001721: {}
 
   chalk@3.0.0:
     dependencies:
@@ -9136,7 +9136,7 @@ snapshots:
     dependencies:
       jake: 10.9.2
 
-  electron-to-chromium@1.5.162: {}
+  electron-to-chromium@1.5.164: {}
 
   emittery@0.13.1: {}
 
@@ -12068,4 +12068,4 @@ snapshots:
 
   yocto-queue@0.1.0: {}
 
-  zod@3.25.49: {}
+  zod@3.25.51: {}

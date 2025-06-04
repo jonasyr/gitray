@@ -1,5 +1,8 @@
 /** @type {import('jest').Config} */
 module.exports = {
+  // Force Jest to exit after tests complete (handles hanging background timers)
+  forceExit: true,
+  
   collectCoverageFrom: [
     '<rootDir>/apps/*/src/**/*.{ts,tsx}',
     '!<rootDir>/apps/*/src/**/*.d.ts',
@@ -23,15 +26,20 @@ module.exports = {
       moduleDirectories: ['node_modules', 'node_modules', '../../node_modules'],
       moduleFileExtensions: ['ts', 'tsx', 'js', 'json', 'node'],
       rootDir: './',
-      testPathIgnorePatterns: ['/node_modules/'],
+      testPathIgnorePatterns: ['/node_modules/', '/dist/', '\\.d\\.ts$'],
       moduleNameMapper: {
         '^@gitray/shared-types$': '<rootDir>/packages/shared-types/src/index.ts',
       },
-      globals: {
-        'ts-jest': {
-          tsconfig: 'apps/backend/tsconfig.json',
-        },
+      transform: {
+        '^.+\\.ts$': ['ts-jest', { 
+          tsconfig: 'apps/backend/tsconfig.json' 
+        }],
       },
+      // Mock cleanup settings
+      clearMocks: true,
+      resetMocks: true,
+      restoreMocks: true,
+      maxWorkers: 1,
     },
     {
       displayName: 'frontend',
