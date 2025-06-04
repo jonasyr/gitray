@@ -32,22 +32,33 @@ router.get('/health', (req: Request, res: Response) => {
 router.get('/health/detailed', async (_req: Request, res: Response) => {
   const checks: Record<string, string> = {
     server: 'healthy',
-    redis: 'unknown',
+    cache: 'unknown',
     git: 'unknown',
   };
 
   let overallStatus = 200;
 
   try {
+    // NEW: Use the new Cache-Stats API to get detailed cache information
+    const cacheStats = redis.getStats();
+
     if (redis.isHealthy()) {
-      checks.redis = 'healthy';
+      checks.cache = `healthy (${cacheStats.activeBackend})`;
+
+      // Add detailed cache information
+      checks.cacheBackend = cacheStats.activeBackend;
+      if (cacheStats.hybrid) {
+        checks.cacheMemoryUsage = `${Math.round(cacheStats.hybrid.memory.usageBytes / 1024 / 1024)}MB`;
+        checks.cacheMemoryEntries = cacheStats.hybrid.memory.entries.toString();
+        checks.cacheDiskEntries = cacheStats.hybrid.disk.entries.toString();
+      }
     } else {
-      checks.redis = 'unhealthy';
+      checks.cache = 'unhealthy';
       overallStatus = 503;
     }
   } catch (error) {
-    logger.error('Redis health check failed', error);
-    checks.redis = 'error';
+    logger.error('Cache health check failed', error);
+    checks.cache = 'error';
     overallStatus = 503;
   }
 

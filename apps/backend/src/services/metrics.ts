@@ -59,6 +59,64 @@ export const cleanupQueueSize = new Gauge({
   help: 'Number of directories waiting for cleanup',
 });
 
+// NEW: HybridLRUCache metrics
+export const cacheHybridMemoryUsage = new Gauge({
+  name: 'cache_hybrid_memory_usage_bytes',
+  help: 'Memory usage of hybrid cache in bytes',
+});
+
+export const cacheHybridMemoryEntries = new Gauge({
+  name: 'cache_hybrid_memory_entries',
+  help: 'Number of entries in hybrid cache memory tier',
+});
+
+export const cacheHybridDiskEntries = new Gauge({
+  name: 'cache_hybrid_disk_entries',
+  help: 'Number of entries in hybrid cache disk tier',
+});
+
+export const cacheActiveBackend = new Gauge({
+  name: 'cache_active_backend',
+  help: 'Active cache backend (0=memory, 1=redis, 2=hybrid)',
+  labelNames: ['backend'] as const,
+});
+
+// Cache metrics update function
+export const updateCacheMetrics = async () => {
+  try {
+    // Dynamic import to avoid circular dependency
+    const { getCacheStats } = await import('./cache');
+    const stats = getCacheStats();
+
+    // Backend tracking
+    cacheActiveBackend.reset();
+    const backendMap: Record<string, number> = {
+      memory: 0,
+      redis: 1,
+      hybrid: 2,
+    };
+    cacheActiveBackend.set(
+      { backend: stats.activeBackend },
+      backendMap[stats.activeBackend] || 0
+    );
+
+    // Hybrid cache metrics
+    if (stats.hybrid) {
+      cacheHybridMemoryUsage.set(stats.hybrid.memory.usageBytes);
+      cacheHybridMemoryEntries.set(stats.hybrid.memory.entries);
+      cacheHybridDiskEntries.set(stats.hybrid.disk?.entries || 0);
+    } else {
+      // Reset hybrid cache metrics when not using hybrid cache
+      cacheHybridMemoryUsage.set(0);
+      cacheHybridMemoryEntries.set(0);
+      cacheHybridDiskEntries.set(0);
+    }
+  } catch (err) {
+    // Use a logger import that doesn't cause circular dependency
+    console.warn('Failed to update cache metrics', { err });
+  }
+};
+
 // Express middleware that records metrics about each HTTP request
 export const metricsMiddleware = (
   req: Request,

@@ -8,6 +8,7 @@ jest.mock('../../src/services/cache', () => ({
   default: {
     isHealthy: jest.fn(),
     quit: jest.fn(),
+    getStats: jest.fn(),
   },
 }));
 
@@ -43,6 +44,18 @@ describe('Health Routes', () => {
     test('returns detailed health status when all services are healthy', async () => {
       // Arrange
       (redis.isHealthy as jest.Mock).mockReturnValue(true);
+      (redis.getStats as jest.Mock).mockReturnValue({
+        activeBackend: 'hybrid',
+        memory: { entries: 150 },
+        redis: { healthy: true },
+        hybrid: {
+          memory: {
+            entries: 100,
+            usageBytes: 5242880, // 5MB
+          },
+          disk: { entries: 50 },
+        },
+      });
 
       // Act
       const res = await request(app).get('/health/detailed');
@@ -55,7 +68,11 @@ describe('Health Routes', () => {
         uptime: expect.any(Number),
         checks: {
           server: 'healthy',
-          redis: 'healthy',
+          cache: 'healthy (hybrid)',
+          cacheBackend: 'hybrid',
+          cacheMemoryUsage: '5MB',
+          cacheMemoryEntries: '100',
+          cacheDiskEntries: '50',
           git: expect.any(String),
         },
         system: {
@@ -66,9 +83,37 @@ describe('Health Routes', () => {
       });
     });
 
+    test('returns detailed health status with memory-only cache', async () => {
+      // Arrange
+      (redis.isHealthy as jest.Mock).mockReturnValue(true);
+      (redis.getStats as jest.Mock).mockReturnValue({
+        activeBackend: 'memory',
+        memory: { entries: 75 },
+        redis: { healthy: false },
+        hybrid: null,
+      });
+
+      // Act
+      const res = await request(app).get('/health/detailed');
+
+      // Assert
+      expect(res.status).toBe(200);
+      expect(res.body.checks.cache).toBe('healthy (memory)');
+      expect(res.body.checks.cacheBackend).toBe('memory');
+      expect(res.body.checks.cacheMemoryUsage).toBeUndefined();
+      expect(res.body.checks.cacheMemoryEntries).toBeUndefined();
+      expect(res.body.checks.cacheDiskEntries).toBeUndefined();
+    });
+
     test('returns unhealthy status when Redis is down', async () => {
       // Arrange
       (redis.isHealthy as jest.Mock).mockReturnValue(false);
+      (redis.getStats as jest.Mock).mockReturnValue({
+        activeBackend: 'memory',
+        memory: { entries: 0 },
+        redis: { healthy: false },
+        hybrid: null,
+      });
 
       // Act
       const res = await request(app).get('/health/detailed');
@@ -76,7 +121,23 @@ describe('Health Routes', () => {
       // Assert
       expect(res.status).toBe(503);
       expect(res.body.status).toBe('unhealthy');
-      expect(res.body.checks.redis).toBe('unhealthy');
+      expect(res.body.checks.cache).toBe('unhealthy');
+    });
+
+    test('handles cache stats error gracefully', async () => {
+      // Arrange
+      (redis.isHealthy as jest.Mock).mockReturnValue(true);
+      (redis.getStats as jest.Mock).mockImplementation(() => {
+        throw new Error('Cache stats unavailable');
+      });
+
+      // Act
+      const res = await request(app).get('/health/detailed');
+
+      // Assert
+      expect(res.status).toBe(503);
+      expect(res.body.status).toBe('unhealthy');
+      expect(res.body.checks.cache).toBe('error');
     });
   });
 

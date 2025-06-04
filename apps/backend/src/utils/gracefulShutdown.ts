@@ -18,7 +18,16 @@ import { shutdownLockManager } from './lockManager';
 // Guard to prevent running shutdown sequence multiple times
 let isShuttingDown = false;
 
-export function setupGracefulShutdown(server: Server): void {
+// Optional cleanup callbacks to run during shutdown
+const cleanupCallbacks: (() => void)[] = [];
+
+export function setupGracefulShutdown(
+  server: Server,
+  additionalCleanup?: () => void
+): void {
+  if (additionalCleanup) {
+    cleanupCallbacks.push(additionalCleanup);
+  }
   // Register signal handlers for graceful shutdown
   const shutdown = async (signal: string) => {
     if (isShuttingDown) return;
@@ -59,6 +68,17 @@ export function setupGracefulShutdown(server: Server): void {
       } catch (cacheErr) {
         logger.error('Cache shutdown failed', { err: cacheErr });
         // Continue with other shutdowns
+      }
+
+      // Run additional cleanup callbacks
+      if (cleanupCallbacks.length > 0) {
+        logger.info('Running additional cleanup callbacks...');
+        try {
+          cleanupCallbacks.forEach((callback) => callback());
+          logger.info('Additional cleanup callbacks completed');
+        } catch (cleanupErr) {
+          logger.error('Additional cleanup failed', { err: cleanupErr });
+        }
       }
 
       clearTimeout(shutdownTimeout);

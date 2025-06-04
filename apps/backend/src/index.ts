@@ -22,7 +22,11 @@ import healthRoutes from './routes/healthRoutes';
 import errorHandler from './middlewares/errorHandler';
 import { setupGracefulShutdown } from './utils/gracefulShutdown';
 import { requestIdMiddleware } from './middlewares/requestId';
-import { metricsMiddleware, metricsHandler } from './services/metrics';
+import {
+  metricsMiddleware,
+  metricsHandler,
+  updateCacheMetrics,
+} from './services/metrics';
 
 // Load environment variables
 dotenv.config();
@@ -91,10 +95,9 @@ const server = app.listen(config.port, () => {
   logger.info(`Backend running on port ${config.port}`);
 });
 
-// Handle graceful shutdown signals
-setupGracefulShutdown(server);
-
 // NEW: Log cache initialization status after startup
+let metricsInterval: NodeJS.Timeout | null = null;
+
 setTimeout(() => {
   import('./services/cache')
     .then(({ getCacheStats }) => {
@@ -113,8 +116,23 @@ setTimeout(() => {
             }
           : null,
       });
+
+      // NEW: Start metrics update scheduler
+      metricsInterval = setInterval(async () => {
+        await updateCacheMetrics();
+      }, 30000); // Every 30 seconds
+
+      logger.info('Cache metrics scheduler started');
     })
     .catch((err) => {
       logger.warn('Failed to get cache stats during startup', { err });
     });
 }, 1000); // Wait 1 second for cache to initialize
+
+// Handle graceful shutdown signals with metrics cleanup
+setupGracefulShutdown(server, () => {
+  if (metricsInterval) {
+    clearInterval(metricsInterval);
+    logger.info('Cache metrics scheduler stopped');
+  }
+});
