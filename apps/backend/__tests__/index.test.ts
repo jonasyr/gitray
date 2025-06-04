@@ -1,5 +1,4 @@
 // apps/backend/__tests__/index.test.ts
-import dotenv from 'dotenv';
 
 // Define Express mock types
 type MockApp = {
@@ -31,7 +30,15 @@ jest.mock('express', () => {
 });
 
 jest.mock('cors', () => jest.fn(() => 'mockedCors'));
-jest.mock('dotenv', () => ({ config: jest.fn() }));
+
+// Mock dotenv properly
+const mockDotenvConfig = jest.fn();
+jest.mock('dotenv', () => ({
+  __esModule: true,
+  default: {
+    config: mockDotenvConfig,
+  },
+}));
 jest.mock('../src/routes', () => 'mockedRoutes');
 jest.mock('../src/routes/repositoryRoutes', () => 'mockedRepositoryRoutes');
 jest.mock('../src/middlewares/errorHandler', () => 'mockedErrorHandler');
@@ -85,7 +92,7 @@ describe('Express App Initialization', () => {
     const mockApp = mockExpress();
 
     // Assert
-    expect(dotenv.config).toHaveBeenCalled();
+    expect(mockDotenvConfig).toHaveBeenCalled();
     expect(mockExpress).toHaveBeenCalled();
     expect(mockCors).toHaveBeenCalled();
     expect(mockApp.use).toHaveBeenCalledWith('mockedCors');
@@ -97,7 +104,7 @@ describe('Express App Initialization', () => {
       'mockedRepositoryRoutes'
     );
     expect(mockApp.use).toHaveBeenCalledWith('mockedErrorHandler');
-    expect(mockApp.listen).toHaveBeenCalledWith('3001', expect.any(Function));
+    expect(mockApp.listen).toHaveBeenCalledWith(3001, expect.any(Function));
   });
 
   test('should use default port 3001 if PORT environment variable is not set', async () => {
