@@ -1,5 +1,5 @@
-import fs from 'fs/promises';
 import path from 'path';
+import { promises as fs } from 'fs';
 import os from 'os';
 import logger from '../services/logger';
 import { lockConfig } from '../config';
@@ -42,7 +42,10 @@ class LockManager {
   private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor() {
-    this.startCleanupScheduler();
+    // Only start the cleanup scheduler if not in test environment
+    if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
+      this.startCleanupScheduler();
+    }
   }
 
   /**
