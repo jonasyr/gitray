@@ -1,15 +1,38 @@
 import Redis from 'ioredis';
-import { config } from '../config';
+import { config, hybridCacheConfig } from '../config';
 import logger from './logger';
+import HybridLRUCache from '../utils/hybridLruCache';
+
+/**
+ * INTEGRATION WRAPPER:
+ * This maintains the existing cache API while using HybridLRUCache underneath.
+ * Provides backward compatibility for all existing code while adding new features.
+ *
+ * FIXES APPLIED:
+ * 1. Maintains exact API compatibility with existing cache interface
+ * 2. Integrates HybridLRUCache as the primary cache implementation
+ * 3. Provides fallback to simple Redis cache if hybrid cache fails
+ * 4. Adds proper error handling and graceful degradation
+ * 5. Maintains all existing logging and health checking behavior
+ */
 
 // Connection to the Redis instance, falls back to `null` when unavailable
 let redis: Redis | null = null;
 // Tracks whether the Redis connection is currently healthy
 let redisHealthy = false;
+
+// NEW: HybridLRUCache instance
+let hybridCache: HybridLRUCache<string> | null = null;
+let hybridCacheHealthy = false;
+
+// Track if cache has been intentionally shut down
+let isShutdown = false;
+
+// In-memory fallback cache (as before)
+const memoryCache = new Map<string, string>();
+
 /**
- * Initializes the Redis client and sets up connection event handlers.
- * When the connection fails, the service gracefully degrades to an
- * in-memory cache so the application can continue to operate.
+ * Initialize Redis connection (unchanged for compatibility)
  */
 function initRedis(): void {
   try {
@@ -42,24 +65,92 @@ function initRedis(): void {
   }
 }
 
+/**
+ * NEW: Initialize HybridLRUCache
+ */
+function initHybridCache(): void {
+  try {
+    if (!hybridCacheConfig.enableRedis && !hybridCacheConfig.enableDisk) {
+      logger.warn(
+        'HybridLRUCache disabled, falling back to simple Redis cache'
+      );
+      return;
+    }
+
+    const options = {
+      maxEntries: hybridCacheConfig.maxEntries,
+      memoryLimitBytes: hybridCacheConfig.memoryLimitBytes,
+      diskPath: hybridCacheConfig.diskPath,
+      lockTimeoutMs: hybridCacheConfig.lockTimeoutMs,
+      redisConfig: hybridCacheConfig.enableRedis
+        ? hybridCacheConfig.redisConfig
+        : undefined,
+    };
+
+    hybridCache = new HybridLRUCache<string>(options);
+    hybridCacheHealthy = true;
+
+    logger.info('HybridLRUCache initialized', {
+      maxEntries: options.maxEntries,
+      memoryLimitMB: Math.round(options.memoryLimitBytes / 1024 ** 2),
+      diskPath: options.diskPath,
+      redisEnabled: !!options.redisConfig,
+    });
+  } catch (err) {
+    logger.error(
+      'HybridLRUCache initialization failed, falling back to Redis cache',
+      { err }
+    );
+    hybridCache = null;
+    hybridCacheHealthy = false;
+  }
+}
+
+// Initialize both cache systems
 initRedis();
+initHybridCache();
 
-const memoryCache = new Map<string, string>();
-
+/**
+ * Cache interface that maintains backward compatibility
+ */
 const cache = {
   /**
    * Retrieves a value from the cache.
-   * Falls back to the in-memory cache when Redis is unavailable.
+   * Priority: HybridLRUCache -> Redis -> Memory
    */
   async get(key: string): Promise<string | null> {
-    if (redis) {
-      return redis.get(key);
+    // Try HybridLRUCache first
+    if (hybridCache && hybridCacheHealthy) {
+      try {
+        const result = await hybridCache.get(key);
+        if (result !== null) {
+          return result;
+        }
+      } catch (err) {
+        logger.warn('HybridLRUCache get failed, falling back', { key, err });
+        hybridCacheHealthy = false;
+        // Fall through to Redis
+      }
     }
+
+    // Fall back to original Redis implementation
+    if (redis && redisHealthy) {
+      try {
+        return await redis.get(key);
+      } catch (err) {
+        logger.warn('Redis get failed, falling back to memory', { key, err });
+        redisHealthy = false;
+        // Fall through to memory
+      }
+    }
+
+    // Final fallback to memory cache
     return memoryCache.get(key) ?? null;
   },
+
   /**
    * Stores a value in the cache.
-   * When `mode` and `duration` are provided, the key is set with an expiry.
+   * Maintains exact API compatibility: set(key, value, mode?, duration?)
    */
   async set(
     key: string,
@@ -67,49 +158,245 @@ const cache = {
     mode?: 'EX' | 'PX',
     duration?: number
   ): Promise<void> {
-    if (redis) {
-      if (mode && duration !== undefined) {
-        await (redis as any).set(key, value, mode, duration);
-      } else {
-        await redis.set(key, value);
+    // Try HybridLRUCache first
+    if (hybridCache && hybridCacheHealthy) {
+      try {
+        await hybridCache.set(key, value, mode, duration);
+        return; // Success - don't try other methods
+      } catch (err) {
+        logger.warn('HybridLRUCache set failed, falling back', { key, err });
+        hybridCacheHealthy = false;
+        // Fall through to Redis
       }
-      return;
     }
+
+    // Fall back to original Redis implementation
+    if (redis && redisHealthy) {
+      try {
+        if (mode && duration !== undefined) {
+          await (redis as any).set(key, value, mode, duration);
+        } else {
+          await redis.set(key, value);
+        }
+
+        // Also store in memory as backup
+        memoryCache.set(key, value);
+        return;
+      } catch (err) {
+        logger.warn('Redis set failed, falling back to memory', { key, err });
+        redisHealthy = false;
+        // Fall through to memory
+      }
+    }
+
+    // Final fallback to memory cache
     memoryCache.set(key, value);
   },
+
   /**
    * Deletes a key from the cache.
    */
   async del(key: string): Promise<void> {
-    if (redis) {
-      await redis.del(key);
-      return;
-    }
-    memoryCache.delete(key);
-  },
-  /**
-   * Closes the Redis connection if one exists.
-   */
-  async quit(): Promise<void> {
-    if (redis) {
+    const errors: Error[] = [];
+
+    // Try HybridLRUCache first
+    if (hybridCache && hybridCacheHealthy) {
       try {
-        await redis.quit();
+        await hybridCache.del(key);
+        return; // Success - don't try other methods
       } catch (err) {
-        logger.warn('Error closing Redis connection', { err });
+        errors.push(err as Error);
+        logger.warn('HybridLRUCache del failed, falling back', { key, err });
+        hybridCacheHealthy = false;
+        // Fall through to Redis
       }
     }
-    redisHealthy = false;
+
+    // Fall back to Redis
+    if (redis && redisHealthy) {
+      try {
+        await redis.del(key);
+        memoryCache.delete(key); // Also remove from memory backup
+        return;
+      } catch (err) {
+        errors.push(err as Error);
+        logger.warn('Redis del failed, falling back to memory', { key, err });
+        redisHealthy = false;
+        // Fall through to memory
+      }
+    }
+
+    // Final fallback to memory cache
+    memoryCache.delete(key);
+
+    // If we had errors but still succeeded with memory, don't throw
+    if (errors.length > 0 && !memoryCache.has(key)) {
+      logger.debug('Cache delete completed with fallbacks', {
+        key,
+        errorCount: errors.length,
+      });
+    }
   },
+
   /**
-   * Determines whether the cache backend is healthy. When Redis is disabled
-   * or has failed to initialize, the in-memory cache is considered healthy.
+   * Closes all cache connections.
+   */
+  async quit(): Promise<void> {
+    const operations: Promise<void>[] = [];
+
+    // Quit HybridLRUCache
+    if (hybridCache) {
+      operations.push(
+        hybridCache.quit().catch((err) => {
+          logger.warn('Error closing HybridLRUCache', { err });
+        })
+      );
+    }
+
+    // Quit Redis
+    if (redis) {
+      operations.push(
+        redis
+          .quit()
+          .then(() => {
+            // Redis.quit() returns "OK", but we need void
+          })
+          .catch((err) => {
+            logger.warn('Error closing Redis connection', { err });
+          })
+      );
+    }
+
+    await Promise.all(operations);
+
+    hybridCacheHealthy = false;
+    redisHealthy = false;
+
+    // Only mark as shutdown if we actually had caches to shut down
+    if (hybridCache || redis) {
+      isShutdown = true;
+    }
+
+    logger.info('All cache connections closed');
+  },
+
+  /**
+   * Determines whether the cache backend is healthy.
+   * Returns true if at least one cache tier is working or if Redis was never initialized.
    */
   isHealthy(): boolean {
+    // If intentionally shut down, not healthy
+    if (isShutdown) {
+      return false;
+    }
+
+    // If HybridLRUCache is healthy, we're good
+    if (hybridCache && hybridCacheHealthy) {
+      return true;
+    }
+
+    // If Redis is healthy, we're good
+    if (redis && redisHealthy) {
+      return true;
+    }
+
+    // If Redis was never initialized (null), memory cache is healthy
     if (redis === null) {
       return true;
     }
-    return redisHealthy;
+
+    // If Redis was initialized but is now unhealthy, we're unhealthy
+    return false;
+  },
+
+  /**
+   * NEW: Get detailed cache statistics for monitoring
+   */
+  getStats(): {
+    hybrid?: ReturnType<HybridLRUCache<string>['getStats']>;
+    redis: { healthy: boolean; connected: boolean };
+    memory: { entries: number };
+    activeBackend: string;
+  } {
+    let activeBackend = 'memory';
+
+    if (hybridCache && hybridCacheHealthy) {
+      activeBackend = 'hybrid';
+    } else if (redis && redisHealthy) {
+      activeBackend = 'redis';
+    }
+
+    return {
+      hybrid: hybridCache?.getStats(),
+      redis: {
+        healthy: redisHealthy,
+        connected: !!redis,
+      },
+      memory: {
+        entries: memoryCache.size,
+      },
+      activeBackend,
+    };
+  },
+
+  /**
+   * NEW: Reset cache health checks (for testing)
+   */
+  resetHealth(): void {
+    if (hybridCache) {
+      hybridCacheHealthy = true;
+    }
+    if (redis) {
+      redisHealthy = true;
+    }
+  },
+
+  /**
+   * NEW: Force switch to specific cache backend (for testing/debugging)
+   */
+  async switchToBackend(backend: 'hybrid' | 'redis' | 'memory'): Promise<void> {
+    switch (backend) {
+      case 'hybrid':
+        if (!hybridCache) {
+          initHybridCache();
+        }
+        hybridCacheHealthy = true;
+        redisHealthy = false;
+        break;
+
+      case 'redis':
+        hybridCacheHealthy = false;
+        if (!redis) {
+          initRedis();
+        }
+        redisHealthy = true;
+        break;
+
+      case 'memory':
+        hybridCacheHealthy = false;
+        redisHealthy = false;
+        break;
+
+      default:
+        throw new Error(`Unknown backend: ${backend}`);
+    }
+
+    logger.info(`Switched to cache backend: ${backend}`);
   },
 };
 
 export default cache;
+
+/**
+ * Export individual functions for testing and direct access
+ */
+export const {
+  get: getFromCache,
+  set: setInCache,
+  del: deleteFromCache,
+  quit: quitCache,
+  isHealthy: isCacheHealthy,
+  getStats: getCacheStats,
+  resetHealth: resetCacheHealth,
+  switchToBackend: switchCacheBackend,
+} = cache;
