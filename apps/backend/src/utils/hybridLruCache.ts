@@ -176,33 +176,26 @@ export class HybridLRUCache<V> {
   }
 
   /**
-   * FIX: Correct LRU eviction based on timestamps, not insertion order
+   * FIX: Performant LRU eviction using Map iteration order (O(1) instead of O(n))
+   * Map maintains insertion order, and we update order on access in get()
    */
   private trimMemory(): void {
     while (
       this.memoryUsage > this.options.memoryLimitBytes ||
       this.memory.size > this.options.maxEntries
     ) {
-      // Find the oldest entry by timestamp
-      let oldestKey: string | null = null;
-      let oldestTimestamp = Date.now();
+      // Use Map iteration order (FIFO) as performant LRU approximation
+      // Since we move accessed entries to end in get(), first entry is least recently used
+      const firstKey = this.memory.keys().next().value;
+      if (!firstKey) break; // Should never happen, but safety check
 
-      for (const [key, entry] of this.memory.entries()) {
-        if (entry.timestamp < oldestTimestamp) {
-          oldestTimestamp = entry.timestamp;
-          oldestKey = key;
-        }
-      }
-
-      if (!oldestKey) break; // Should never happen, but safety check
-
-      const oldEntry = this.memory.get(oldestKey)!;
-      this.memory.delete(oldestKey);
+      const oldEntry = this.memory.get(firstKey)!;
+      this.memory.delete(firstKey);
       this.memoryUsage -= oldEntry.size;
 
       logger.debug('Evicted from memory cache', {
-        key: oldestKey,
-        age: Date.now() - oldestTimestamp,
+        key: firstKey,
+        age: Date.now() - oldEntry.timestamp,
       });
     }
   }
@@ -338,7 +331,7 @@ export class HybridLRUCache<V> {
   }
 
   /**
-   * FIX: Added transactional consistency and proper error handling
+   * FIX: Graceful degradation - continue operation even if some tiers fail
    */
   async set(
     key: string,
@@ -346,99 +339,58 @@ export class HybridLRUCache<V> {
     mode?: 'EX' | 'PX',
     duration?: number
   ): Promise<void> {
-    const operations: Array<() => Promise<void>> = [];
-    const rollbacks: Array<() => Promise<void>> = [];
+    const errors: Error[] = [];
+    let memorySuccess = false;
 
-    // Redis operation
+    // Try Redis operation
     if (this.redis && this.redisHealthy) {
-      operations.push(async () => {
-        try {
-          if (mode && duration !== undefined) {
-            await (this.redis as any).set(
-              key,
-              this.toJSON(value),
-              mode,
-              duration
-            );
-          } else {
-            await this.redis!.set(key, this.toJSON(value));
-          }
-        } catch (err) {
-          this.redisHealthy = false;
-          logger.warn('HybridLRUCache Redis set failed', { err });
-          throw err;
+      try {
+        if (mode && duration !== undefined) {
+          await (this.redis as any).set(
+            key,
+            this.toJSON(value),
+            mode,
+            duration
+          );
+        } else {
+          await this.redis!.set(key, this.toJSON(value));
         }
-      });
-
-      rollbacks.unshift(async () => {
-        try {
-          if (this.redis && this.redisHealthy) {
-            await this.redis.del(key);
-          }
-        } catch (err) {
-          logger.warn('Failed to rollback Redis operation', { key, err });
-        }
-      });
+      } catch (err) {
+        this.redisHealthy = false;
+        logger.warn('HybridLRUCache Redis set failed', { err });
+        errors.push(err as Error);
+      }
     }
 
-    // Memory operation (always succeeds or logs warning)
-    operations.push(async () => {
-      this.addToMemory(key, value);
-    });
-
-    rollbacks.unshift(async () => {
-      const mem = this.memory.get(key);
-      if (mem) {
-        this.memory.delete(key);
-        this.memoryUsage -= mem.size;
-      }
-    });
-
-    // Disk operation
-    operations.push(async () => {
-      await this.addToDisk(key, value);
-    });
-
-    rollbacks.unshift(async () => {
-      const filePath = this.disk.get(key);
-      if (filePath) {
-        this.disk.delete(key);
-        try {
-          await fs.unlink(filePath);
-        } catch (err) {
-          logger.warn('Failed to rollback disk operation', { key, err });
-        }
-      }
-    });
-
-    // Execute operations with rollback on failure
-    let completedOps = 0;
+    // Try memory operation (this should always succeed)
     try {
-      for (const operation of operations) {
-        await operation();
-        completedOps++;
-      }
+      this.addToMemory(key, value);
+      memorySuccess = true;
     } catch (err) {
-      logger.error('HybridLRUCache set operation failed, rolling back', {
+      errors.push(err as Error);
+    }
+
+    // Try disk operation
+    try {
+      await this.addToDisk(key, value);
+    } catch (err) {
+      errors.push(err as Error);
+    }
+
+    // Only throw if all operations failed (including memory)
+    if (!memorySuccess && errors.length > 0) {
+      throw new Error(
+        `All cache operations failed: ${errors.map((e) => e.message).join(', ')}`
+      );
+    }
+
+    // Log warnings if some operations failed but at least memory succeeded
+    if (errors.length > 0) {
+      logger.warn('Some cache tiers failed but operation completed', {
         key,
-        completedOps,
-        err,
+        failedTiers: errors.length,
+        errors: errors.map((e) => e.message),
       });
-
-      // Rollback completed operations
-      for (let i = 0; i < completedOps; i++) {
-        try {
-          await rollbacks[i]();
-        } catch (rollbackErr) {
-          logger.error('Rollback operation failed', {
-            key,
-            step: i,
-            err: rollbackErr,
-          });
-        }
-      }
-
-      throw err;
     }
   }
 
@@ -472,20 +424,12 @@ export class HybridLRUCache<V> {
           `disk:${key}`,
           async () => {
             this.disk.delete(key);
-            try {
-              await fs.unlink(filePath);
-            } catch (unlinkErr) {
-              // File might already be gone - that's ok
-              logger.debug('File already removed during delete', {
-                key,
-                err: unlinkErr,
-              });
-            }
+            await fs.unlink(filePath);
           },
           this.lockTimeoutMs
         );
       } catch (err) {
-        logger.error('Failed to delete from disk cache', { key, err });
+        logger.warn('HybridLRUCache disk del failed', { err });
         errors.push(err as Error);
       }
     }
@@ -501,8 +445,8 @@ export class HybridLRUCache<V> {
     if (this.redis) {
       try {
         await this.redis.quit();
-      } catch (err) {
-        logger.warn('HybridLRUCache Redis quit failed', { err });
+      } catch {
+        // Ignore quit errors
       }
     }
     this.redisHealthy = false;

@@ -242,6 +242,9 @@ class LockManager {
     const lockPath = path.join(lockConfig.lockDir, encodeURIComponent(lockKey));
     const errors: Error[] = [];
 
+    // Get lock info before deleting it
+    const lockInfo = this.activeLocks.get(lockKey);
+
     // Close file handle
     try {
       await handle.close();
@@ -263,7 +266,6 @@ class LockManager {
     this.metrics.currentLocks--;
 
     if (lockConfig.enableLockLogging) {
-      const lockInfo = this.activeLocks.get(lockKey);
       const holdTime = lockInfo ? Date.now() - lockInfo.startTime : 0;
       logger.debug('Lock released', { lockKey, holdTime });
     }

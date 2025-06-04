@@ -383,6 +383,26 @@ const cache = {
 
     logger.info(`Switched to cache backend: ${backend}`);
   },
+
+  /**
+   * NEW: Inject mock dependencies for testing
+   * WARNING: This method is only intended for testing purposes!
+   */
+  __setDependenciesForTesting(
+    mockHybridCache?: HybridLRUCache<string> | null,
+    mockRedis?: any | null,
+    hybridHealthy = true,
+    redisHealthyParam = true
+  ): void {
+    if (mockHybridCache !== undefined) {
+      hybridCache = mockHybridCache;
+      hybridCacheHealthy = hybridHealthy;
+    }
+    if (mockRedis !== undefined) {
+      redis = mockRedis;
+      redisHealthy = redisHealthyParam;
+    }
+  },
 };
 
 export default cache;
@@ -399,4 +419,5 @@ export const {
   getStats: getCacheStats,
   resetHealth: resetCacheHealth,
   switchToBackend: switchCacheBackend,
+  __setDependenciesForTesting,
 } = cache;
