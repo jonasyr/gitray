@@ -62,6 +62,7 @@ export interface CommitHeatmapData {
     maxCommitCount: number;
     totalCommits: number;
     filterOptions?: CommitFilterOptions;
+    streamingUsed?: boolean;
   };
 }
 

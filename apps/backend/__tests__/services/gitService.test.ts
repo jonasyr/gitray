@@ -198,7 +198,7 @@ describe('GitService Extended Tests', () => {
       const commits = await gitService.getCommits(localRepoPath);
       expect(commits).toHaveLength(1);
       expect(commits[0].sha).toBe('abc123');
-      expect(warnSpy).toHaveBeenCalledTimes(2);
+      expect(warnSpy).toHaveBeenCalledTimes(3); // Updated: streaming adds 1 more warning
       warnSpy.mockRestore();
     });
 

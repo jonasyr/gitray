@@ -11,8 +11,13 @@ jest.mock('../../src/services/gitService', () => ({
   gitService: {
     cloneRepository: jest.fn(),
     getCommits: jest.fn(),
+    getCommitCount: jest.fn(),
+    shouldUseStreaming: jest.fn(),
+    getCommitsStream: jest.fn(),
     aggregateCommitsByTime: jest.fn(),
     cleanupRepository: jest.fn(),
+    clearStreamingResumeState: jest.fn(),
+    getStreamingResumeState: jest.fn(),
   },
 }));
 jest.mock('../../src/services/cache', () => ({
@@ -26,6 +31,10 @@ const mockClone = gitService.cloneRepository as jest.MockedFunction<
 const mockGetCommits = gitService.getCommits as jest.MockedFunction<
   typeof gitService.getCommits
 >;
+const mockShouldUseStreaming =
+  gitService.shouldUseStreaming as jest.MockedFunction<
+    typeof gitService.shouldUseStreaming
+  >;
 const mockAggregate = gitService.aggregateCommitsByTime as jest.MockedFunction<
   typeof gitService.aggregateCommitsByTime
 >;
@@ -54,6 +63,7 @@ describe('commitRoutes /heatmap', () => {
     };
     mockClone.mockResolvedValue(tempDir);
     mockGetCommits.mockResolvedValue([]);
+    mockShouldUseStreaming.mockResolvedValue(false); // Mock streaming decision
     mockAggregate.mockResolvedValue(heatmap);
     mockCleanup.mockResolvedValue();
 
@@ -88,6 +98,7 @@ describe('commitRoutes /heatmap', () => {
     const repoUrl = 'https://github.com/user/repo.git';
     const tempDir = '/tmp/repo';
     mockClone.mockResolvedValue(tempDir);
+    mockShouldUseStreaming.mockResolvedValue(false); // Mock streaming decision
     mockGetCommits.mockRejectedValue(new Error('fail'));
     mockCleanup.mockResolvedValue();
 
@@ -129,6 +140,7 @@ describe('commitRoutes / list commits', () => {
       },
     ];
     mockClone.mockResolvedValue(tempDir);
+    mockShouldUseStreaming.mockResolvedValue(false); // Mock streaming decision
     mockGetCommits.mockResolvedValue(commits);
     mockCleanup.mockResolvedValue();
 
@@ -139,7 +151,13 @@ describe('commitRoutes / list commits', () => {
 
     // Assert
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ commits, page: 2, limit: 1 });
+    expect(res.body).toEqual({
+      commits,
+      page: 2,
+      limit: 1,
+      streamingUsed: false,
+      totalCommits: 1,
+    });
     expect(mockGetCommits).toHaveBeenCalledWith(tempDir, { skip: 1, limit: 1 });
     await runCleanupQueue();
     expect(mockCleanup).toHaveBeenCalledWith(tempDir);

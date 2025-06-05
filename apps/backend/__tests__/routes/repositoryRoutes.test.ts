@@ -13,8 +13,13 @@ jest.mock('../../src/services/gitService', () => ({
   gitService: {
     cloneRepository: jest.fn(),
     getCommits: jest.fn(),
+    getCommitCount: jest.fn(),
+    shouldUseStreaming: jest.fn(),
+    getCommitsStream: jest.fn(),
     cleanupRepository: jest.fn(),
     aggregateCommitsByTime: jest.fn(),
+    clearStreamingResumeState: jest.fn(),
+    getStreamingResumeState: jest.fn(),
   },
 }));
 jest.mock('../../src/services/logger', () => ({
@@ -36,6 +41,14 @@ const mockCloneRepository = gitService.cloneRepository as jest.MockedFunction<
 const mockGetCommits = gitService.getCommits as jest.MockedFunction<
   typeof gitService.getCommits
 >;
+const mockShouldUseStreaming =
+  gitService.shouldUseStreaming as jest.MockedFunction<
+    typeof gitService.shouldUseStreaming
+  >;
+const mockAggregateCommitsByTime =
+  gitService.aggregateCommitsByTime as jest.MockedFunction<
+    typeof gitService.aggregateCommitsByTime
+  >;
 const mockCleanupRepository =
   gitService.cleanupRepository as jest.MockedFunction<
     typeof gitService.cleanupRepository
@@ -63,6 +76,7 @@ describe('Repository API Extended Tests', () => {
     const mockError = new Error('Fehler beim Abrufen der Commits');
 
     mockCloneRepository.mockResolvedValue(tempDir);
+    mockShouldUseStreaming.mockResolvedValue(false); // Mock streaming decision
     mockGetCommits.mockRejectedValue(mockError);
     mockCleanupRepository.mockResolvedValue();
 
@@ -97,6 +111,7 @@ describe('Repository API Extended Tests', () => {
     const cleanupError = new Error('Cleanup fehlgeschlagen');
 
     mockCloneRepository.mockResolvedValue(tempDir);
+    mockShouldUseStreaming.mockResolvedValue(false); // Mock streaming decision
     mockGetCommits.mockResolvedValue(mockCommits);
     mockCleanupRepository.mockRejectedValue(cleanupError);
 
@@ -133,6 +148,7 @@ describe('Repository API Extended Tests', () => {
     // Test with basic valid URL - only this should trigger cloneRepository
     const validUrl = 'https://github.com/user/repo.git';
     mockCloneRepository.mockResolvedValueOnce('/tmp/valid-repo');
+    mockShouldUseStreaming.mockResolvedValueOnce(false); // Mock streaming decision
     mockGetCommits.mockResolvedValueOnce([]);
 
     // Act
@@ -150,9 +166,15 @@ describe('Repository API Extended Tests', () => {
     // Arrange
     const repoUrl = 'https://github.com/user/repo.git';
     const tempDir = '/tmp/repo';
+    const mockHeatmapData = {
+      timePeriod: 'day' as const,
+      data: [],
+      metadata: { maxCommitCount: 0, totalCommits: 0 },
+    };
     mockCloneRepository.mockResolvedValue(tempDir);
+    mockShouldUseStreaming.mockResolvedValue(false); // Mock streaming decision
     mockGetCommits.mockResolvedValue([]);
-    (gitService.aggregateCommitsByTime as jest.Mock).mockResolvedValue({});
+    mockAggregateCommitsByTime.mockResolvedValue(mockHeatmapData);
     mockCleanupRepository.mockResolvedValue();
 
     // Act
@@ -168,8 +190,15 @@ describe('Repository API Extended Tests', () => {
     // Arrange
     const repoUrl = 'https://github.com/user/repo.git';
     const tempDir = '/tmp/repo';
+    const mockHeatmapData = {
+      timePeriod: 'day' as const,
+      data: [],
+      metadata: { maxCommitCount: 0, totalCommits: 0 },
+    };
     mockCloneRepository.mockResolvedValue(tempDir);
+    mockShouldUseStreaming.mockResolvedValue(false); // Mock streaming decision
     mockGetCommits.mockResolvedValue([]);
+    mockAggregateCommitsByTime.mockResolvedValue(mockHeatmapData);
     (gitService.aggregateCommitsByTime as jest.Mock).mockResolvedValue({});
     mockCleanupRepository.mockResolvedValue();
 
