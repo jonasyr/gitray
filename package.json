@@ -28,8 +28,6 @@
     "test:backend": "cd apps/backend && jest",
     "test:watch": "jest --config=jest.config.cjs --watchAll",
     "test:watch:changed": "jest --config=jest.config.cjs --watch",
-    "test:watch:frontend": "cd apps/frontend && jest --watch",
-    "test:watch:backend": "cd apps/backend && jest --watch",
     "test:coverage": "jest --config=jest.config.cjs --coverage",
     "lint": "eslint . --ext .js,.ts,.jsx,.tsx,.cjs,.mjs",
     "lint:md": "markdownlint-cli2",

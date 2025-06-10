@@ -3,8 +3,14 @@ module.exports = {
   displayName: 'backend',
   preset: 'ts-jest',
   testEnvironment: 'node',
-  rootDir: './',
-  testMatch: ['<rootDir>/__tests__/**/*.test.ts'],
+  // Use absolute path for rootDir
+  rootDir: __dirname,
+  // More specific test patterns
+  testMatch: [
+    '<rootDir>/__tests__/**/*.test.ts',
+    '<rootDir>/__tests__/**/*.test.js'
+  ],
+  // Ensure proper module resolution
   moduleNameMapper: {
     '^@gitray/shared-types$': '<rootDir>/../../packages/shared-types/src/index.ts',
   },
@@ -14,4 +20,21 @@ module.exports = {
       useESM: false
     }],
   },
+  // Add watch-specific settings
+  watchPathIgnorePatterns: [
+    '<rootDir>/node_modules',
+    '<rootDir>/dist',
+    '<rootDir>/coverage',
+    '<rootDir>/.tmp'
+  ],
+  // Improve test detection
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/dist/',
+    '/.tmp/'
+  ],
+  // Clear mocks between tests
+  clearMocks: true,
+  // Restore mocks between tests
+  restoreMocks: true,
 };

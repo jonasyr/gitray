@@ -1,19 +1,23 @@
-/** @typ  transform: {
-    '^.+\\.tsx?$': ['ts-jest', { 
-      tsconfig: '<rootDir>/tsconfig.app.json',
-      useESM: false
-    }],
-    '\\.(jpg|jpeg|png|gif|eot|otf|webp|svg|ttf|woff|woff2|mp4|webm|wav|mp3|m4a|aac|oga)$': 'jest-transform-stub',
-  },mport('jest').Config} */
+/** @type {import('jest').Config} */
 module.exports = {
   displayName: 'frontend',
   preset: 'ts-jest',
   testEnvironment: 'jsdom',
-  rootDir: './',
-  testMatch: ['<rootDir>/__tests__/**/*.test.tsx'],
+  // Use absolute path for rootDir
+  rootDir: __dirname,
+  // More specific test patterns
+  testMatch: [
+    '<rootDir>/__tests__/**/*.test.tsx',
+    '<rootDir>/__tests__/**/*.test.ts',
+    '<rootDir>/__tests__/**/*.test.jsx',
+    '<rootDir>/__tests__/**/*.test.js'
+  ],
   
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.app.json' }],
+    '^.+\\.tsx?$': ['ts-jest', { 
+      tsconfig: '<rootDir>/tsconfig.app.json',
+      useESM: false
+    }],
     '\\.(jpg|jpeg|png|gif|eot|otf|webp|svg|ttf|woff|woff2|mp4|webm|wav|mp3|m4a|aac|oga)$': 'jest-transform-stub',
   },
 
@@ -25,4 +29,22 @@ module.exports = {
   },
   
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
+  
+  // Add watch-specific settings
+  watchPathIgnorePatterns: [
+    '<rootDir>/node_modules',
+    '<rootDir>/dist',
+    '<rootDir>/coverage',
+    '<rootDir>/.vite'
+  ],
+  // Improve test detection
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/dist/',
+    '/.vite/'
+  ],
+  // Clear mocks between tests
+  clearMocks: true,
+  // Restore mocks between tests
+  restoreMocks: true,
 };
