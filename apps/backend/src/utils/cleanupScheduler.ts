@@ -65,5 +65,7 @@ export function getQueueStatus(): { size: number; items: string[] } {
   };
 }
 
-// Kick off cleanup processing on startup
-startCleanupScheduler();
+// Kick off cleanup processing on startup (but not in test environment)
+if (process.env.NODE_ENV !== 'test') {
+  startCleanupScheduler();
+}

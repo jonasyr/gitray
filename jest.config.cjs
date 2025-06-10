@@ -13,6 +13,18 @@ module.exports = {
     'main.tsx$',
     '\\.d\\.ts$',
   ],
+  watchPathIgnorePatterns: [
+    '/node_modules/',
+    '/dist/',
+    '/.git/',
+    '/coverage/',
+    '/.vite/',
+    '/.tmp/',
+    '/pnpm-lock.yaml',
+    '/.eslintcache'
+  ],
+  watchman: false,
+  passWithNoTests: true,
 
   projects: [
     {
@@ -27,10 +39,13 @@ module.exports = {
       moduleNameMapper: {
         '^@gitray/shared-types$': '<rootDir>/packages/shared-types/src/index.ts',
       },
-      globals: {
-        'ts-jest': {
-          tsconfig: 'apps/backend/tsconfig.json',
-        },
+      transform: {
+        '^.+\\.tsx?$': [
+          'ts-jest',
+          {
+            tsconfig: 'apps/backend/tsconfig.json',
+          },
+        ],
       },
     },
     {
