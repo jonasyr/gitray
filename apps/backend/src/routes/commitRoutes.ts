@@ -1,9 +1,8 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { query } from 'express-validator';
+import { query, validationResult } from 'express-validator';
 import { gitService } from '../services/gitService';
 import redis from '../services/cache';
 import { withTempRepository } from '../utils/withTempRepository';
-import { handleValidationErrors } from '../middlewares/validation';
 import { createRequestLogger } from '../services/logger';
 import { cacheHits, cacheMisses } from '../services/metrics';
 import {
@@ -15,6 +14,26 @@ import {
 
 // Router serving commit related data
 const router = express.Router();
+
+// ---------------------------------------------------------------------------
+// Custom validation handler that ensures proper error format
+// ---------------------------------------------------------------------------
+const customValidationHandler = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    // Send the expected response format and end the request cycle
+    res.status(HTTP_STATUS.BAD_REQUEST).json({
+      error: 'Validation failed',
+      code: 'VALIDATION_ERROR',
+    });
+    return; // Important: don't call next() when sending response
+  }
+  next();
+};
 
 // ---------------------------------------------------------------------------
 // Query parameter validation
@@ -31,7 +50,7 @@ const repoUrlValidation = [
   query('toDate').optional().isISO8601(),
   query('page').optional().isInt({ min: 1 }).toInt(),
   query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
-  handleValidationErrors,
+  customValidationHandler,
 ];
 
 // ---------------------------------------------------------------------------
@@ -39,7 +58,7 @@ const repoUrlValidation = [
 // ---------------------------------------------------------------------------
 router.get(
   '/',
-  repoUrlValidation,
+  ...repoUrlValidation,
   async (req: Request, res: Response, next: NextFunction) => {
     const logger = createRequestLogger(req);
     const { repoUrl } = req.query as Record<string, string>;
@@ -76,7 +95,6 @@ router.get(
         count: commits.length,
       });
       res.status(HTTP_STATUS.OK).json(result);
-      return;
     } catch (error) {
       logger.error('Error fetching commits', { error, repoUrl });
       next(error);
@@ -89,7 +107,7 @@ router.get(
 // ---------------------------------------------------------------------------
 router.get(
   '/heatmap',
-  repoUrlValidation,
+  ...repoUrlValidation,
   async (req: Request, res: Response, next: NextFunction) => {
     const logger = createRequestLogger(req);
     const { repoUrl, author, authors, fromDate, toDate } = req.query as Record<
@@ -133,7 +151,6 @@ router.get(
 
       logger.info('Generated heatmap data', { repoUrl, filters });
       res.status(HTTP_STATUS.OK).json(heatmapData);
-      return;
     } catch (error) {
       logger.error('Error generating heatmap', { error, repoUrl, filters });
       next(error);
