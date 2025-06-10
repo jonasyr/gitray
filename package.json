@@ -5,6 +5,12 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
+    "app": "./start.sh",
+    "start": "./start.sh dev",
+    "quick": "./start.sh quick",
+    "env:status": "./start.sh status",
+    "env:stop": "./start.sh stop",
+    "env:clean": "./start.sh clean",
     "dev": "pnpm run build:shared-types && pnpm -r run dev",
     "dev:frontend": "pnpm --filter frontend run dev",
     "dev:backend": "pnpm --filter backend run dev",
