@@ -440,15 +440,126 @@ quick_start() {
     echo -e "${YELLOW}${ICON_ROCKET} Quick Start (Frontend Only)${NC}"
     echo
     
-    # Check if types are built
-    if [ ! -d "packages/shared-types/dist" ]; then
-        echo -e "${BLUE}Building shared types...${NC}"
-        pnpm --filter @gitray/shared-types build
+    # 1. Install dependencies (same as full setup)
+    echo -e "${BLUE}${ICON_GEAR} Installing dependencies...${NC}"
+    if [ -f "pnpm-lock.yaml" ]; then
+        if ! pnpm install --frozen-lockfile; then
+            echo -e "${RED}${ICON_ERROR} Failed to install dependencies${NC}"
+            return 1
+        fi
+    else
+        echo -e "${YELLOW}${ICON_WARNING} No lockfile found, generating one...${NC}"
+        if ! pnpm install; then
+            echo -e "${RED}${ICON_ERROR} Failed to install dependencies${NC}"
+            return 1
+        fi
     fi
     
+    # 2. Build shared types (same as full setup)
+    echo -e "${BLUE}${ICON_GEAR} Building shared types...${NC}"
+    if ! pnpm --filter @gitray/shared-types build; then
+        echo -e "${RED}${ICON_ERROR} Failed to build shared types${NC}"
+        return 1
+    fi
+    
+    # 3. Start only frontend
+    echo
     start_service "frontend"
     
-    echo -e "${GREEN}${ICON_SUCCESS} Frontend ready at http://localhost:${SERVICE_PORTS[frontend]}${NC}"
+    echo
+    echo -e "${GREEN}${ICON_SUCCESS} Frontend development environment ready!${NC}"
+    echo -e "${CYAN}Frontend: http://localhost:${SERVICE_PORTS[frontend]}${NC}"
+    echo
+    echo -e "${YELLOW}Commands available:${NC}"
+    echo -e "${DIM}  • Press 'l' to view live logs${NC}"
+    echo -e "${DIM}  • Press 's' to show service status${NC}"
+    echo -e "${DIM}  • Press Ctrl+C to stop all services and exit${NC}"
+    echo -e "${DIM}  • In logs: Press 'q' to return to monitoring${NC}"
+    echo
+    
+    # Interactive monitoring loop (exactly like full_development_setup)
+    local exiting=false
+    local initial_status_shown=false
+    trap 'exiting=true; echo -e "\n${YELLOW}Stopping all services and exiting...${NC}"; stop_all_services; echo -e "${DIM}Final status:${NC}"; show_system_status; echo -e "${GREEN}All services stopped.${NC}"; echo -e "${GREEN}Thank you for using GitRay! ${ICON_SUCCESS}${NC}"; exit 0' INT
+    
+    # Show status every 10 seconds automatically
+    local status_counter=0
+    while true; do
+        # Exit immediately if Ctrl+C was pressed
+        if [ "$exiting" = true ]; then
+            break
+        fi
+        
+        read -t 1 -n 1 input 2>/dev/null || {
+            status_counter=$((status_counter + 1))
+            if [ $status_counter -ge 10 ]; then
+                if [ "$initial_status_shown" = "false" ]; then
+                    echo -e "${DIM}Auto-refresh: $(date '+%H:%M:%S')${NC}"
+                    show_system_status
+                    echo -e "${DIM}Commands: 'l' logs • 's' status • Ctrl+C exit${NC}"
+                    echo
+                    initial_status_shown=true
+                else
+                    # Move cursor up to overwrite the entire status block including timestamp and commands
+                    # 1 (auto-refresh) + 10 (status) + 1 (commands) + 1 (blank) = 13 lines
+                    printf "\033[13A"
+                    printf "\033[J"
+                    echo -e "${DIM}Auto-refresh: $(date '+%H:%M:%S')${NC}"
+                    show_system_status
+                    echo -e "${DIM}Commands: 'l' logs • 's' status • Ctrl+C exit${NC}"
+                    echo
+                fi
+                status_counter=0
+            fi
+            continue
+        }
+        
+        case "$input" in
+            'l'|'L')
+                status_counter=0
+                echo
+                echo -e "${CYAN}${ICON_INFO} Live Logs (Press 'q' to return)${NC}"
+                echo -e "${GRAY}$(printf '%.0s─' {1..60})${NC}"
+                
+                # Start log viewing in background (only frontend logs for quick start)
+                tail -f "$SCRIPT_DIR"/.frontend.log 2>/dev/null &
+                local tail_pid=$!
+                
+                # Wait for 'q' to exit logs
+                while true; do
+                    read -t 1 -n 1 log_input 2>/dev/null || continue
+                    if [[ "$log_input" == "q" || "$log_input" == "Q" ]]; then
+                        kill $tail_pid 2>/dev/null
+                        echo -e "\n${GREEN}${ICON_SUCCESS} Returned to monitoring${NC}"
+                        echo
+                        show_system_status
+                        echo -e "${DIM}Commands: 'l' logs • 's' status • Ctrl+C exit${NC}"
+                        echo
+                        initial_status_shown=true
+                        break
+                    fi
+                done
+                ;;
+            's'|'S')
+                status_counter=0
+                if [ "$initial_status_shown" = "true" ]; then
+                    # Move cursor up to overwrite the commands line and status block
+                    # 1 (commands) + 1 (blank) = 2 lines to get back to status start
+                    printf "\033[2A"
+                    printf "\033[J"
+                    show_system_status
+                    echo -e "${DIM}Commands: 'l' logs • 's' status • Ctrl+C exit${NC}"
+                    echo
+                else
+                    echo
+                    show_system_status
+                    echo -e "${DIM}Commands: 'l' logs • 's' status • Ctrl+C exit${NC}"
+                    echo
+                    initial_status_shown=true
+                fi
+                ;;
+        esac
+    done
 }
 
 production_build() {
@@ -471,6 +582,9 @@ production_build() {
     
     echo -e "${GREEN}${ICON_SUCCESS} Production build completed!${NC}"
     echo -e "${DIM}Build artifacts are in packages/*/dist and apps/*/dist${NC}"
+    echo
+    echo -e "${DIM}Press Enter to return to main menu...${NC}"
+    read
 }
 
 run_tests() {
@@ -494,6 +608,10 @@ run_tests() {
         5) pnpm run test:watch ;;
         *) echo -e "${RED}Invalid choice${NC}" ;;
     esac
+    
+    echo
+    echo -e "${DIM}Press Enter to return to main menu...${NC}"
+    read
 }
 
 clean_environment() {
@@ -508,6 +626,10 @@ clean_environment() {
         pnpm run clean
         echo -e "${GREEN}${ICON_SUCCESS} Environment cleaned${NC}"
     fi
+    
+    echo
+    echo -e "${DIM}Press Enter to return to main menu...${NC}"
+    read
 }
 
 # ============================================================================
@@ -622,16 +744,40 @@ show_logs() {
                 fi
             else
                 echo "No service logs available. Start some services first."
+                echo
+                echo -e "${DIM}Press Enter to return to main menu...${NC}"
+                read
             fi
             ;;
         2) 
-            [ -f "$SCRIPT_DIR/.backend.log" ] && tail -f "$SCRIPT_DIR/.backend.log" || echo "Backend not running"
+            if [ -f "$SCRIPT_DIR/.backend.log" ]; then
+                tail -f "$SCRIPT_DIR/.backend.log"
+            else
+                echo "Backend not running"
+                echo
+                echo -e "${DIM}Press Enter to return to main menu...${NC}"
+                read
+            fi
             ;;
         3) 
-            [ -f "$SCRIPT_DIR/.frontend.log" ] && tail -f "$SCRIPT_DIR/.frontend.log" || echo "Frontend not running"
+            if [ -f "$SCRIPT_DIR/.frontend.log" ]; then
+                tail -f "$SCRIPT_DIR/.frontend.log"
+            else
+                echo "Frontend not running"
+                echo
+                echo -e "${DIM}Press Enter to return to main menu...${NC}"
+                read
+            fi
             ;;
         4) 
-            [ -f "$LOG_FILE" ] && tail -f "$LOG_FILE" || echo "No main log file found"
+            if [ -f "$LOG_FILE" ]; then
+                tail -f "$LOG_FILE"
+            else
+                echo "No main log file found"
+                echo
+                echo -e "${DIM}Press Enter to return to main menu...${NC}"
+                read
+            fi
             ;;
         5)
             echo -e "${RED}Recent Errors:${NC}"
@@ -653,6 +799,9 @@ show_logs() {
             ;;
         *) 
             echo -e "${RED}Invalid choice${NC}"
+            echo
+            echo -e "${DIM}Press Enter to return to main menu...${NC}"
+            read
             ;;
     esac
 }
