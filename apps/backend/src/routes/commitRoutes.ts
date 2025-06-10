@@ -21,6 +21,8 @@ const router = express.Router();
 // ---------------------------------------------------------------------------
 const repoUrlValidation = [
   query('repoUrl')
+    .notEmpty()
+    .withMessage('repoUrl query parameter is required')
     .isURL({ protocols: ['http', 'https'] })
     .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
     .matches(/\.git$|github\.com|gitlab\.com|bitbucket\.org/)
