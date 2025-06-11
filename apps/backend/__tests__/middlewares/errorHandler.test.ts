@@ -1,4 +1,4 @@
-import { describe, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, test, expect } from 'vitest';
 // apps/backend/__tests__/middlewares/errorHandler.test.ts
 import { Request, Response, NextFunction } from 'express';
 import errorHandler from '../../src/middlewares/errorHandler';

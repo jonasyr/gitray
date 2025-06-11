@@ -1,7 +1,7 @@
-import { describe, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import dotenv from 'dotenv';
 
-// Mocking the modules
+// anying the modules
 vi.mock('express', () => {
   const mockJson = vi.fn();
   const mockApp = {
@@ -63,7 +63,7 @@ vi.mock('../src/services/metrics', () => ({
   ),
 }));
 
-// Mocking process.env
+// anying process.env
 const originalEnv = process.env;
 
 describe('Express App Initialization', () => {

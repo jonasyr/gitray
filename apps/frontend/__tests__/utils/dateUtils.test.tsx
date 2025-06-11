@@ -1,13 +1,4 @@
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  vi,
-  beforeAll,
-  afterAll,
-} from 'vitest';
+import { describe, test, expect } from 'vitest';
 import {
   formatDateByPeriod,
   generateDateRange,

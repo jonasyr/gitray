@@ -1,7 +1,7 @@
-import { describe, expect, test, beforeEach, afterEach, vi } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import { createRoot } from 'react-dom/client';
 
-// Mock the modules
+// any the modules
 vi.mock('react-dom/client', () => ({
   createRoot: vi.fn(() => ({
     render: vi.fn(),

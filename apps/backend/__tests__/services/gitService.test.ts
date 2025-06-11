@@ -37,9 +37,9 @@ describe('GitService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    (simpleGit as MockInstance).mockReturnValue(mockGit);
-    (mkdtemp as MockInstance).mockResolvedValue('/tmp/git-visualizer-test');
-    (rm as MockInstance).mockResolvedValue(undefined);
+    (simpleGit as any).mockReturnValue(mockGit);
+    (mkdtemp as any).mockResolvedValue('/tmp/git-visualizer-test');
+    (rm as any).mockResolvedValue(undefined);
     vi.spyOn(logger, 'error').mockReset();
     vi.spyOn(logger, 'warn').mockReset();
     vi.spyOn(logger, 'info').mockReset();
@@ -137,9 +137,9 @@ describe('GitService Extended Tests', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    (simpleGit as MockInstance).mockReturnValue(mockGit);
-    (mkdtemp as MockInstance).mockResolvedValue('/tmp/git-visualizer-test');
-    (rm as MockInstance).mockResolvedValue(undefined);
+    (simpleGit as any).mockReturnValue(mockGit);
+    (mkdtemp as any).mockResolvedValue('/tmp/git-visualizer-test');
+    (rm as any).mockResolvedValue(undefined);
     vi.spyOn(logger, 'error').mockReset();
     vi.spyOn(logger, 'warn').mockReset();
     vi.spyOn(logger, 'info').mockReset();
@@ -168,7 +168,7 @@ describe('GitService Extended Tests', () => {
       const mockCleanupError = new Error('Cleanup failed');
       const mockTempDir = '/tmp/git-visualizer-test';
       mockGit.clone.mockRejectedValue(mockCloneError);
-      (rm as MockInstance).mockRejectedValueOnce(mockCleanupError);
+      (rm as any).mockRejectedValueOnce(mockCleanupError);
       const errorSpy = vi.spyOn(logger, 'error');
       await expect(gitService.cloneRepository(repoUrl)).rejects.toThrow(
         'Failed to clone repository'
@@ -233,7 +233,7 @@ describe('GitService Extended Tests', () => {
     test('should handle errors when cleaning up repository', async () => {
       const repoPath = '/tmp/git-visualizer-test';
       const mockError = new Error('Cleanup failed');
-      (rm as MockInstance).mockRejectedValue(mockError);
+      (rm as any).mockRejectedValue(mockError);
       await expect(gitService.cleanupRepository(repoPath)).rejects.toThrow(
         'Failed to clean up repository directory'
       );

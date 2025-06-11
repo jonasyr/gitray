@@ -24,6 +24,7 @@
     "clean:all": "pnpm run clean && rimraf **/.DS_Store **/*.log",
     "rebuild": "pnpm run clean && pnpm install && pnpm build",
     "test": "vitest run",
+    "test:ui": "vitest --ui",
     "test:frontend": "vitest run --project frontend",
     "test:backend": "vitest run --project backend",
     "test:watch": "vitest",

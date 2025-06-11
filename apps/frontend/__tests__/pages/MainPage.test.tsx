@@ -1,10 +1,10 @@
-import { describe, expect, vi } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import MainPage from '../../src/pages/MainPage';
 import { getRepositoryFullData } from '../../src/services/api';
 import { Commit } from '@gitray/shared-types';
 
-// Mock the API module
+// any the API module
 vi.mock('../../src/services/api', () => ({
   getRepositoryFullData: vi.fn(),
   getHeatmapData: vi.fn(),

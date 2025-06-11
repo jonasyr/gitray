@@ -68,7 +68,6 @@ export default [
     languageOptions: {
       globals: {
         ...globals.node,
-        ...globals.jest, // Keep jest for now, can be removed if all jest is migrated
         ...globals.vitest, // Add vitest globals
         module: true,
         require: true,

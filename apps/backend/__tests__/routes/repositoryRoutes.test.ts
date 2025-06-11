@@ -18,7 +18,7 @@ import errorHandler from '../../src/middlewares/errorHandler';
 import logger from '../../src/services/logger';
 import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
 
-// Mock des gitService
+// any des gitService
 vi.mock('../../src/services/gitService', () => ({
   gitService: {
     cloneRepository: vi.fn(),
@@ -39,24 +39,16 @@ vi.mock('../../src/services/cache', () => ({
   default: { get: vi.fn(), set: vi.fn() },
 }));
 
-// Typ-Casting für gemockte Funktionen
-const mockCloneRepository =
-  gitService.cloneRepository as MockInstanceedFunction<
-    typeof gitService.cloneRepository
-  >;
-const mockGetCommits = gitService.getCommits as MockInstanceedFunction<
-  typeof gitService.getCommits
->;
-const mockCleanupRepository =
-  gitService.cleanupRepository as MockInstanceedFunction<
-    typeof gitService.cleanupRepository
-  >;
+// Type casting for mocked functions
+const mockCloneRepository = gitService.cloneRepository as any;
+const mockGetCommits = gitService.getCommits as any;
+const mockCleanupRepository = gitService.cleanupRepository as any;
 
 describe('Repository API Extended Tests', () => {
   let app: Application;
 
   beforeEach(() => {
-    // Zurücksetzen aller Mocks für jeden Test
+    // Zurücksetzen aller anys für jeden Test
     vi.clearAllMocks();
 
     // Express App für Tests einrichten
@@ -163,7 +155,7 @@ describe('Repository API Extended Tests', () => {
     const tempDir = '/tmp/repo';
     mockCloneRepository.mockResolvedValue(tempDir);
     mockGetCommits.mockResolvedValue([]);
-    (gitService.aggregateCommitsByTime as MockInstance).mockResolvedValue({});
+    (gitService.aggregateCommitsByTime as any).mockResolvedValue({});
     mockCleanupRepository.mockResolvedValue();
 
     // Act
@@ -181,7 +173,7 @@ describe('Repository API Extended Tests', () => {
     const tempDir = '/tmp/repo';
     mockCloneRepository.mockResolvedValue(tempDir);
     mockGetCommits.mockResolvedValue([]);
-    (gitService.aggregateCommitsByTime as MockInstance).mockResolvedValue({});
+    (gitService.aggregateCommitsByTime as any).mockResolvedValue({});
     mockCleanupRepository.mockResolvedValue();
 
     // Act

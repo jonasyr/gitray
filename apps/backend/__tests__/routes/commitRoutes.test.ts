@@ -1,4 +1,4 @@
-import { describe, expect, beforeEach, vi } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import request from 'supertest';
 import express, { Application } from 'express';
 import { CommitHeatmapData } from '@gitray/shared-types';
@@ -7,7 +7,7 @@ import { gitService } from '../../src/services/gitService';
 import errorHandler from '../../src/middlewares/errorHandler';
 import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
 
-// Mock gitService methods used in the route
+// any gitService methods used in the route
 vi.mock('../../src/services/gitService', () => ({
   gitService: {
     cloneRepository: vi.fn(),

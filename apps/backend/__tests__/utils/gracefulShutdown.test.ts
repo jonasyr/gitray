@@ -1,11 +1,11 @@
-import { describe, expect, beforeEach, vi, type MockInstance } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import { Server } from 'http';
 import actualLogger from '../../src/services/logger'; // Import for type
 // We need to get the mocked versions of these for assertion
 // import redisCache from '../../src/services/cache';
 // import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
 
-// Mocks
+// anys
 vi.mock('http', () => ({
   Server: vi.fn(() => ({
     close: vi.fn((callback?: () => void) => {
@@ -23,8 +23,8 @@ vi.mock('../../src/services/logger', () => ({
 }));
 
 // Hold references to the mocked functions to assert against
-let mockRunCleanupQueue: MockInstance;
-let mockRedisQuit: MockInstance;
+let mockRunCleanupQueue: any;
+let mockRedisQuit: any;
 
 vi.mock('../../src/services/cache', () => {
   mockRedisQuit = vi.fn().mockResolvedValue(undefined);
@@ -60,7 +60,7 @@ describe('Graceful Shutdown', () => {
   let setupGracefulShutdown: (server: Server) => void;
   let isServerShuttingDown: () => boolean;
   let logger: typeof actualLogger;
-  let clearTimeoutSpy: MockInstance; // Added spy instance
+  let clearTimeoutSpy: any; // Added spy instance
 
   beforeEach(async () => {
     vi.clearAllMocks();

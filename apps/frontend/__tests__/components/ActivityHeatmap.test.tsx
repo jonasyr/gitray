@@ -1,4 +1,4 @@
-import { describe, expect, vi } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import { render, waitFor, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ActivityHeatmap from '../../src/components/ActivityHeatmap';

@@ -1,8 +1,8 @@
-import { describe, expect, beforeEach, vi, Mock } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import { getWorkspaceCommits } from '../../src/services/api';
 import { Commit } from '@gitray/shared-types';
 
-// Mock axios
+// any axios
 vi.mock('axios', () => {
   const mockPost = vi.fn();
   const mockCreate = vi.fn(() => ({ post: mockPost }));
@@ -44,7 +44,7 @@ describe('API Service', () => {
 
     // Access the mocked functions
     const axios = await import('axios');
-    const mockAxiosInstance = (axios.default.create as Mock)();
+    const mockAxiosInstance = (axios.default.create as any)();
     mockAxiosInstance.post.mockResolvedValueOnce(mockResponse);
 
     // Act
@@ -64,9 +64,9 @@ describe('API Service', () => {
 
     // Access the mocked functions
     const axios = await import('axios');
-    const mockAxiosInstance = (axios.default.create as Mock)();
+    const mockAxiosInstance = (axios.default.create as any)();
     mockAxiosInstance.post.mockRejectedValueOnce(error);
-    (axios.default.isAxiosError as unknown as Mock).mockReturnValueOnce(true);
+    (axios.default.isAxiosError as unknown as any).mockReturnValueOnce(true);
 
     // Act & Assert
     await expect(getWorkspaceCommits(repoUrl)).rejects.toThrow('Network error');

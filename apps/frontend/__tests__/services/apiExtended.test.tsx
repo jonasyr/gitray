@@ -1,8 +1,8 @@
-import { describe, expect, beforeEach, vi, Mock } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import { getHeatmapData, getRepositoryFullData } from '../../src/services/api';
 import { CommitHeatmapData } from '@gitray/shared-types';
 
-// Mock axios
+// any axios
 vi.mock('axios', () => {
   const mockGet = vi.fn();
   const mockPost = vi.fn();
@@ -32,7 +32,7 @@ describe('API Service extended', () => {
 
     // Access the mocked functions
     const axios = await import('axios');
-    const mockAxiosInstance = (axios.default.create as Mock)();
+    const mockAxiosInstance = (axios.default.create as any)();
     mockAxiosInstance.get.mockResolvedValueOnce({ data: heatmap });
 
     // Act
@@ -52,9 +52,9 @@ describe('API Service extended', () => {
 
     // Access the mocked functions
     const axios = await import('axios');
-    const mockAxiosInstance = (axios.default.create as Mock)();
+    const mockAxiosInstance = (axios.default.create as any)();
     mockAxiosInstance.get.mockRejectedValueOnce(error);
-    (axios.default.isAxiosError as unknown as Mock).mockReturnValueOnce(true);
+    (axios.default.isAxiosError as unknown as any).mockReturnValueOnce(true);
 
     // Act & Assert
     await expect(getHeatmapData('url', 'day')).rejects.toThrow(
@@ -77,7 +77,7 @@ describe('API Service extended', () => {
 
     // Access the mocked functions
     const axios = await import('axios');
-    const mockAxiosInstance = (axios.default.create as Mock)();
+    const mockAxiosInstance = (axios.default.create as any)();
     mockAxiosInstance.post.mockResolvedValueOnce(response);
 
     // Act
@@ -102,9 +102,9 @@ describe('API Service extended', () => {
 
     // Access the mocked functions
     const axios = await import('axios');
-    const mockAxiosInstance = (axios.default.create as Mock)();
+    const mockAxiosInstance = (axios.default.create as any)();
     mockAxiosInstance.post.mockRejectedValueOnce(error);
-    (axios.default.isAxiosError as unknown as Mock).mockReturnValueOnce(true);
+    (axios.default.isAxiosError as unknown as any).mockReturnValueOnce(true);
 
     // Act & Assert
     await expect(getRepositoryFullData('url')).rejects.toThrow(

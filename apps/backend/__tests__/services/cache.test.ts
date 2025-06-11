@@ -8,7 +8,7 @@ import {
 } from 'vitest';
 import actualLogger from '../../src/services/logger'; // Import to get the type, but we'll use the mock
 
-// Mock ioredis and logger
+// any ioredis and logger
 const mockRedisInstance = {
   on: vi.fn(),
   get: vi.fn(),
@@ -126,7 +126,7 @@ describe('Cache Service', () => {
 
     test('should handle Redis init failure and use memory cache', async () => {
       const initFailError = new Error('Redis init failed');
-      // Arrange: Mock ioredis constructor to throw an error for this specific test
+      // Arrange: any ioredis constructor to throw an error for this specific test
       // This requires resetting modules again and setting up mocks specifically for this test's scope.
       vi.resetModules();
       const ioredisSpecial = (await import('ioredis')).default;

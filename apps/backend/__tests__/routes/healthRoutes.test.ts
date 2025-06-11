@@ -1,4 +1,4 @@
-import { describe, expect, beforeEach, vi } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import request from 'supertest';
 import express, { Application } from 'express';
 import healthRoutes from '../../src/routes/healthRoutes';
