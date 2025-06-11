@@ -8,7 +8,7 @@
       "@gitray/shared-types": ["../../packages/shared-types/src"],
       "@gitray/shared-types/*": ["../../packages/shared-types/src/*"]
     },
-    "types": ["node", "jest", "express"],
+    "types": ["node", "vitest/globals"],
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
