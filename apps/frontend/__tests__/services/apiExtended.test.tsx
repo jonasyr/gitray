@@ -1,23 +1,25 @@
-import axios from 'axios';
+import { describe, expect, beforeEach, vi, Mock } from 'vitest';
 import { getHeatmapData, getRepositoryFullData } from '../../src/services/api';
 import { CommitHeatmapData } from '@gitray/shared-types';
 
-jest.mock('axios', () => {
-  const mock = {
-    create: jest.fn(() => mock),
-    get: jest.fn(),
-    post: jest.fn(),
-    isAxiosError: jest.fn(),
-  } as any;
-  return mock;
-});
+// Mock axios
+vi.mock('axios', () => {
+  const mockGet = vi.fn();
+  const mockPost = vi.fn();
+  const mockCreate = vi.fn(() => ({ get: mockGet, post: mockPost }));
+  const mockIsAxiosError = vi.fn();
 
-const mockedAxios = axios as jest.Mocked<typeof axios>;
+  return {
+    default: {
+      create: mockCreate,
+      isAxiosError: mockIsAxiosError,
+    },
+  };
+});
 
 describe('API Service extended', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    mockedAxios.create.mockReturnValue(mockedAxios);
+    vi.clearAllMocks();
   });
 
   test('getHeatmapData constructs query params and returns data', async () => {
@@ -27,13 +29,17 @@ describe('API Service extended', () => {
       data: [],
       metadata: { maxCommitCount: 0, totalCommits: 0 },
     };
-    mockedAxios.get.mockResolvedValueOnce({ data: heatmap });
+
+    // Access the mocked functions
+    const axios = await import('axios');
+    const mockAxiosInstance = (axios.default.create as Mock)();
+    mockAxiosInstance.get.mockResolvedValueOnce({ data: heatmap });
 
     // Act
     const result = await getHeatmapData('url', 'day', { author: 'Me' });
 
     // Assert
-    expect(mockedAxios.get).toHaveBeenCalled();
+    expect(mockAxiosInstance.get).toHaveBeenCalled();
     expect(result).toEqual(heatmap);
   });
 
@@ -43,8 +49,12 @@ describe('API Service extended', () => {
       request: {},
       message: 'Network',
     };
-    mockedAxios.get.mockRejectedValueOnce(error);
-    mockedAxios.isAxiosError.mockReturnValueOnce(true);
+
+    // Access the mocked functions
+    const axios = await import('axios');
+    const mockAxiosInstance = (axios.default.create as Mock)();
+    mockAxiosInstance.get.mockRejectedValueOnce(error);
+    (axios.default.isAxiosError as unknown as Mock).mockReturnValueOnce(true);
 
     // Act & Assert
     await expect(getHeatmapData('url', 'day')).rejects.toThrow(
@@ -64,13 +74,17 @@ describe('API Service extended', () => {
         },
       },
     };
-    mockedAxios.post.mockResolvedValueOnce(response);
+
+    // Access the mocked functions
+    const axios = await import('axios');
+    const mockAxiosInstance = (axios.default.create as Mock)();
+    mockAxiosInstance.post.mockResolvedValueOnce(response);
 
     // Act
     const result = await getRepositoryFullData('url', 'day');
 
     // Assert
-    expect(mockedAxios.post).toHaveBeenCalledWith(
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith(
       '/api/repositories/full-data',
       { repoUrl: 'url', timePeriod: 'day', filterOptions: undefined }
     );
@@ -84,9 +98,13 @@ describe('API Service extended', () => {
     // Arrange
     const error = {
       response: { data: { error: 'fail' } },
-    } as any;
-    mockedAxios.post.mockRejectedValueOnce(error);
-    mockedAxios.isAxiosError.mockReturnValueOnce(true);
+    };
+
+    // Access the mocked functions
+    const axios = await import('axios');
+    const mockAxiosInstance = (axios.default.create as Mock)();
+    mockAxiosInstance.post.mockRejectedValueOnce(error);
+    (axios.default.isAxiosError as unknown as Mock).mockReturnValueOnce(true);
 
     // Act & Assert
     await expect(getRepositoryFullData('url')).rejects.toThrow(

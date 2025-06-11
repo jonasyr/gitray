@@ -1,19 +1,27 @@
+import {
+  describe,
+  test,
+  expect,
+  beforeEach,
+  vi,
+  type MockInstance,
+} from 'vitest';
 import actualLogger from '../../src/services/logger'; // Import to get the type, but we'll use the mock
 
 // Mock ioredis and logger
 const mockRedisInstance = {
-  on: jest.fn(),
-  get: jest.fn(),
-  set: jest.fn(),
-  del: jest.fn(),
-  quit: jest.fn(),
-  disconnect: jest.fn(),
+  on: vi.fn(),
+  get: vi.fn(),
+  set: vi.fn(),
+  del: vi.fn(),
+  quit: vi.fn(),
+  disconnect: vi.fn(),
 };
 
 // This will store the handlers registered by initRedis
 const capturedRedisHandlers: Record<string, ((err?: Error) => void)[]> = {};
 
-(mockRedisInstance.on as jest.Mock).mockImplementation(
+(mockRedisInstance.on as MockInstance).mockImplementation(
   (event: string, callback: (err?: Error) => void) => {
     if (!capturedRedisHandlers[event]) {
       capturedRedisHandlers[event] = [];
@@ -23,11 +31,11 @@ const capturedRedisHandlers: Record<string, ((err?: Error) => void)[]> = {};
   }
 );
 
-jest.mock('ioredis', () => {
-  return jest.fn().mockImplementation(() => mockRedisInstance);
-});
+vi.mock('ioredis', () => ({
+  default: vi.fn().mockImplementation(() => mockRedisInstance),
+}));
 
-jest.mock('../../src/config', () => ({
+vi.mock('../../src/config', () => ({
   config: {
     redis: {
       host: 'localhost',
@@ -36,12 +44,12 @@ jest.mock('../../src/config', () => ({
   },
 }));
 
-jest.mock('../../src/services/logger', () => ({
+vi.mock('../../src/services/logger', () => ({
   __esModule: true,
   default: {
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
   },
 }));
 
@@ -50,19 +58,19 @@ describe('Cache Service', () => {
   let logger: typeof actualLogger; // To hold the mocked logger instance
 
   beforeEach(async () => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     // Clear captured handlers for each test
     for (const key in capturedRedisHandlers) {
       delete capturedRedisHandlers[key];
     }
 
     // Reset modules to ensure initRedis is called fresh and mocks are reapplied
-    jest.resetModules();
+    vi.resetModules();
 
     // Re-import dependencies with mocks
     // Ensure ioredis mock is active after reset
     const ioredis = (await import('ioredis')).default;
-    (ioredis as unknown as jest.Mock).mockImplementation(
+    (ioredis as unknown as MockInstance).mockImplementation(
       () => mockRedisInstance
     );
 
@@ -120,9 +128,9 @@ describe('Cache Service', () => {
       const initFailError = new Error('Redis init failed');
       // Arrange: Mock ioredis constructor to throw an error for this specific test
       // This requires resetting modules again and setting up mocks specifically for this test's scope.
-      jest.resetModules();
+      vi.resetModules();
       const ioredisSpecial = (await import('ioredis')).default;
-      (ioredisSpecial as unknown as jest.Mock).mockImplementationOnce(() => {
+      (ioredisSpecial as unknown as MockInstance).mockImplementationOnce(() => {
         // Use mockImplementationOnce
         throw initFailError;
       });
@@ -199,9 +207,9 @@ describe('Cache Service', () => {
   describe('Cache Operations with Memory Cache (Redis unavailable)', () => {
     beforeEach(async () => {
       // Simulate Redis init failure
-      jest.resetModules();
+      vi.resetModules();
       const ioredis = (await import('ioredis')).default;
-      (ioredis as unknown as jest.Mock).mockImplementation(() => {
+      (ioredis as unknown as MockInstance).mockImplementation(() => {
         throw new Error('Simulated Redis init failure');
       });
       cache = (await import('../../src/services/cache')).default;
@@ -255,9 +263,9 @@ describe('Cache Service', () => {
 
     test('should return true if redis init failed (memory cache fallback)', async () => {
       // Similar to the init failure test, set up a specific scenario
-      jest.resetModules();
+      vi.resetModules();
       const ioredisFail = (await import('ioredis')).default;
-      (ioredisFail as unknown as jest.Mock).mockImplementationOnce(() => {
+      (ioredisFail as unknown as MockInstance).mockImplementationOnce(() => {
         throw new Error('init fail');
       });
       const localCache = (await import('../../src/services/cache')).default;

@@ -1,3 +1,13 @@
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+  beforeAll,
+  afterAll,
+} from 'vitest';
 // apps/frontend/src/__tests__/App.test.tsx
 import { render, screen } from '@testing-library/react';
 import App from '../src/App';

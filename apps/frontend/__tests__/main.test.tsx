@@ -1,87 +1,50 @@
-// apps/frontend/src/__tests__/main.test.tsx
+import { describe, expect, test, beforeEach, afterEach, vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
 
 // Mock the modules
-jest.mock('react-dom/client', () => ({
-  createRoot: jest.fn(() => ({
-    render: jest.fn(),
+vi.mock('react-dom/client', () => ({
+  createRoot: vi.fn(() => ({
+    render: vi.fn(),
   })),
 }));
 
-// Mock React's StrictMode without importing from react
-jest.mock('react', () => {
-  const actualReact = jest.requireActual('react');
+vi.mock('react', async () => {
+  const actualReact = await vi.importActual('react');
   return {
     ...actualReact,
-    StrictMode: jest.fn(
-      ({ children }: { children: React.ReactNode }) => children
-    ),
+    StrictMode: ({ children }: { children: React.ReactNode }) => children,
   };
 });
 
-// Mock App component without importing
-jest.mock('../App', () => jest.fn(() => null), { virtual: true });
+vi.mock('../src/App', () => ({
+  default: () => null,
+}));
 
-// Mock direct import for index.css
-jest.mock('../index.css', () => ({}), { virtual: true });
-
-// Mock getElementById
-const originalGetElementById = document.getElementById;
+vi.mock('../src/index.css', () => ({}));
 
 describe('Main Entry Point', () => {
-  // Explicitly type mockRootElement as HTMLDivElement
   let mockRootElement: HTMLDivElement;
+  const originalGetElementById = document.getElementById;
 
   beforeEach(() => {
-    // Clear mocks
-    jest.clearAllMocks();
-
-    // Create mock root element
+    vi.clearAllMocks();
     mockRootElement = document.createElement('div');
-
-    // Mock getElementById to always return our non-null element
-    document.getElementById = jest.fn().mockReturnValue(mockRootElement);
-
-    // Create a mock version of main.tsx content
-    jest.doMock(
-      '../main.tsx',
-      () => {
-        // This simulates what main.tsx would do
-        const rootElement = document.getElementById('root');
-        // Only proceed if rootElement is not null (TypeScript safety)
-        if (rootElement) {
-          const root = createRoot(rootElement);
-          root.render(
-            jest.requireMock('react').StrictMode({
-              children: jest.requireMock('../App')(),
-            })
-          );
-        }
-        return {};
-      },
-      { virtual: true }
-    );
+    document.getElementById = vi.fn().mockReturnValue(mockRootElement);
   });
 
   afterEach(() => {
-    // Restore getElementById
     document.getElementById = originalGetElementById;
-
-    // Reset modules to ensure clean slate between tests
-    jest.resetModules();
+    vi.resetModules();
   });
 
-  test('should render App component into root element', () => {
-    // Arrange is handled in beforeEach
-
-    // Act
-    jest.requireMock('../main.tsx');
+  test('should render App component into root element', async () => {
+    // Act - Import main.tsx to trigger execution
+    await import('../src/main');
 
     // Assert
     expect(document.getElementById).toHaveBeenCalledWith('root');
     expect(createRoot).toHaveBeenCalledWith(mockRootElement);
-    expect(
-      (createRoot as jest.Mock).mock.results[0].value.render
-    ).toHaveBeenCalled();
+    const mockCreateRoot = vi.mocked(createRoot);
+    expect(mockCreateRoot.mock.results[0].value.render).toHaveBeenCalled();
   });
 });

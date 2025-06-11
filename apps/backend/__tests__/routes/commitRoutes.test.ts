@@ -1,3 +1,4 @@
+import { describe, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import express, { Application } from 'express';
 import { CommitHeatmapData } from '@gitray/shared-types';
@@ -7,37 +8,31 @@ import errorHandler from '../../src/middlewares/errorHandler';
 import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
 
 // Mock gitService methods used in the route
-jest.mock('../../src/services/gitService', () => ({
+vi.mock('../../src/services/gitService', () => ({
   gitService: {
-    cloneRepository: jest.fn(),
-    getCommits: jest.fn(),
-    aggregateCommitsByTime: jest.fn(),
-    cleanupRepository: jest.fn(),
+    cloneRepository: vi.fn(),
+    getCommits: vi.fn(),
+    aggregateCommitsByTime: vi.fn(),
+    cleanupRepository: vi.fn(),
   },
 }));
-jest.mock('../../src/services/cache', () => ({
+vi.mock('../../src/services/cache', () => ({
   __esModule: true,
-  default: { get: jest.fn(), set: jest.fn() },
+  default: { get: vi.fn(), set: vi.fn() },
 }));
 
-const mockClone = gitService.cloneRepository as jest.MockedFunction<
-  typeof gitService.cloneRepository
+const mockClone = gitService.cloneRepository as ReturnType<typeof vi.fn>;
+const mockGetCommits = gitService.getCommits as ReturnType<typeof vi.fn>;
+const mockAggregate = gitService.aggregateCommitsByTime as ReturnType<
+  typeof vi.fn
 >;
-const mockGetCommits = gitService.getCommits as jest.MockedFunction<
-  typeof gitService.getCommits
->;
-const mockAggregate = gitService.aggregateCommitsByTime as jest.MockedFunction<
-  typeof gitService.aggregateCommitsByTime
->;
-const mockCleanup = gitService.cleanupRepository as jest.MockedFunction<
-  typeof gitService.cleanupRepository
->;
+const mockCleanup = gitService.cleanupRepository as ReturnType<typeof vi.fn>;
 
 describe('commitRoutes /heatmap', () => {
   let app: Application;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     app = express();
     app.use('/api/commits', commitRoutes);
     app.use(errorHandler);
@@ -55,7 +50,7 @@ describe('commitRoutes /heatmap', () => {
     mockClone.mockResolvedValue(tempDir);
     mockGetCommits.mockResolvedValue([]);
     mockAggregate.mockResolvedValue(heatmap);
-    mockCleanup.mockResolvedValue();
+    mockCleanup.mockResolvedValue(undefined);
 
     // Act
     const res = await request(app)
@@ -89,7 +84,7 @@ describe('commitRoutes /heatmap', () => {
     const tempDir = '/tmp/repo';
     mockClone.mockResolvedValue(tempDir);
     mockGetCommits.mockRejectedValue(new Error('fail'));
-    mockCleanup.mockResolvedValue();
+    mockCleanup.mockResolvedValue(undefined);
 
     // Act
     const res = await request(app)
@@ -109,7 +104,7 @@ describe('commitRoutes / list commits', () => {
   let app: Application;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     app = express();
     app.use('/api/commits', commitRoutes);
     app.use(errorHandler);
@@ -130,7 +125,7 @@ describe('commitRoutes / list commits', () => {
     ];
     mockClone.mockResolvedValue(tempDir);
     mockGetCommits.mockResolvedValue(commits);
-    mockCleanup.mockResolvedValue();
+    mockCleanup.mockResolvedValue(undefined);
 
     // Act
     const res = await request(app)

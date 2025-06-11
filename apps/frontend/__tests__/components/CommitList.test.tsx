@@ -1,3 +1,13 @@
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+  beforeAll,
+  afterAll,
+} from 'vitest';
 import { render, screen } from '@testing-library/react';
 import CommitList from '../../src/components/CommitList';
 import { Commit } from '@gitray/shared-types';
