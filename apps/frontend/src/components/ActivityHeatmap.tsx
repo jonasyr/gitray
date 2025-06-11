@@ -24,6 +24,7 @@ import {
   TIME,
 } from '@gitray/shared-types';
 import { getHeatmapData } from '../services/api';
+import RiveLoader from './RiveLoader';
 
 interface ActivityHeatmapProps {
   repoUrl: string;
@@ -261,7 +262,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
           />
           {loading && (
             <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-              <div className="animate-spin h-5 w-5 border-2 border-green-500 border-t-transparent rounded-full" />
+              <RiveLoader size={20} className="" />
             </div>
           )}
         </div>
@@ -269,9 +270,11 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
         {/* Heatmap container with dynamic sizing */}
         <div ref={containerRef} className="w-full overflow-x-auto">
           {loading ? (
-            <div className="flex justify-center items-center h-40">
-              <span className="text-white text-lg">Loading commits...</span>
-            </div>
+            <RiveLoader
+              size={80}
+              message="Loading heatmap data..."
+              className="h-40 flex justify-center items-center"
+            />
           ) : (
             <div className="min-w-fit">
               <CalendarHeatmap

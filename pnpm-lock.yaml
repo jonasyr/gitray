@@ -153,6 +153,9 @@ importers:
       '@gitray/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@rive-app/react-canvas':
+        specifier: ^4.21.3
+        version: 4.21.3(react@19.1.0)
       apexcharts:
         specifier: ^4.7.0
         version: 4.7.0
