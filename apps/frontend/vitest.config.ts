@@ -13,8 +13,10 @@ export default defineConfig({
     include: ['**/*.{test,spec}.{ts,tsx}'],
     exclude: ['node_modules', 'dist', 'coverage'],
     css: false,
-    deps: {
-      inline: ['@testing-library/user-event'],
+    server: {
+      deps: {
+        inline: ['@testing-library/user-event'],
+      },
     },
     coverage: {
       provider: 'v8',
