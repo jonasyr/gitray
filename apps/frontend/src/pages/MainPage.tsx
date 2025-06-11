@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLoading } from '../context/LoadingContext';
 
 /**
  * Main application page that orchestrates repository input and visualizations.
@@ -18,10 +19,10 @@ import { Commit } from '@gitray/shared-types';
  */
 const MainPage: React.FC = () => {
   const [commits, setCommits] = useState<Commit[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [repoUrl, setRepoUrl] = useState<string>('');
   const [showHeatmap, setShowHeatmap] = useState<boolean>(false);
+  const { isLoading, showLoading, hideLoading } = useLoading();
 
   /**
    * Fetches repository data when the user requests visualization of a new
@@ -31,7 +32,7 @@ const MainPage: React.FC = () => {
     // Trigger data fetch for the entered repository URL
     console.log('Visualizing:', inputRepoUrl);
     setRepoUrl(inputRepoUrl);
-    setIsLoading(true);
+    showLoading();
     setError(null);
 
     try {
@@ -47,7 +48,7 @@ const MainPage: React.FC = () => {
       setCommits([]);
       setShowHeatmap(false);
     } finally {
-      setIsLoading(false);
+      hideLoading();
     }
   };
 
@@ -66,14 +67,6 @@ const MainPage: React.FC = () => {
       {/* Main area */}
       <main className="w-full max-w-4xl mx-auto flex flex-col flex-grow space-y-8 px-4">
         <RepoInput onVisualize={handleVisualize} />
-
-        {isLoading && (
-          <div className="mt-8 text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto"></div>
-            <p className="mt-2 text-gray-400">Loading repository data...</p>
-          </div>
-        )}
-
         {error && (
           <div className="mt-8 p-4 bg-red-900 border border-red-700 text-red-200 rounded-md">
             <p>

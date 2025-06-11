@@ -25,7 +25,8 @@ module.exports = {
       rootDir: './',
       testPathIgnorePatterns: ['/node_modules/'],
       moduleNameMapper: {
-        '^@gitray/shared-types$': '<rootDir>/packages/shared-types/src/index.ts',
+        '^@gitray/shared-types$':
+          '<rootDir>/packages/shared-types/src/index.ts',
       },
       globals: {
         'ts-jest': {
@@ -46,17 +47,18 @@ module.exports = {
           { tsconfig: 'apps/frontend/tsconfig.jest.json' },
         ],
         // ➞ Assets stubben
-        '\\.(jpg|jpeg|png|gif|eot|otf|webp|svg|ttf|woff|woff2|mp4|webm|wav|mp3|m4a|aac|oga)$':
+        '\\.(jpg|jpeg|png|gif|eot|otf|webp|svg|ttf|woff|woff2|mp4|webm|wav|mp3|m4a|aac|oga|riv)$':
           'jest-transform-stub',
       },
 
       moduleNameMapper: {
         '\\.css$': 'identity-obj-proxy',
-        '\\.(svg|jpg|jpeg|png|gif|webp)$':
+        '\\.(svg|jpg|jpeg|png|gif|webp|riv)$':
           '<rootDir>/apps/frontend/__mocks__/fileMock.cjs',
         '^/vite\\.svg$': '<rootDir>/apps/frontend/__mocks__/fileMock.cjs',
         '^ansi-styles$': '<rootDir>/apps/frontend/__mocks__/ansi-styles.cjs',
-        '^@gitray/shared-types$': '<rootDir>/packages/shared-types/src/index.ts',
+        '^@gitray/shared-types$':
+          '<rootDir>/packages/shared-types/src/index.ts',
       },
       setupFilesAfterEnv: ['<rootDir>/apps/frontend/jest.setup.ts'],
       moduleDirectories: [

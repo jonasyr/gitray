@@ -24,6 +24,7 @@ import {
   TIME,
 } from '@gitray/shared-types';
 import { getHeatmapData } from '../services/api';
+import { useLoading } from '../context/LoadingContext';
 
 interface ActivityHeatmapProps {
   repoUrl: string;
@@ -110,6 +111,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
   const [loading, setLoading] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const { showLoading, hideLoading } = useLoading();
 
   // memoize start/end dates to avoid unstable deps
   const startDate = useMemo(() => new Date(Date.now() - TIME.DAY * 364), []);
@@ -189,13 +191,15 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
   const fetchData = useCallback(async () => {
     if (!repoUrl) return;
     setLoading(true);
+    showLoading();
     try {
       const d = await getHeatmapData(repoUrl, 'day', filterOptions);
       setData(d);
     } finally {
       setLoading(false);
+      hideLoading();
     }
-  }, [repoUrl, filterOptions]);
+  }, [repoUrl, filterOptions, showLoading, hideLoading]);
 
   // Only call fetchData when filters changed
   const handleMenuClose = () => {
@@ -259,11 +263,6 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
             }
             placeholder="Select author(s) to filter..."
           />
-          {loading && (
-            <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-              <div className="animate-spin h-5 w-5 border-2 border-green-500 border-t-transparent rounded-full" />
-            </div>
-          )}
         </div>
         <br></br>
         {/* Heatmap container with dynamic sizing */}

@@ -7,7 +7,7 @@ module.exports = {
     // CSS-Module
     '\\.css$': 'identity-obj-proxy',
     // Stub für Bild- und SVG-Imports
-    '\\.(svg|jpg|jpeg|png|gif|webp)$': '<rootDir>/__mocks__/fileMock.cjs',
+    '\\.(svg|jpg|jpeg|png|gif|webp|riv)$': '<rootDir>/__mocks__/fileMock.cjs',
     // Mock problematic ESM modules
     '^ansi-styles$': '<rootDir>/__mocks__/ansi-styles.cjs',
   },
@@ -21,7 +21,7 @@ module.exports = {
       },
     ],
     // Assets
-    '\\.(jpg|jpeg|png|gif|eot|otf|webp|svg|ttf|woff|woff2|mp4|webm|wav|mp3|m4a|aac|oga)$':
+    '\\.(jpg|jpeg|png|gif|eot|otf|webp|svg|ttf|woff|woff2|mp4|webm|wav|mp3|m4a|aac|oga|riv)$':
       'jest-transform-stub',
   },
 
