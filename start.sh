@@ -70,11 +70,16 @@ readonly ICON_DATABASE="🗄️"
 # UTILITY FUNCTIONS
 # ============================================================================
 
-# Global graceful shutdown handler
+# Global graceful shutdown handler - SIMPLIFIED VERSION
 graceful_shutdown() {
     if [ "$SHUTDOWN_IN_PROGRESS" = "true" ]; then
         # If already shutting down, force exit on second Ctrl+C
         echo -e "\n${RED}${ICON_ERROR} Force exit requested${NC}"
+        pkill -KILL -f "pnpm.*dev" 2>/dev/null || true
+        pkill -KILL -f "pnpm.*watch" 2>/dev/null || true
+        pkill -KILL -f "vite" 2>/dev/null || true
+        pkill -KILL -f "tsc.*watch" 2>/dev/null || true
+        docker stop gitray-redis 2>/dev/null && docker rm gitray-redis 2>/dev/null || true
         exit 1
     fi
     
@@ -93,12 +98,15 @@ graceful_shutdown() {
     echo -e "${BLUE}${ICON_CLEAN} Cleaning up processes...${NC}"
     cleanup_background_processes
     
+    # Clean up main PID file
+    rm -f "$PID_FILE" 2>/dev/null || true
+    
     echo -e "${GREEN}${ICON_SUCCESS} Shutdown complete${NC}"
     echo -e "${GREEN}Thank you for using GitRay! ${ICON_SUCCESS}${NC}"
     exit 0
 }
 
-# Set up global trap for graceful shutdown
+# Set up graceful shutdown trap (simple version)
 trap 'graceful_shutdown' INT TERM
 
 cleanup_background_processes() {
@@ -133,6 +141,18 @@ cleanup_background_processes() {
     # Clean up PID files
     rm -f "$SCRIPT_DIR"/.*.pid 2>/dev/null || true
 }
+
+# Bulletproof cleanup - DISABLED (was too aggressive)
+# cleanup_background_processes_bulletproof() {
+#     # This function was causing startup issues by being too aggressive
+#     # Use cleanup_background_processes instead
+# }
+
+# Clean up any stale processes from previous script runs - SIMPLIFIED
+# cleanup_stale_processes() {
+#     # This function was too aggressive and caused startup issues
+#     # Simple cleanup is now done inline in main()
+# }
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"
@@ -684,6 +704,18 @@ stop_all_services_quiet() {
     # Clean up all PID files
     rm -f "$SCRIPT_DIR"/.*.pid >/dev/null 2>&1 || true
 }
+
+# Bulletproof service stopping - DISABLED (was too aggressive)
+# stop_all_services_bulletproof() {
+#     # This function was causing startup issues by being too aggressive
+#     # Use stop_all_services_quiet instead
+# }
+
+# Verify that all services are actually stopped - SIMPLIFIED
+# verify_all_services_stopped() {
+#     # This function was too verbose and complex
+#     # Simple verification is better
+# }
 
 
 # ============================================================================
@@ -1527,6 +1559,19 @@ main() {
     mkdir -p "$(dirname "$LOG_FILE")"
     log "GitRay Development Environment Manager started"
     
+    # Create lock file to prevent multiple instances
+    echo $$ > "$PID_FILE"
+    
+    # Clean up any stale processes from previous runs (simple version)
+    echo -e "${DIM}Checking for stale processes...${NC}"
+    pkill -f "pnpm.*dev" 2>/dev/null || true
+    pkill -f "pnpm.*watch" 2>/dev/null || true
+    pkill -f "vite" 2>/dev/null || true
+    pkill -f "tsc.*watch" 2>/dev/null || true
+    docker stop gitray-redis 2>/dev/null || true
+    docker rm gitray-redis 2>/dev/null || true
+    rm -f "$SCRIPT_DIR"/.*.pid 2>/dev/null || true
+    
     # Check for command line arguments
     case "${1:-}" in
         "start"|"dev") full_development_setup ;;
@@ -1534,10 +1579,17 @@ main() {
         "build") production_build ;;
         "test") run_tests ;;
         "clean") clean_environment ;;
-        "stop") stop_all_services ;;
+        "stop") 
+            echo -e "${YELLOW}${ICON_WARNING} Stopping all services...${NC}"
+            stop_all_services
+            echo -e "${GREEN}${ICON_SUCCESS} All services stopped${NC}"
+            ;;
         "status") print_header; show_system_status ;;
         *) show_main_menu ;;
     esac
+    
+    # Clean up on normal exit
+    rm -f "$PID_FILE" 2>/dev/null || true
 }
 
 # Execute main function
