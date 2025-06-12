@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "dev": "nodemon --watch src --exec \"node --loader ts-node/esm --experimental-specifier-resolution=node src/index.ts\"",
+    "dev": "nodemon --watch src --exec \"node --import tsx src/index.ts\"",
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -46,6 +46,7 @@
     "supertest": "^7.1.0",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
+    "tsx": "^4.20.2",
     "typescript": "~5.7.3",
     "vitest": "^3.2.3"
   }
