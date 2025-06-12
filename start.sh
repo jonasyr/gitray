@@ -201,6 +201,62 @@ check_dependencies() {
     fi
 }
 
+check_and_install_multitail() {
+    if ! command -v multitail >/dev/null 2>&1; then
+        echo -e "${YELLOW}${ICON_INFO} multitail not found - installing for better log viewing...${NC}"
+        
+        # Detect package manager and install multitail
+        if command -v apt >/dev/null 2>&1; then
+            # Ubuntu/Debian
+            if sudo apt update >/dev/null 2>&1 && sudo apt install -y multitail >/dev/null 2>&1; then
+                echo -e "${GREEN}${ICON_SUCCESS} multitail installed successfully${NC}"
+            else
+                echo -e "${YELLOW}${ICON_WARNING} Failed to install multitail via apt - log viewing will use fallback method${NC}"
+            fi
+        elif command -v yum >/dev/null 2>&1; then
+            # RHEL/CentOS/Fedora (older)
+            if sudo yum install -y multitail >/dev/null 2>&1; then
+                echo -e "${GREEN}${ICON_SUCCESS} multitail installed successfully${NC}"
+            else
+                echo -e "${YELLOW}${ICON_WARNING} Failed to install multitail via yum - log viewing will use fallback method${NC}"
+            fi
+        elif command -v dnf >/dev/null 2>&1; then
+            # Fedora (newer)
+            if sudo dnf install -y multitail >/dev/null 2>&1; then
+                echo -e "${GREEN}${ICON_SUCCESS} multitail installed successfully${NC}"
+            else
+                echo -e "${YELLOW}${ICON_WARNING} Failed to install multitail via dnf - log viewing will use fallback method${NC}"
+            fi
+        elif command -v pacman >/dev/null 2>&1; then
+            # Arch Linux
+            if sudo pacman -S --noconfirm multitail >/dev/null 2>&1; then
+                echo -e "${GREEN}${ICON_SUCCESS} multitail installed successfully${NC}"
+            else
+                echo -e "${YELLOW}${ICON_WARNING} Failed to install multitail via pacman - log viewing will use fallback method${NC}"
+            fi
+        elif command -v zypper >/dev/null 2>&1; then
+            # openSUSE
+            if sudo zypper install -y multitail >/dev/null 2>&1; then
+                echo -e "${GREEN}${ICON_SUCCESS} multitail installed successfully${NC}"
+            else
+                echo -e "${YELLOW}${ICON_WARNING} Failed to install multitail via zypper - log viewing will use fallback method${NC}"
+            fi
+        elif command -v brew >/dev/null 2>&1; then
+            # macOS with Homebrew
+            if brew install multitail >/dev/null 2>&1; then
+                echo -e "${GREEN}${ICON_SUCCESS} multitail installed successfully${NC}"
+            else
+                echo -e "${YELLOW}${ICON_WARNING} Failed to install multitail via brew - log viewing will use fallback method${NC}"
+            fi
+        else
+            echo -e "${YELLOW}${ICON_WARNING} Unknown package manager - cannot auto-install multitail${NC}"
+            echo -e "${DIM}Log viewing will use fallback method. Install multitail manually for better experience.${NC}"
+        fi
+    else
+        echo -e "${GREEN}${ICON_SUCCESS} multitail found - enhanced log viewing available${NC}"
+    fi
+}
+
 check_port() {
     local port="$1"
     lsof -i ":$port" >/dev/null 2>&1
@@ -783,41 +839,45 @@ full_development_setup() {
                         [ -f "$SCRIPT_DIR/.backend.log" ] && multitail_cmd+=" -ci green -t \"Backend\" \"$SCRIPT_DIR/.backend.log\""
                         [ -f "$SCRIPT_DIR/.frontend.log" ] && multitail_cmd+=" -ci blue -t \"Frontend\" \"$SCRIPT_DIR/.frontend.log\""
                         [ -f "$SCRIPT_DIR/.shared-types.log" ] && multitail_cmd+=" -ci yellow -t \"Shared Types\" \"$SCRIPT_DIR/.shared-types.log\""
-                        # Run multitail in background but capture PID for cleanup
-                        eval "$multitail_cmd" &
-                        local tail_pid=$!
-                    else
-                        # Fallback: use tail with better formatting and strip ANSI codes
-                        (
-                            for logfile in "${log_files[@]}"; do
-                                tail -f "$logfile" 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | while IFS= read -r line; do
-                                    basename_log=$(basename "$logfile" .log)
-                                    printf "[%s] %s\n" "$basename_log" "$line"
-                                done &
-                            done
-                            wait
-                        ) &
-                        local tail_pid=$!
-                    fi
-                else
-                    echo "No log files available yet"
-                    continue
-                fi
-                
-                # Wait for 'q' to exit logs
-                while [ "$SCRIPT_RUNNING" = "true" ]; do
-                    read -t 1 -n 1 log_input 2>/dev/null || continue
-                    if [[ "$log_input" == "q" || "$log_input" == "Q" ]]; then
-                        kill $tail_pid 2>/dev/null
+                        # Run multitail interactively (it handles its own exit on 'q')
+                        eval "$multitail_cmd"
+                        # After multitail exits, return to monitoring
                         echo -e "\n${GREEN}${ICON_SUCCESS} Returned to monitoring${NC}"
                         echo
                         show_system_status
                         echo -e "${DIM}Commands: 'l' logs • 's' status • Ctrl+C exit${NC}"
                         echo
                         initial_status_shown=true
-                        break
+                    else
+                        # Fallback: use tail with better formatting and strip ANSI codes
+                        (
+                            trap 'kill $(jobs -p) 2>/dev/null || true; exit' INT TERM
+                            for logfile in "${log_files[@]}"; do
+                                tail -f "$logfile" 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | while IFS= read -r line; do
+                                    basename_log=$(basename "$logfile" .log)
+                                    printf "[%s] %s\n" "$basename_log" "$line"
+                                done &
+                            done
+                            # Wait for user input to exit
+                            while read -r -n 1 -s key; do
+                                if [[ "$key" == "q" || "$key" == "Q" ]]; then
+                                    break
+                                fi
+                            done
+                            # Kill all background tail processes
+                            kill $(jobs -p) 2>/dev/null || true
+                        )
+                        echo -e "\n${GREEN}${ICON_SUCCESS} Returned to monitoring${NC}"
+                        echo
+                        show_system_status
+                        echo -e "${DIM}Commands: 'l' logs • 's' status • Ctrl+C exit${NC}"
+                        echo
+                        initial_status_shown=true
                     fi
-                done
+                else
+                    echo "No log files available yet"
+                    continue
+                fi
                 ;;
             's'|'S')
                 status_counter=0
@@ -1463,6 +1523,7 @@ show_logs() {
 main() {
     # Setup
     check_dependencies
+    check_and_install_multitail
     mkdir -p "$(dirname "$LOG_FILE")"
     log "GitRay Development Environment Manager started"
     
