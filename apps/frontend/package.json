@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@gitray/shared-types": "workspace:*",
+    "@rive-app/react-canvas": "^4.21.3",
     "apexcharts": "^4.7.0",
     "axios": "^1.9.0",
     "date-fns": "^4.1.0",

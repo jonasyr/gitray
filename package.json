@@ -76,5 +76,8 @@
     "typescript": "~5.7.3",
     "typescript-eslint": "^8.32.1",
     "vitest": "^3.2.3"
+  },
+  "dependencies": {
+    "@rive-app/react-canvas": "^4.21.3"
   }
 }

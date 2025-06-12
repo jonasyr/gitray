@@ -8,6 +8,7 @@ import React, { useState } from 'react';
 import RepoInput from '../components/RepoInput';
 import CommitList from '../components/CommitList';
 import ActivityHeatmap from '../components/ActivityHeatmap';
+import RiveLoader from '../components/RiveLoader';
 import { getRepositoryFullData } from '../services/api';
 import { Commit } from '@gitray/shared-types';
 
@@ -69,8 +70,11 @@ const MainPage: React.FC = () => {
 
         {isLoading && (
           <div className="mt-8 text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto"></div>
-            <p className="mt-2 text-gray-400">Loading repository data...</p>
+            <RiveLoader
+              size={120}
+              message="Loading repository data..."
+              className="py-8"
+            />
           </div>
         )}
 
