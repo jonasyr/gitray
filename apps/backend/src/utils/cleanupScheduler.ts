@@ -65,6 +65,12 @@ export function getQueueStatus(): { size: number; items: string[] } {
   };
 }
 
+// Test helper function to clear the queue
+export function clearQueue(): void {
+  queue.length = 0;
+  cleanupQueueSize.set(0);
+}
+
 // Kick off cleanup processing on startup (but not in test environment)
 if (process.env.NODE_ENV !== 'test') {
   startCleanupScheduler();
