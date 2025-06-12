@@ -19,6 +19,10 @@
     "tsBuildInfoFile": ".tsbuildinfo",
     "outDir": "./dist"
   },
+  "ts-node": {
+    "esm": true
+    // "experimentalSpecifierResolution": "node"
+  },
   "include": ["src/**/*.ts", "__tests__/**/*.ts"],
   "exclude": ["node_modules", "dist"],
   "references": [{ "path": "../../packages/shared-types" }]
