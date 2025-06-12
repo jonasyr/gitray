@@ -329,8 +329,8 @@ start_service() {
             local log_file="$SCRIPT_DIR/.$service.log"
             echo -e "${BLUE}Starting shared types watcher in background...${NC}"
             
-            # Start service and capture PID with NO_COLOR environment variable
-            env NO_COLOR=1 $cmd > "$log_file" 2>&1 &
+            # Start service and capture PID, filtering output through ANSI code remover
+            env NO_COLOR=1 FORCE_COLOR=0 NODE_DISABLE_COLORS=1 TERM=dumb $cmd 2>&1 | sed -u 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\[[0-9;]*[~]//g; s/\x1b\].*\x07//g; s/\x1b\[[?][0-9;]*[hl]//g; s/\x1b\[2J//g; s/\x1b\[H//g; s/\x1b\[3J//g' > "$log_file" &
             local pid=$!
             echo $pid > "$SCRIPT_DIR/.$service.pid"
             
