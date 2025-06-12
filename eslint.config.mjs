@@ -53,14 +53,12 @@ export default [
     },
   },
 
-  // Node.js, Jest und CommonJS-Konfiguration
+  // Node.js, Vitest and CommonJS configuration
   {
     files: [
       '**/*.cjs',
-      '**/jest.config.js',
-      '**/jest.config.cjs',
-      '**/jest-transforms/**/*.cjs',
-      '**/jest-transforms/**/*.js',
+      '**/vitest.config.ts',
+      '**/vite.config.ts',
       '**/apps/backend/src/**/*.js',
       '**/*.test.ts', // Added to include TypeScript test files
       '**/*.test.tsx', // Added to include TypeScript JSX test files
@@ -71,7 +69,6 @@ export default [
         ...globals.vitest, // Add vitest globals
         module: true,
         require: true,
-        jest: true,
         exports: true,
         process: true,
         console: true,
