@@ -329,8 +329,8 @@ start_service() {
             local log_file="$SCRIPT_DIR/.$service.log"
             echo -e "${BLUE}Starting shared types watcher in background...${NC}"
             
-            # Start service and capture PID
-            $cmd > "$log_file" 2>&1 &
+            # Start service and capture PID with NO_COLOR environment variable
+            env NO_COLOR=1 $cmd > "$log_file" 2>&1 &
             local pid=$!
             echo $pid > "$SCRIPT_DIR/.$service.pid"
             
@@ -1437,7 +1437,7 @@ show_logs() {
                 local log_file="$SCRIPT_DIR/.$service.log"
                 if [ -f "$log_file" ]; then
                     echo -e "${YELLOW}Last 10 lines from $service:${NC}"
-                    tail -10 "$log_file" 2>/dev/null
+                    tail -10 "$log_file" 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g'
                     echo -e "${GRAY}$(printf '%.0s─' {1..40})${NC}"
                 fi
             done
