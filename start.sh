@@ -361,6 +361,7 @@ start_service() {
 
 stop_service() {
     local service="$1"
+    local service_name="${SERVICES[$service]:-$service}"
     
     case "$service" in
         "redis")
@@ -368,13 +369,67 @@ stop_service() {
             docker rm gitray-redis 2>/dev/null || true
             echo -e "${YELLOW}Redis stopped${NC}"
             ;;
+        "frontend")
+            # Kill all vite processes
+            pkill -f "vite" 2>/dev/null || true
+            # Kill all pnpm processes running frontend dev
+            pkill -f "pnpm.*frontend.*dev" 2>/dev/null || true
+            # Also try to kill by PID file if it exists
+            local pid_file="$SCRIPT_DIR/.$service.pid"
+            if [ -f "$pid_file" ]; then
+                local pid=$(cat "$pid_file" 2>/dev/null || echo "")
+                if [ -n "$pid" ]; then
+                    kill -TERM "$pid" 2>/dev/null || true
+                    sleep 1
+                    kill -KILL "$pid" 2>/dev/null || true
+                fi
+                rm -f "$pid_file"
+            fi
+            echo -e "${YELLOW}$service_name stopped${NC}"
+            ;;
+        "backend")
+            # Kill processes using the backend port
+            local port="${SERVICE_PORTS[$service]:-}"
+            if [ -n "$port" ]; then
+                local pids=$(lsof -t -i ":$port" 2>/dev/null || echo "")
+                if [ -n "$pids" ]; then
+                    for pid in $pids; do
+                        kill -TERM "$pid" 2>/dev/null || true
+                    done
+                    sleep 1
+                    for pid in $pids; do
+                        kill -KILL "$pid" 2>/dev/null || true
+                    done
+                fi
+            fi
+            # Kill all pnpm processes running backend dev
+            pkill -f "pnpm.*backend.*dev" 2>/dev/null || true
+            # Also try to kill by PID file if it exists
+            local pid_file="$SCRIPT_DIR/.$service.pid"
+            if [ -f "$pid_file" ]; then
+                local pid=$(cat "$pid_file" 2>/dev/null || echo "")
+                if [ -n "$pid" ]; then
+                    kill -TERM "$pid" 2>/dev/null || true
+                    sleep 1
+                    kill -KILL "$pid" 2>/dev/null || true
+                fi
+                rm -f "$pid_file"
+            fi
+            echo -e "${YELLOW}$service_name stopped${NC}"
+            ;;
         *)
             local pid_file="$SCRIPT_DIR/.$service.pid"
             if [ -f "$pid_file" ]; then
-                local pid=$(cat "$pid_file")
-                kill "$pid" 2>/dev/null || true
+                local pid=$(cat "$pid_file" 2>/dev/null || echo "")
+                if [ -n "$pid" ]; then
+                    kill -TERM "$pid" 2>/dev/null || true
+                    sleep 1
+                    kill -KILL "$pid" 2>/dev/null || true
+                fi
                 rm -f "$pid_file"
-                echo -e "${YELLOW}${service} stopped${NC}"
+                echo -e "${YELLOW}$service_name stopped${NC}"
+            else
+                echo -e "${YELLOW}$service_name was not running${NC}"
             fi
             ;;
     esac
@@ -384,11 +439,43 @@ stop_all_services() {
     echo -e "${YELLOW}${ICON_WARNING} Stopping all services...${NC}"
     
     for service in "${!SERVICES[@]}"; do
-        stop_service "$service" >/dev/null 2>&1
+        stop_service "$service"
     done
     
-    # Clean up any remaining processes
+    # Clean up any remaining processes more aggressively
+    echo -e "${DIM}Cleaning up any remaining processes...${NC}"
+    
+    # Kill all pnpm dev processes
     pkill -f "pnpm.*dev" 2>/dev/null || true
+    
+    # Kill any remaining vite processes
+    pkill -f "vite" 2>/dev/null || true
+    
+    # Kill any node processes on our service ports
+    for port in "${SERVICE_PORTS[@]}"; do
+        local pids=$(lsof -t -i ":$port" 2>/dev/null || echo "")
+        if [ -n "$pids" ]; then
+            for pid in $pids; do
+                kill -TERM "$pid" 2>/dev/null || true
+            done
+        fi
+    done
+    
+    # Wait a moment for graceful shutdown
+    sleep 2
+    
+    # Force kill any remaining processes on our ports
+    for port in "${SERVICE_PORTS[@]}"; do
+        local pids=$(lsof -t -i ":$port" 2>/dev/null || echo "")
+        if [ -n "$pids" ]; then
+            for pid in $pids; do
+                kill -KILL "$pid" 2>/dev/null || true
+            done
+        fi
+    done
+    
+    # Clean up all PID files
+    rm -f "$SCRIPT_DIR"/.*.pid 2>/dev/null || true
     
     echo -e "${GREEN}${ICON_SUCCESS} All services stopped${NC}"
 }
@@ -401,12 +488,55 @@ stop_all_services_quiet() {
                 docker stop gitray-redis >/dev/null 2>&1 || true
                 docker rm gitray-redis >/dev/null 2>&1 || true
                 ;;
+            "frontend")
+                # Kill all vite processes
+                pkill -f "vite" >/dev/null 2>&1 || true
+                pkill -f "pnpm.*frontend.*dev" >/dev/null 2>&1 || true
+                local pid_file="$SCRIPT_DIR/.$service.pid"
+                if [ -f "$pid_file" ]; then
+                    local pid=$(cat "$pid_file" 2>/dev/null || echo "")
+                    if [ -n "$pid" ]; then
+                        kill -TERM "$pid" >/dev/null 2>&1 || true
+                        sleep 1
+                        kill -KILL "$pid" >/dev/null 2>&1 || true
+                    fi
+                    rm -f "$pid_file" >/dev/null 2>&1 || true
+                fi
+                ;;
+            "backend")
+                local port="${SERVICE_PORTS[$service]:-}"
+                if [ -n "$port" ]; then
+                    local pids=$(lsof -t -i ":$port" 2>/dev/null || echo "")
+                    if [ -n "$pids" ]; then
+                        for pid in $pids; do
+                            kill -TERM "$pid" >/dev/null 2>&1 || true
+                        done
+                        sleep 1
+                        for pid in $pids; do
+                            kill -KILL "$pid" >/dev/null 2>&1 || true
+                        done
+                    fi
+                fi
+                pkill -f "pnpm.*backend.*dev" >/dev/null 2>&1 || true
+                local pid_file="$SCRIPT_DIR/.$service.pid"
+                if [ -f "$pid_file" ]; then
+                    local pid=$(cat "$pid_file" 2>/dev/null || echo "")
+                    if [ -n "$pid" ]; then
+                        kill -TERM "$pid" >/dev/null 2>&1 || true
+                        sleep 1
+                        kill -KILL "$pid" >/dev/null 2>&1 || true
+                    fi
+                    rm -f "$pid_file" >/dev/null 2>&1 || true
+                fi
+                ;;
             *)
                 local pid_file="$SCRIPT_DIR/.$service.pid"
                 if [ -f "$pid_file" ]; then
                     local pid=$(cat "$pid_file" 2>/dev/null || echo "")
                     if [ -n "$pid" ]; then
-                        kill "$pid" >/dev/null 2>&1 || true
+                        kill -TERM "$pid" >/dev/null 2>&1 || true
+                        sleep 1
+                        kill -KILL "$pid" >/dev/null 2>&1 || true
                     fi
                     rm -f "$pid_file" >/dev/null 2>&1 || true
                 fi
@@ -416,7 +546,22 @@ stop_all_services_quiet() {
     
     # Clean up any remaining processes
     pkill -f "pnpm.*dev" >/dev/null 2>&1 || true
+    pkill -f "vite" >/dev/null 2>&1 || true
+    
+    # Force kill any processes on our service ports
+    for port in "${SERVICE_PORTS[@]}"; do
+        local pids=$(lsof -t -i ":$port" 2>/dev/null || echo "")
+        if [ -n "$pids" ]; then
+            for pid in $pids; do
+                kill -KILL "$pid" >/dev/null 2>&1 || true
+            done
+        fi
+    done
+    
+    # Clean up all PID files
+    rm -f "$SCRIPT_DIR"/.*.pid >/dev/null 2>&1 || true
 }
+
 
 # ============================================================================
 # DEVELOPMENT WORKFLOWS
