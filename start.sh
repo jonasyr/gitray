@@ -123,8 +123,12 @@ cleanup_background_processes() {
         fi
     done
     
-    # Clean up any remaining pnpm dev processes
+    # Clean up any remaining pnpm dev and watch processes
     pkill -f "pnpm.*dev" 2>/dev/null || true
+    pkill -f "pnpm.*watch" 2>/dev/null || true
+    
+    # Clean up TypeScript compiler processes
+    pkill -f "tsc.*watch" 2>/dev/null || true
     
     # Clean up PID files
     rm -f "$SCRIPT_DIR"/.*.pid 2>/dev/null || true
@@ -222,6 +226,14 @@ get_service_status() {
                 echo "stopped"
             fi
             ;;
+        "shared-types")
+            # Check for TypeScript compiler in watch mode
+            if pgrep -f "tsc.*watch" >/dev/null 2>&1; then
+                echo "running"
+            else
+                echo "stopped"
+            fi
+            ;;
         *)
             if [ -n "$port" ] && check_port "$port"; then
                 echo "running"
@@ -303,11 +315,54 @@ start_service() {
                 return 1
             fi
             
-            if pnpm --filter @gitray/shared-types build; then
-                echo -e "${GREEN}${ICON_SUCCESS} Shared types built successfully${NC}"
-            else
+            # First build the shared types
+            if ! pnpm --filter @gitray/shared-types build; then
                 echo -e "${RED}${ICON_ERROR} Failed to build shared types${NC}"
                 return 1
+            fi
+            
+            if [ "$SCRIPT_RUNNING" = "false" ]; then
+                return 1
+            fi
+            
+            # Then start the watcher like other services
+            local log_file="$SCRIPT_DIR/.$service.log"
+            echo -e "${BLUE}Starting shared types watcher in background...${NC}"
+            
+            # Start service and capture PID
+            $cmd > "$log_file" 2>&1 &
+            local pid=$!
+            echo $pid > "$SCRIPT_DIR/.$service.pid"
+            
+            # Wait a moment for service to initialize
+            local wait_count=0
+            while [ $wait_count -lt 30 ] && [ "$SCRIPT_RUNNING" = "true" ]; do
+                sleep 0.1
+                wait_count=$((wait_count + 1))
+            done
+            
+            if [ "$SCRIPT_RUNNING" = "false" ]; then
+                kill "$pid" 2>/dev/null || true
+                return 1
+            fi
+            
+            # Check if process is still running
+            if ! kill -0 $pid 2>/dev/null; then
+                echo -e "${RED}${ICON_ERROR} Failed to start shared types watcher${NC}"
+                echo -e "${YELLOW}Last few lines from log:${NC}"
+                echo -e "${GRAY}$(printf '%.0s─' {1..40})${NC}"
+                tail -10 "$log_file" 2>/dev/null || echo "No log output available"
+                echo -e "${GRAY}$(printf '%.0s─' {1..40})${NC}"
+                return 1
+            fi
+            
+            # Show initial startup logs
+            if [[ "$show_logs" == "true" ]]; then
+                echo -e "${GREEN}${ICON_SUCCESS} Shared types watcher started (PID: $pid)${NC}"
+                echo -e "${DIM}Initial output:${NC}"
+                echo -e "${GRAY}$(printf '%.0s─' {1..40})${NC}"
+                tail -5 "$log_file" 2>/dev/null || echo "Waiting for output..."
+                echo -e "${GRAY}$(printf '%.0s─' {1..40})${NC}"
             fi
             ;;
         *)
@@ -417,7 +472,12 @@ stop_service() {
             fi
             echo -e "${YELLOW}$service_name stopped${NC}"
             ;;
-        *)
+        "shared-types")
+            # Kill TypeScript compiler watch processes
+            pkill -f "tsc.*watch" 2>/dev/null || true
+            # Kill all pnpm processes running shared-types watch
+            pkill -f "pnpm.*shared-types.*watch" 2>/dev/null || true
+            # Also try to kill by PID file if it exists
             local pid_file="$SCRIPT_DIR/.$service.pid"
             if [ -f "$pid_file" ]; then
                 local pid=$(cat "$pid_file" 2>/dev/null || echo "")
@@ -427,11 +487,10 @@ stop_service() {
                     kill -KILL "$pid" 2>/dev/null || true
                 fi
                 rm -f "$pid_file"
-                echo -e "${YELLOW}$service_name stopped${NC}"
-            else
-                echo -e "${YELLOW}$service_name was not running${NC}"
             fi
+            echo -e "${YELLOW}$service_name stopped${NC}"
             ;;
+        *)
     esac
 }
 
@@ -445,11 +504,15 @@ stop_all_services() {
     # Clean up any remaining processes more aggressively
     echo -e "${DIM}Cleaning up any remaining processes...${NC}"
     
-    # Kill all pnpm dev processes
+    # Kill all pnpm dev processes (including watch)
     pkill -f "pnpm.*dev" 2>/dev/null || true
+    pkill -f "pnpm.*watch" 2>/dev/null || true
     
     # Kill any remaining vite processes
     pkill -f "vite" 2>/dev/null || true
+    
+    # Kill any remaining TypeScript compiler processes
+    pkill -f "tsc.*watch" 2>/dev/null || true
     
     # Kill any node processes on our service ports
     for port in "${SERVICE_PORTS[@]}"; do
@@ -529,7 +592,10 @@ stop_all_services_quiet() {
                     rm -f "$pid_file" >/dev/null 2>&1 || true
                 fi
                 ;;
-            *)
+            "shared-types")
+                # Kill TypeScript compiler watch processes
+                pkill -f "tsc.*watch" >/dev/null 2>&1 || true
+                pkill -f "pnpm.*shared-types.*watch" >/dev/null 2>&1 || true
                 local pid_file="$SCRIPT_DIR/.$service.pid"
                 if [ -f "$pid_file" ]; then
                     local pid=$(cat "$pid_file" 2>/dev/null || echo "")
@@ -541,6 +607,7 @@ stop_all_services_quiet() {
                     rm -f "$pid_file" >/dev/null 2>&1 || true
                 fi
                 ;;
+            *)
         esac
     done
     
@@ -612,7 +679,18 @@ full_development_setup() {
         return 1
     fi
     
-    # 3. Start Redis
+    # 3. Start shared types watcher
+    echo
+    if ! start_service "shared-types"; then
+        return 1
+    fi
+    
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
+    
+    # 4. Start Redis
+    echo
     if ! start_service "redis" false; then
         return 1
     fi
@@ -621,7 +699,7 @@ full_development_setup() {
         return 1
     fi
     
-    # 4. Start backend
+    # 5. Start backend
     echo
     if ! start_service "backend"; then
         return 1
@@ -631,7 +709,7 @@ full_development_setup() {
         return 1
     fi
     
-    # 5. Start frontend  
+    # 6. Start frontend  
     echo
     if ! start_service "frontend"; then
         return 1
@@ -692,9 +770,19 @@ full_development_setup() {
                 echo -e "${CYAN}${ICON_INFO} Live Logs (Press 'q' to return)${NC}"
                 echo -e "${GRAY}$(printf '%.0s─' {1..60})${NC}"
                 
-                # Start log viewing in background
-                tail -f "$SCRIPT_DIR"/.backend.log "$SCRIPT_DIR"/.frontend.log 2>/dev/null &
-                local tail_pid=$!
+                # Start log viewing in background - only include existing log files
+                local log_files=()
+                [ -f "$SCRIPT_DIR/.backend.log" ] && log_files+=("$SCRIPT_DIR/.backend.log")
+                [ -f "$SCRIPT_DIR/.frontend.log" ] && log_files+=("$SCRIPT_DIR/.frontend.log")
+                [ -f "$SCRIPT_DIR/.shared-types.log" ] && log_files+=("$SCRIPT_DIR/.shared-types.log")
+                
+                if [ ${#log_files[@]} -gt 0 ]; then
+                    tail -f "${log_files[@]}" 2>/dev/null &
+                    local tail_pid=$!
+                else
+                    echo "No log files available yet"
+                    continue
+                fi
                 
                 # Wait for 'q' to exit logs
                 while [ "$SCRIPT_RUNNING" = "true" ]; do
@@ -778,7 +866,17 @@ quick_start() {
         return 1
     fi
     
-    # 3. Start only frontend
+    # 3. Start shared types watcher
+    echo
+    if ! start_service "shared-types"; then
+        return 1
+    fi
+    
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
+    
+    # 4. Start only frontend
     echo
     if ! start_service "frontend"; then
         return 1
@@ -837,9 +935,18 @@ quick_start() {
                 echo -e "${CYAN}${ICON_INFO} Live Logs (Press 'q' to return)${NC}"
                 echo -e "${GRAY}$(printf '%.0s─' {1..60})${NC}"
                 
-                # Start log viewing in background (only frontend logs for quick start)
-                tail -f "$SCRIPT_DIR"/.frontend.log 2>/dev/null &
-                local tail_pid=$!
+                # Start log viewing in background - only include existing log files for quick start
+                local log_files=()
+                [ -f "$SCRIPT_DIR/.frontend.log" ] && log_files+=("$SCRIPT_DIR/.frontend.log")
+                [ -f "$SCRIPT_DIR/.shared-types.log" ] && log_files+=("$SCRIPT_DIR/.shared-types.log")
+                
+                if [ ${#log_files[@]} -gt 0 ]; then
+                    tail -f "${log_files[@]}" 2>/dev/null &
+                    local tail_pid=$!
+                else
+                    echo "No log files available yet"
+                    continue
+                fi
                 
                 # Wait for 'q' to exit logs
                 while [ "$SCRIPT_RUNNING" = "true" ]; do
@@ -1068,12 +1175,13 @@ service_management_menu() {
         echo "  1) Start Redis"
         echo "  2) Start Backend"
         echo "  3) Start Frontend"
-        echo "  4) Stop All Services"
-        echo "  5) Restart All Services"
-        echo "  6) Back to Main Menu"
+        echo "  4) Start Shared Types Watcher"
+        echo "  5) Stop All Services"
+        echo "  6) Restart All Services"
+        echo "  7) Back to Main Menu"
         echo
         
-        read -p "Choose action (1-6): " choice
+        read -p "Choose action (1-7): " choice
         
         if [ "$SCRIPT_RUNNING" = "false" ]; then
             break
@@ -1083,21 +1191,32 @@ service_management_menu() {
             1) start_service "redis" ;;
             2) start_service "backend" ;;
             3) start_service "frontend" ;;
-            4) stop_all_services ;;
+            4) start_service "shared-types" ;;
             5) 
-                stop_all_services
+                echo -e "${BLUE}${ICON_GEAR} Stopping all services...${NC}"
+                stop_all_services_quiet
+                echo -e "${GREEN}${ICON_SUCCESS} All services stopped${NC}"
+                ;;
+            6) 
+                echo -e "${BLUE}${ICON_GEAR} Restarting all services...${NC}"
+                stop_all_services_quiet
                 if [ "$SCRIPT_RUNNING" = "true" ]; then
                     sleep 2
-                    start_service "redis"
+                    echo -e "${DIM}Starting services...${NC}"
+                    start_service "redis" false
                     if [ "$SCRIPT_RUNNING" = "true" ]; then
-                        start_service "backend"
+                        start_service "shared-types" false
                     fi
                     if [ "$SCRIPT_RUNNING" = "true" ]; then
-                        start_service "frontend"
+                        start_service "backend" false
                     fi
+                    if [ "$SCRIPT_RUNNING" = "true" ]; then
+                        start_service "frontend" false
+                    fi
+                    echo -e "${GREEN}${ICON_SUCCESS} All services restarted${NC}"
                 fi
                 ;;
-            6) break ;;
+            7) break ;;
             *) echo -e "${RED}Invalid choice${NC}" ;;
         esac
         
@@ -1118,12 +1237,13 @@ show_logs() {
     echo "1) ${ICON_INFO} Live Combined Logs (All services)"
     echo "2) ${ICON_SERVER} Backend Logs"
     echo "3) ${ICON_SERVER} Frontend Logs"
-    echo "4) ${ICON_GEAR} GitRay Main Log"
-    echo "5) ${ICON_WARNING} Recent Errors Only"
-    echo "6) ${ICON_INFO} Service Status + Last 10 Lines"
+    echo "4) ${ICON_GEAR} Shared Types Watcher Logs"
+    echo "5) ${ICON_GEAR} GitRay Main Log"
+    echo "6) ${ICON_WARNING} Recent Errors Only"
+    echo "7) ${ICON_INFO} Service Status + Last 10 Lines"
     echo
     
-    read -p "Choose log view (1-6): " choice
+    read -p "Choose log view (1-7): " choice
     
     if [ "$SCRIPT_RUNNING" = "false" ]; then
         return 1
@@ -1135,14 +1255,30 @@ show_logs() {
     
     case $choice in
         1) 
-            if [ -f "$SCRIPT_DIR/.backend.log" ] || [ -f "$SCRIPT_DIR/.frontend.log" ]; then
-                # Use multitail if available, otherwise fall back to tail
-                if command -v multitail >/dev/null 2>&1; then
-                    multitail -s 2 -sn 1,3 \
-                        -ci green -t "Backend" "$SCRIPT_DIR/.backend.log" \
-                        -ci blue -t "Frontend" "$SCRIPT_DIR/.frontend.log" 2>/dev/null
+            if [ -f "$SCRIPT_DIR/.backend.log" ] || [ -f "$SCRIPT_DIR/.frontend.log" ] || [ -f "$SCRIPT_DIR/.shared-types.log" ]; then
+                # Collect existing log files
+                local log_files=()
+                [ -f "$SCRIPT_DIR/.backend.log" ] && log_files+=("$SCRIPT_DIR/.backend.log")
+                [ -f "$SCRIPT_DIR/.frontend.log" ] && log_files+=("$SCRIPT_DIR/.frontend.log") 
+                [ -f "$SCRIPT_DIR/.shared-types.log" ] && log_files+=("$SCRIPT_DIR/.shared-types.log")
+                
+                if [ ${#log_files[@]} -gt 0 ]; then
+                    # Use multitail if available, otherwise fall back to tail
+                    if command -v multitail >/dev/null 2>&1; then
+                        # Build multitail command with existing files only
+                        local multitail_cmd="multitail -s 2"
+                        [ -f "$SCRIPT_DIR/.backend.log" ] && multitail_cmd+=" -ci green -t \"Backend\" \"$SCRIPT_DIR/.backend.log\""
+                        [ -f "$SCRIPT_DIR/.frontend.log" ] && multitail_cmd+=" -ci blue -t \"Frontend\" \"$SCRIPT_DIR/.frontend.log\""
+                        [ -f "$SCRIPT_DIR/.shared-types.log" ] && multitail_cmd+=" -ci yellow -t \"Shared Types\" \"$SCRIPT_DIR/.shared-types.log\""
+                        eval "$multitail_cmd" 2>/dev/null
+                    else
+                        tail -f "${log_files[@]}" 2>/dev/null
+                    fi
                 else
-                    tail -f "$SCRIPT_DIR"/.backend.log "$SCRIPT_DIR"/.frontend.log 2>/dev/null
+                    echo "No service logs available. Start some services first."
+                    echo
+                    echo -e "${DIM}Press Enter to return to main menu...${NC}"
+                    read
                 fi
             else
                 echo "No service logs available. Start some services first."
@@ -1153,7 +1289,17 @@ show_logs() {
             ;;
         2) 
             if [ -f "$SCRIPT_DIR/.backend.log" ]; then
-                tail -f "$SCRIPT_DIR/.backend.log"
+                echo -e "${DIM}Press 'q' to return to menu${NC}"
+                tail -f "$SCRIPT_DIR/.backend.log" &
+                local tail_pid=$!
+                # Wait for 'q' to exit logs
+                while [ "$SCRIPT_RUNNING" = "true" ]; do
+                    read -t 1 -n 1 log_input 2>/dev/null || continue
+                    if [[ "$log_input" == "q" || "$log_input" == "Q" ]]; then
+                        kill $tail_pid 2>/dev/null
+                        break
+                    fi
+                done
             else
                 echo "Backend not running"
                 echo
@@ -1163,7 +1309,17 @@ show_logs() {
             ;;
         3) 
             if [ -f "$SCRIPT_DIR/.frontend.log" ]; then
-                tail -f "$SCRIPT_DIR/.frontend.log"
+                echo -e "${DIM}Press 'q' to return to menu${NC}"
+                tail -f "$SCRIPT_DIR/.frontend.log" &
+                local tail_pid=$!
+                # Wait for 'q' to exit logs
+                while [ "$SCRIPT_RUNNING" = "true" ]; do
+                    read -t 1 -n 1 log_input 2>/dev/null || continue
+                    if [[ "$log_input" == "q" || "$log_input" == "Q" ]]; then
+                        kill $tail_pid 2>/dev/null
+                        break
+                    fi
+                done
             else
                 echo "Frontend not running"
                 echo
@@ -1172,8 +1328,38 @@ show_logs() {
             fi
             ;;
         4) 
+            if [ -f "$SCRIPT_DIR/.shared-types.log" ]; then
+                echo -e "${DIM}Press 'q' to return to menu${NC}"
+                tail -f "$SCRIPT_DIR/.shared-types.log" &
+                local tail_pid=$!
+                # Wait for 'q' to exit logs
+                while [ "$SCRIPT_RUNNING" = "true" ]; do
+                    read -t 1 -n 1 log_input 2>/dev/null || continue
+                    if [[ "$log_input" == "q" || "$log_input" == "Q" ]]; then
+                        kill $tail_pid 2>/dev/null
+                        break
+                    fi
+                done
+            else
+                echo "Shared types watcher not running"
+                echo
+                echo -e "${DIM}Press Enter to return to main menu...${NC}"
+                read
+            fi
+            ;;
+        5) 
             if [ -f "$LOG_FILE" ]; then
-                tail -f "$LOG_FILE"
+                echo -e "${DIM}Press 'q' to return to menu${NC}"
+                tail -f "$LOG_FILE" &
+                local tail_pid=$!
+                # Wait for 'q' to exit logs
+                while [ "$SCRIPT_RUNNING" = "true" ]; do
+                    read -t 1 -n 1 log_input 2>/dev/null || continue
+                    if [[ "$log_input" == "q" || "$log_input" == "Q" ]]; then
+                        kill $tail_pid 2>/dev/null
+                        break
+                    fi
+                done
             else
                 echo "No main log file found"
                 echo
@@ -1181,17 +1367,17 @@ show_logs() {
                 read
             fi
             ;;
-        5)
+        6)
             echo -e "${RED}Recent Errors:${NC}"
             grep -i "error\|fail\|exception" "$SCRIPT_DIR"/.*.log 2>/dev/null | tail -20 || echo "No recent errors found"
             if [ "$SCRIPT_RUNNING" = "true" ]; then
                 read -p "Press Enter to continue..."
             fi
             ;;
-        6)
+        7)
             show_system_status
             echo -e "${CYAN}Recent Log Output:${NC}"
-            for service in backend frontend; do
+            for service in backend frontend shared-types; do
                 local log_file="$SCRIPT_DIR/.$service.log"
                 if [ -f "$log_file" ]; then
                     echo -e "${YELLOW}Last 10 lines from $service:${NC}"
