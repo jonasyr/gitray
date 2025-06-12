@@ -777,8 +777,28 @@ full_development_setup() {
                 [ -f "$SCRIPT_DIR/.shared-types.log" ] && log_files+=("$SCRIPT_DIR/.shared-types.log")
                 
                 if [ ${#log_files[@]} -gt 0 ]; then
-                    tail -f "${log_files[@]}" 2>/dev/null &
-                    local tail_pid=$!
+                    # Use multitail if available for better multi-file display
+                    if command -v multitail >/dev/null 2>&1; then
+                        local multitail_cmd="multitail -s 2"
+                        [ -f "$SCRIPT_DIR/.backend.log" ] && multitail_cmd+=" -ci green -t \"Backend\" \"$SCRIPT_DIR/.backend.log\""
+                        [ -f "$SCRIPT_DIR/.frontend.log" ] && multitail_cmd+=" -ci blue -t \"Frontend\" \"$SCRIPT_DIR/.frontend.log\""
+                        [ -f "$SCRIPT_DIR/.shared-types.log" ] && multitail_cmd+=" -ci yellow -t \"Shared Types\" \"$SCRIPT_DIR/.shared-types.log\""
+                        # Run multitail in background but capture PID for cleanup
+                        eval "$multitail_cmd" &
+                        local tail_pid=$!
+                    else
+                        # Fallback: use tail with better formatting and strip ANSI codes
+                        (
+                            for logfile in "${log_files[@]}"; do
+                                tail -f "$logfile" 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | while IFS= read -r line; do
+                                    basename_log=$(basename "$logfile" .log)
+                                    printf "[%s] %s\n" "$basename_log" "$line"
+                                done &
+                            done
+                            wait
+                        ) &
+                        local tail_pid=$!
+                    fi
                 else
                     echo "No log files available yet"
                     continue
@@ -941,8 +961,26 @@ quick_start() {
                 [ -f "$SCRIPT_DIR/.shared-types.log" ] && log_files+=("$SCRIPT_DIR/.shared-types.log")
                 
                 if [ ${#log_files[@]} -gt 0 ]; then
-                    tail -f "${log_files[@]}" 2>/dev/null &
-                    local tail_pid=$!
+                    # Use multitail if available for better multi-file display
+                    if command -v multitail >/dev/null 2>&1; then
+                        local multitail_cmd="multitail -s 2"
+                        [ -f "$SCRIPT_DIR/.frontend.log" ] && multitail_cmd+=" -ci blue -t \"Frontend\" \"$SCRIPT_DIR/.frontend.log\""
+                        [ -f "$SCRIPT_DIR/.shared-types.log" ] && multitail_cmd+=" -ci yellow -t \"Shared Types\" \"$SCRIPT_DIR/.shared-types.log\""
+                        eval "$multitail_cmd" 2>/dev/null &
+                        local tail_pid=$!
+                    else
+                        # Fallback: use tail with better formatting and strip ANSI codes
+                        (
+                            for logfile in "${log_files[@]}"; do
+                                tail -f "$logfile" 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | while IFS= read -r line; do
+                                    basename_log=$(basename "$logfile" .log)
+                                    printf "[%s] %s\n" "$basename_log" "$line"
+                                done &
+                            done
+                            wait
+                        ) &
+                        local tail_pid=$!
+                    fi
                 else
                     echo "No log files available yet"
                     continue
@@ -1263,16 +1301,34 @@ show_logs() {
                 [ -f "$SCRIPT_DIR/.shared-types.log" ] && log_files+=("$SCRIPT_DIR/.shared-types.log")
                 
                 if [ ${#log_files[@]} -gt 0 ]; then
-                    # Use multitail if available, otherwise fall back to tail
+                    # Use multitail if available, otherwise fall back to formatted tail
                     if command -v multitail >/dev/null 2>&1; then
                         # Build multitail command with existing files only
                         local multitail_cmd="multitail -s 2"
                         [ -f "$SCRIPT_DIR/.backend.log" ] && multitail_cmd+=" -ci green -t \"Backend\" \"$SCRIPT_DIR/.backend.log\""
                         [ -f "$SCRIPT_DIR/.frontend.log" ] && multitail_cmd+=" -ci blue -t \"Frontend\" \"$SCRIPT_DIR/.frontend.log\""
                         [ -f "$SCRIPT_DIR/.shared-types.log" ] && multitail_cmd+=" -ci yellow -t \"Shared Types\" \"$SCRIPT_DIR/.shared-types.log\""
-                        eval "$multitail_cmd" 2>/dev/null
+                        # Run multitail interactively (it handles its own exit on 'q')
+                        eval "$multitail_cmd"
                     else
-                        tail -f "${log_files[@]}" 2>/dev/null
+                        # Fallback: use formatted tail with service labels and strip ANSI codes
+                        {
+                            trap 'kill $(jobs -p) 2>/dev/null || true; exit' INT TERM
+                            for logfile in "${log_files[@]}"; do
+                                tail -f "$logfile" 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | while IFS= read -r line; do
+                                    basename_log=$(basename "$logfile" .log)
+                                    printf "[%s] %s\n" "$basename_log" "$line"
+                                done &
+                            done
+                            # Wait for user input to exit
+                            while read -r -n 1 -s key; do
+                                if [[ "$key" == "q" || "$key" == "Q" ]]; then
+                                    break
+                                fi
+                            done
+                            # Kill all background tail processes
+                            kill $(jobs -p) 2>/dev/null || true
+                        }
                     fi
                 else
                     echo "No service logs available. Start some services first."
@@ -1290,7 +1346,7 @@ show_logs() {
         2) 
             if [ -f "$SCRIPT_DIR/.backend.log" ]; then
                 echo -e "${DIM}Press 'q' to return to menu${NC}"
-                tail -f "$SCRIPT_DIR/.backend.log" &
+                tail -f "$SCRIPT_DIR/.backend.log" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' &
                 local tail_pid=$!
                 # Wait for 'q' to exit logs
                 while [ "$SCRIPT_RUNNING" = "true" ]; do
@@ -1310,7 +1366,7 @@ show_logs() {
         3) 
             if [ -f "$SCRIPT_DIR/.frontend.log" ]; then
                 echo -e "${DIM}Press 'q' to return to menu${NC}"
-                tail -f "$SCRIPT_DIR/.frontend.log" &
+                tail -f "$SCRIPT_DIR/.frontend.log" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' &
                 local tail_pid=$!
                 # Wait for 'q' to exit logs
                 while [ "$SCRIPT_RUNNING" = "true" ]; do
@@ -1330,7 +1386,7 @@ show_logs() {
         4) 
             if [ -f "$SCRIPT_DIR/.shared-types.log" ]; then
                 echo -e "${DIM}Press 'q' to return to menu${NC}"
-                tail -f "$SCRIPT_DIR/.shared-types.log" &
+                tail -f "$SCRIPT_DIR/.shared-types.log" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' &
                 local tail_pid=$!
                 # Wait for 'q' to exit logs
                 while [ "$SCRIPT_RUNNING" = "true" ]; do
@@ -1350,7 +1406,7 @@ show_logs() {
         5) 
             if [ -f "$LOG_FILE" ]; then
                 echo -e "${DIM}Press 'q' to return to menu${NC}"
-                tail -f "$LOG_FILE" &
+                tail -f "$LOG_FILE" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' &
                 local tail_pid=$!
                 # Wait for 'q' to exit logs
                 while [ "$SCRIPT_RUNNING" = "true" ]; do
