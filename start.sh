@@ -5,6 +5,11 @@
 
 set -euo pipefail
 
+# Global state for graceful shutdown
+SCRIPT_RUNNING=true
+SHUTDOWN_IN_PROGRESS=false
+CURRENT_OPERATION=""
+
 # ============================================================================
 # CONFIGURATION & CONSTANTS
 # ============================================================================
@@ -64,6 +69,66 @@ readonly ICON_DATABASE="🗄️"
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
+
+# Global graceful shutdown handler
+graceful_shutdown() {
+    if [ "$SHUTDOWN_IN_PROGRESS" = "true" ]; then
+        # If already shutting down, force exit on second Ctrl+C
+        echo -e "\n${RED}${ICON_ERROR} Force exit requested${NC}"
+        exit 1
+    fi
+    
+    SHUTDOWN_IN_PROGRESS=true
+    SCRIPT_RUNNING=false
+    
+    echo -e "\n${YELLOW}${ICON_WARNING} Graceful shutdown initiated...${NC}"
+    
+    if [ -n "$CURRENT_OPERATION" ]; then
+        echo -e "${DIM}Interrupting: $CURRENT_OPERATION${NC}"
+    fi
+    
+    echo -e "${BLUE}${ICON_GEAR} Stopping all services...${NC}"
+    stop_all_services_quiet
+    
+    echo -e "${BLUE}${ICON_CLEAN} Cleaning up processes...${NC}"
+    cleanup_background_processes
+    
+    echo -e "${GREEN}${ICON_SUCCESS} Shutdown complete${NC}"
+    echo -e "${GREEN}Thank you for using GitRay! ${ICON_SUCCESS}${NC}"
+    exit 0
+}
+
+# Set up global trap for graceful shutdown
+trap 'graceful_shutdown' INT TERM
+
+cleanup_background_processes() {
+    # Kill any remaining background processes we might have started
+    local pids_to_kill=()
+    
+    # Collect PIDs from our PID files
+    for service in "${!SERVICES[@]}"; do
+        local pid_file="$SCRIPT_DIR/.$service.pid"
+        if [ -f "$pid_file" ]; then
+            local pid=$(cat "$pid_file" 2>/dev/null || echo "")
+            if [ -n "$pid" ]; then
+                pids_to_kill+=("$pid")
+            fi
+        fi
+    done
+    
+    # Kill collected PIDs
+    for pid in "${pids_to_kill[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+        fi
+    done
+    
+    # Clean up any remaining pnpm dev processes
+    pkill -f "pnpm.*dev" 2>/dev/null || true
+    
+    # Clean up PID files
+    rm -f "$SCRIPT_DIR"/.*.pid 2>/dev/null || true
+}
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"
@@ -203,13 +268,23 @@ start_service() {
     local cmd="${SERVICE_COMMANDS[$service]}"
     local show_logs="${2:-true}"
     
+    # Check if we should continue running
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
+    
     echo -e "${BLUE}${ICON_GEAR} Starting ${SERVICES[$service]}...${NC}"
+    CURRENT_OPERATION="Starting ${SERVICES[$service]}"
     
     case "$service" in
         "redis")
             # Stop existing container if running
             docker stop gitray-redis 2>/dev/null || true
             docker rm gitray-redis 2>/dev/null || true
+            
+            if [ "$SCRIPT_RUNNING" = "false" ]; then
+                return 1
+            fi
             
             if eval "$cmd" >/dev/null 2>&1; then
                 echo -e "${GREEN}${ICON_DATABASE} Redis started successfully${NC}"
@@ -222,6 +297,12 @@ start_service() {
             ;;
         "shared-types")
             echo -e "${YELLOW}Building shared types...${NC}"
+            CURRENT_OPERATION="Building shared types"
+            
+            if [ "$SCRIPT_RUNNING" = "false" ]; then
+                return 1
+            fi
+            
             if pnpm --filter @gitray/shared-types build; then
                 echo -e "${GREEN}${ICON_SUCCESS} Shared types built successfully${NC}"
             else
@@ -233,13 +314,26 @@ start_service() {
             local log_file="$SCRIPT_DIR/.$service.log"
             echo -e "${BLUE}Starting $service in background...${NC}"
             
+            if [ "$SCRIPT_RUNNING" = "false" ]; then
+                return 1
+            fi
+            
             # Start service and capture PID
             $cmd > "$log_file" 2>&1 &
             local pid=$!
             echo $pid > "$SCRIPT_DIR/.$service.pid"
             
             # Wait a moment for service to initialize
-            sleep 3
+            local wait_count=0
+            while [ $wait_count -lt 30 ] && [ "$SCRIPT_RUNNING" = "true" ]; do
+                sleep 0.1
+                wait_count=$((wait_count + 1))
+            done
+            
+            if [ "$SCRIPT_RUNNING" = "false" ]; then
+                kill "$pid" 2>/dev/null || true
+                return 1
+            fi
             
             # Check if process is still running
             if ! kill -0 $pid 2>/dev/null; then
@@ -261,6 +355,8 @@ start_service() {
             fi
             ;;
     esac
+    
+    CURRENT_OPERATION=""
 }
 
 stop_service() {
@@ -297,6 +393,31 @@ stop_all_services() {
     echo -e "${GREEN}${ICON_SUCCESS} All services stopped${NC}"
 }
 
+# Quiet version for shutdown
+stop_all_services_quiet() {
+    for service in "${!SERVICES[@]}"; do
+        case "$service" in
+            "redis")
+                docker stop gitray-redis >/dev/null 2>&1 || true
+                docker rm gitray-redis >/dev/null 2>&1 || true
+                ;;
+            *)
+                local pid_file="$SCRIPT_DIR/.$service.pid"
+                if [ -f "$pid_file" ]; then
+                    local pid=$(cat "$pid_file" 2>/dev/null || echo "")
+                    if [ -n "$pid" ]; then
+                        kill "$pid" >/dev/null 2>&1 || true
+                    fi
+                    rm -f "$pid_file" >/dev/null 2>&1 || true
+                fi
+                ;;
+        esac
+    done
+    
+    # Clean up any remaining processes
+    pkill -f "pnpm.*dev" >/dev/null 2>&1 || true
+}
+
 # ============================================================================
 # DEVELOPMENT WORKFLOWS
 # ============================================================================
@@ -305,8 +426,17 @@ full_development_setup() {
     echo -e "${MAGENTA}${ICON_ROCKET} Full Development Setup${NC}"
     echo
     
+    # Remove any existing traps and set up our own
+    trap 'graceful_shutdown' INT TERM
+    
     # 1. Install dependencies
     echo -e "${BLUE}${ICON_GEAR} Installing dependencies...${NC}"
+    CURRENT_OPERATION="Installing dependencies"
+    
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
+    
     if [ -f "pnpm-lock.yaml" ]; then
         if ! pnpm install --frozen-lockfile; then
             echo -e "${RED}${ICON_ERROR} Failed to install dependencies${NC}"
@@ -320,24 +450,53 @@ full_development_setup() {
         fi
     fi
     
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
+    
     # 2. Build shared types
     echo -e "${BLUE}${ICON_GEAR} Building shared types...${NC}"
+    CURRENT_OPERATION="Building shared types"
+    
     if ! pnpm --filter @gitray/shared-types build; then
         echo -e "${RED}${ICON_ERROR} Failed to build shared types${NC}"
         return 1
     fi
     
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
+    
     # 3. Start Redis
-    start_service "redis" false
+    if ! start_service "redis" false; then
+        return 1
+    fi
+    
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
     
     # 4. Start backend
     echo
-    start_service "backend"
+    if ! start_service "backend"; then
+        return 1
+    fi
+    
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
     
     # 5. Start frontend  
     echo
-    start_service "frontend"
+    if ! start_service "frontend"; then
+        return 1
+    fi
     
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
+    
+    CURRENT_OPERATION=""
     echo
     echo -e "${GREEN}${ICON_SUCCESS} Development environment ready!${NC}"
     echo -e "${CYAN}Frontend: http://localhost:${SERVICE_PORTS[frontend]}${NC}"
@@ -351,19 +510,12 @@ full_development_setup() {
     echo -e "${DIM}  • In logs: Press 'q' to return to monitoring${NC}"
     echo
     
-    # Interactive monitoring loop
-    local exiting=false
+    # Interactive monitoring loop - this now NEVER returns to main menu
     local initial_status_shown=false
-    trap 'exiting=true; echo -e "\n${YELLOW}Stopping all services and exiting...${NC}"; stop_all_services; echo -e "${DIM}Final status:${NC}"; show_system_status; echo -e "${GREEN}All services stopped.${NC}"; echo -e "${GREEN}Thank you for using GitRay! ${ICON_SUCCESS}${NC}"; exit 0' INT
     
     # Show status every 10 seconds automatically
     local status_counter=0
-    while true; do
-        # Exit immediately if Ctrl+C was pressed
-        if [ "$exiting" = true ]; then
-            break
-        fi
-        
+    while [ "$SCRIPT_RUNNING" = "true" ]; do
         read -t 1 -n 1 input 2>/dev/null || {
             status_counter=$((status_counter + 1))
             if [ $status_counter -ge 10 ]; then
@@ -400,7 +552,7 @@ full_development_setup() {
                 local tail_pid=$!
                 
                 # Wait for 'q' to exit logs
-                while true; do
+                while [ "$SCRIPT_RUNNING" = "true" ]; do
                     read -t 1 -n 1 log_input 2>/dev/null || continue
                     if [[ "$log_input" == "q" || "$log_input" == "Q" ]]; then
                         kill $tail_pid 2>/dev/null
@@ -440,8 +592,17 @@ quick_start() {
     echo -e "${YELLOW}${ICON_ROCKET} Quick Start (Frontend Only)${NC}"
     echo
     
+    # Remove any existing traps and set up our own
+    trap 'graceful_shutdown' INT TERM
+    
     # 1. Install dependencies (same as full setup)
     echo -e "${BLUE}${ICON_GEAR} Installing dependencies...${NC}"
+    CURRENT_OPERATION="Installing dependencies"
+    
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
+    
     if [ -f "pnpm-lock.yaml" ]; then
         if ! pnpm install --frozen-lockfile; then
             echo -e "${RED}${ICON_ERROR} Failed to install dependencies${NC}"
@@ -455,17 +616,34 @@ quick_start() {
         fi
     fi
     
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
+    
     # 2. Build shared types (same as full setup)
     echo -e "${BLUE}${ICON_GEAR} Building shared types...${NC}"
+    CURRENT_OPERATION="Building shared types"
+    
     if ! pnpm --filter @gitray/shared-types build; then
         echo -e "${RED}${ICON_ERROR} Failed to build shared types${NC}"
         return 1
     fi
     
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
+    
     # 3. Start only frontend
     echo
-    start_service "frontend"
+    if ! start_service "frontend"; then
+        return 1
+    fi
     
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
+    
+    CURRENT_OPERATION=""
     echo
     echo -e "${GREEN}${ICON_SUCCESS} Frontend development environment ready!${NC}"
     echo -e "${CYAN}Frontend: http://localhost:${SERVICE_PORTS[frontend]}${NC}"
@@ -477,19 +655,12 @@ quick_start() {
     echo -e "${DIM}  • In logs: Press 'q' to return to monitoring${NC}"
     echo
     
-    # Interactive monitoring loop (exactly like full_development_setup)
-    local exiting=false
+    # Interactive monitoring loop - this now NEVER returns to main menu
     local initial_status_shown=false
-    trap 'exiting=true; echo -e "\n${YELLOW}Stopping all services and exiting...${NC}"; stop_all_services; echo -e "${DIM}Final status:${NC}"; show_system_status; echo -e "${GREEN}All services stopped.${NC}"; echo -e "${GREEN}Thank you for using GitRay! ${ICON_SUCCESS}${NC}"; exit 0' INT
     
     # Show status every 10 seconds automatically
     local status_counter=0
-    while true; do
-        # Exit immediately if Ctrl+C was pressed
-        if [ "$exiting" = true ]; then
-            break
-        fi
-        
+    while [ "$SCRIPT_RUNNING" = "true" ]; do
         read -t 1 -n 1 input 2>/dev/null || {
             status_counter=$((status_counter + 1))
             if [ $status_counter -ge 10 ]; then
@@ -526,7 +697,7 @@ quick_start() {
                 local tail_pid=$!
                 
                 # Wait for 'q' to exit logs
-                while true; do
+                while [ "$SCRIPT_RUNNING" = "true" ]; do
                     read -t 1 -n 1 log_input 2>/dev/null || continue
                     if [[ "$log_input" == "q" || "$log_input" == "Q" ]]; then
                         kill $tail_pid 2>/dev/null
@@ -566,10 +737,20 @@ production_build() {
     echo -e "${MAGENTA}${ICON_GEAR} Production Build${NC}"
     echo
     
+    CURRENT_OPERATION="Production build"
+    
     echo -e "${BLUE}Cleaning previous builds...${NC}"
+    CURRENT_OPERATION="Cleaning previous builds"
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
     pnpm run clean:dist
     
     echo -e "${BLUE}Installing dependencies...${NC}"
+    CURRENT_OPERATION="Installing dependencies"
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
     if [ -f "pnpm-lock.yaml" ]; then
         pnpm install --frozen-lockfile
     else
@@ -578,8 +759,13 @@ production_build() {
     fi
     
     echo -e "${BLUE}Building all packages...${NC}"
+    CURRENT_OPERATION="Building all packages"
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
     pnpm run build
     
+    CURRENT_OPERATION=""
     echo -e "${GREEN}${ICON_SUCCESS} Production build completed!${NC}"
     echo -e "${DIM}Build artifacts are in packages/*/dist and apps/*/dist${NC}"
     echo
@@ -600,15 +786,38 @@ run_tests() {
     
     read -p "Choose test option (1-5): " choice
     
+    CURRENT_OPERATION="Running tests"
+    
     case $choice in
-        1) pnpm run test ;;
-        2) pnpm run test:frontend ;;
-        3) pnpm run test:backend ;;
-        4) pnpm run test:coverage ;;
-        5) pnpm run test:watch ;;
+        1) 
+            if [ "$SCRIPT_RUNNING" = "true" ]; then
+                pnpm run test
+            fi
+            ;;
+        2) 
+            if [ "$SCRIPT_RUNNING" = "true" ]; then
+                pnpm run test:frontend
+            fi
+            ;;
+        3) 
+            if [ "$SCRIPT_RUNNING" = "true" ]; then
+                pnpm run test:backend
+            fi
+            ;;
+        4) 
+            if [ "$SCRIPT_RUNNING" = "true" ]; then
+                pnpm run test:coverage
+            fi
+            ;;
+        5) 
+            if [ "$SCRIPT_RUNNING" = "true" ]; then
+                pnpm run test:watch
+            fi
+            ;;
         *) echo -e "${RED}Invalid choice${NC}" ;;
     esac
     
+    CURRENT_OPERATION=""
     echo
     echo -e "${DIM}Press Enter to return to main menu...${NC}"
     read
@@ -621,10 +830,14 @@ clean_environment() {
     read -p "Are you sure? (y/N): " confirm
     
     if [[ $confirm =~ ^[Yy]$ ]]; then
+        CURRENT_OPERATION="Cleaning environment"
         stop_all_services
-        echo -e "${BLUE}Cleaning build artifacts...${NC}"
-        pnpm run clean
-        echo -e "${GREEN}${ICON_SUCCESS} Environment cleaned${NC}"
+        if [ "$SCRIPT_RUNNING" = "true" ]; then
+            echo -e "${BLUE}Cleaning build artifacts...${NC}"
+            pnpm run clean
+            echo -e "${GREEN}${ICON_SUCCESS} Environment cleaned${NC}"
+        fi
+        CURRENT_OPERATION=""
     fi
     
     echo
@@ -637,7 +850,7 @@ clean_environment() {
 # ============================================================================
 
 show_main_menu() {
-    while true; do
+    while [ "$SCRIPT_RUNNING" = "true" ]; do
         print_header
         show_system_status
         
@@ -655,29 +868,53 @@ show_main_menu() {
         
         read -p "Choose action (1-8): " choice
         
+        if [ "$SCRIPT_RUNNING" = "false" ]; then
+            break
+        fi
+        
         case $choice in
             1) full_development_setup ;;
             2) quick_start ;;
-            3) production_build ;;
-            4) run_tests ;;
-            5) clean_environment ;;
-            6) service_management_menu ;;
-            7) show_logs ;;
+            3) 
+                if [ "$SCRIPT_RUNNING" = "true" ]; then
+                    production_build
+                fi
+                ;;
+            4) 
+                if [ "$SCRIPT_RUNNING" = "true" ]; then
+                    run_tests
+                fi
+                ;;
+            5) 
+                if [ "$SCRIPT_RUNNING" = "true" ]; then
+                    clean_environment
+                fi
+                ;;
+            6) 
+                if [ "$SCRIPT_RUNNING" = "true" ]; then
+                    service_management_menu
+                fi
+                ;;
+            7) 
+                if [ "$SCRIPT_RUNNING" = "true" ]; then
+                    show_logs
+                fi
+                ;;
             8) 
-                stop_all_services
-                echo -e "${GREEN}Thank you for using GitRay! ${ICON_SUCCESS}${NC}"
-                exit 0
+                graceful_shutdown
                 ;;
             *) 
                 echo -e "${RED}Invalid choice. Please try again.${NC}"
-                sleep 1
+                if [ "$SCRIPT_RUNNING" = "true" ]; then
+                    sleep 1
+                fi
                 ;;
         esac
     done
 }
 
 service_management_menu() {
-    while true; do
+    while [ "$SCRIPT_RUNNING" = "true" ]; do
         print_header
         show_system_status
         
@@ -693,6 +930,10 @@ service_management_menu() {
         
         read -p "Choose action (1-6): " choice
         
+        if [ "$SCRIPT_RUNNING" = "false" ]; then
+            break
+        fi
+        
         case $choice in
             1) start_service "redis" ;;
             2) start_service "backend" ;;
@@ -700,21 +941,33 @@ service_management_menu() {
             4) stop_all_services ;;
             5) 
                 stop_all_services
-                sleep 2
-                start_service "redis"
-                start_service "backend"
-                start_service "frontend"
+                if [ "$SCRIPT_RUNNING" = "true" ]; then
+                    sleep 2
+                    start_service "redis"
+                    if [ "$SCRIPT_RUNNING" = "true" ]; then
+                        start_service "backend"
+                    fi
+                    if [ "$SCRIPT_RUNNING" = "true" ]; then
+                        start_service "frontend"
+                    fi
+                fi
                 ;;
             6) break ;;
             *) echo -e "${RED}Invalid choice${NC}" ;;
         esac
         
-        echo
-        read -p "Press Enter to continue..."
+        if [ "$SCRIPT_RUNNING" = "true" ]; then
+            echo
+            read -p "Press Enter to continue..."
+        fi
     done
 }
 
 show_logs() {
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
+    
     echo -e "${CYAN}${ICON_INFO} Service Logs${NC}"
     echo
     echo "1) ${ICON_INFO} Live Combined Logs (All services)"
@@ -726,6 +979,10 @@ show_logs() {
     echo
     
     read -p "Choose log view (1-6): " choice
+    
+    if [ "$SCRIPT_RUNNING" = "false" ]; then
+        return 1
+    fi
     
     echo -e "${GRAY}$(printf '%.0s─' {1..60})${NC}"
     echo -e "${DIM}Press 'q' to return to menu (or Ctrl+C to exit completely)${NC}"
@@ -782,7 +1039,9 @@ show_logs() {
         5)
             echo -e "${RED}Recent Errors:${NC}"
             grep -i "error\|fail\|exception" "$SCRIPT_DIR"/.*.log 2>/dev/null | tail -20 || echo "No recent errors found"
-            read -p "Press Enter to continue..."
+            if [ "$SCRIPT_RUNNING" = "true" ]; then
+                read -p "Press Enter to continue..."
+            fi
             ;;
         6)
             show_system_status
@@ -795,13 +1054,17 @@ show_logs() {
                     echo -e "${GRAY}$(printf '%.0s─' {1..40})${NC}"
                 fi
             done
-            read -p "Press Enter to continue..."
+            if [ "$SCRIPT_RUNNING" = "true" ]; then
+                read -p "Press Enter to continue..."
+            fi
             ;;
         *) 
             echo -e "${RED}Invalid choice${NC}"
             echo
             echo -e "${DIM}Press Enter to return to main menu...${NC}"
-            read
+            if [ "$SCRIPT_RUNNING" = "true" ]; then
+                read
+            fi
             ;;
     esac
 }
