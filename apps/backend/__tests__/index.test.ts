@@ -1,71 +1,79 @@
-// apps/backend/__tests__/index.test.ts
+import { describe, test, expect } from 'vitest';
 import dotenv from 'dotenv';
 
-// Define Express mock types
-type MockApp = {
-  use: jest.Mock;
-  listen: jest.Mock;
-};
-
-type MockExpress = jest.Mock<MockApp> & {
-  json: jest.Mock;
-  Router?: jest.Mock;
-};
-
-// Mocking the modules
-jest.mock('express', () => {
-  const mockJson = jest.fn();
+// anying the modules
+vi.mock('express', () => {
+  const mockJson = vi.fn();
   const mockApp = {
-    use: jest.fn(),
-    listen: jest.fn().mockImplementation((port, callback) => {
+    use: vi.fn(),
+    listen: vi.fn().mockImplementation((port: any, callback?: any) => {
       if (callback) callback();
       return mockApp;
     }),
   };
-  const mockRouter = { get: jest.fn(), post: jest.fn(), use: jest.fn() };
+  const mockRouter = { get: vi.fn(), post: vi.fn(), use: vi.fn() };
 
-  const mockExpress = jest.fn(() => mockApp) as MockExpress;
-  mockExpress.json = jest.fn(() => mockJson);
-  mockExpress.Router = jest.fn(() => mockRouter);
-  return mockExpress;
+  const mockExpress = vi.fn(() => mockApp);
+  Object.assign(mockExpress, {
+    json: mockJson,
+    Router: vi.fn(() => mockRouter),
+  });
+
+  return {
+    default: mockExpress,
+  };
 });
 
-jest.mock('cors', () => jest.fn(() => 'mockedCors'));
-jest.mock('dotenv', () => ({ config: jest.fn() }));
-jest.mock('../src/routes', () => 'mockedRoutes');
-jest.mock('../src/routes/repositoryRoutes', () => 'mockedRepositoryRoutes');
-jest.mock('../src/middlewares/errorHandler', () => 'mockedErrorHandler');
-jest.mock('express-rate-limit', () =>
-  jest.fn(() => (req: any, res: any, next: any) => next())
-);
-jest.mock('../src/services/logger', () => ({
+vi.mock('cors', () => ({
+  default: vi.fn(() => 'mockedCors'),
+}));
+vi.mock('dotenv', () => ({
+  default: { config: vi.fn() },
+  config: vi.fn(),
+}));
+vi.mock('../src/routes', () => ({
+  default: 'mockedRoutes',
+}));
+vi.mock('../src/routes/repositoryRoutes', () => ({
+  default: 'mockedRepositoryRoutes',
+}));
+vi.mock('../src/middlewares/errorHandler', () => ({
+  default: 'mockedErrorHandler',
+}));
+vi.mock('../src/middlewares/requestId', () => ({
+  requestIdMiddleware: vi.fn((req: any, res: any, next: any) => next()),
+}));
+vi.mock('express-rate-limit', () => ({
+  default: vi.fn(() => (req: any, res: any, next: any) => next()),
+}));
+vi.mock('../src/services/logger', () => ({
   __esModule: true,
   default: {
-    info: jest.fn(),
-    error: jest.fn(),
-    warn: jest.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
   },
 }));
+vi.mock('../src/services/metrics', () => ({
+  httpRequestsTotal: { inc: vi.fn() },
+  httpRequestDuration: { observe: vi.fn() },
+  metricsMiddleware: vi.fn((req: any, res: any, next: any) => next()),
+  metricsHandler: vi.fn((req: any, res: any) =>
+    res.status(200).send('mocked metrics')
+  ),
+}));
 
-// Mocking process.env
+// anying process.env
 const originalEnv = process.env;
 
 describe('Express App Initialization', () => {
-  let mockExpress: MockExpress;
-  let mockCors: jest.Mock;
-
   beforeEach(() => {
     // Reset mocks before each test
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Setup process.env
     process.env = { ...originalEnv };
     process.env.PORT = '3001';
-
-    // Import the mocked modules after resetting mocks
-    // Using jest.requireMock to avoid require() style imports
-    mockExpress = jest.requireMock('express');
-    mockCors = jest.requireMock('cors');
   });
 
   afterEach(() => {
@@ -73,7 +81,7 @@ describe('Express App Initialization', () => {
     process.env = originalEnv;
 
     // Clear require cache to ensure fresh imports in each test
-    jest.resetModules();
+    vi.resetModules();
   });
 
   test('should configure the Express app with correct middlewares and routes', async () => {
@@ -81,7 +89,11 @@ describe('Express App Initialization', () => {
     // Using dynamic import instead of require
     await import('../src/index');
 
-    // Get the mock Express app
+    // Get the mocked modules
+    const express = await import('express');
+    const cors = await import('cors');
+    const mockExpress = express.default as any;
+    const mockCors = cors.default as any;
     const mockApp = mockExpress();
 
     // Assert
@@ -108,7 +120,9 @@ describe('Express App Initialization', () => {
     // Using dynamic import instead of require
     await import('../src/index');
 
-    // Get the mock Express app
+    // Get the mocked modules
+    const express = await import('express');
+    const mockExpress = express.default as any;
     const mockApp = mockExpress();
 
     // Assert
@@ -118,13 +132,15 @@ describe('Express App Initialization', () => {
   test('should log when server starts', async () => {
     // Arrange
     const logger = (await import('../src/services/logger')).default;
-    const infoSpy = jest.spyOn(logger, 'info');
+    const infoSpy = vi.spyOn(logger, 'info');
 
     // Act - Import the index module to trigger the app initialization
     // Using dynamic import instead of require
     await import('../src/index');
 
-    // Get the mock Express app
+    // Get the mocked modules
+    const express = await import('express');
+    const mockExpress = express.default as any;
     const mockApp = mockExpress();
     const listenCallback = mockApp.listen.mock.calls[0][1];
 

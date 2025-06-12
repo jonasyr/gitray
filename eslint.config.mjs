@@ -62,10 +62,13 @@ export default [
       '**/jest-transforms/**/*.cjs',
       '**/jest-transforms/**/*.js',
       '**/apps/backend/src/**/*.js',
+      '**/*.test.ts', // Added to include TypeScript test files
+      '**/*.test.tsx', // Added to include TypeScript JSX test files
     ],
     languageOptions: {
       globals: {
         ...globals.node,
+        ...globals.vitest, // Add vitest globals
         module: true,
         require: true,
         jest: true,

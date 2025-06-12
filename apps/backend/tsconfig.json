@@ -1,14 +1,14 @@
 {
   "compilerOptions": {
-    "target": "es2016",
-    "module": "commonjs",
+    "target": "es2020",
+    "module": "ESNext",
     "moduleResolution": "node",
     "baseUrl": "./",
     "paths": {
       "@gitray/shared-types": ["../../packages/shared-types/src"],
       "@gitray/shared-types/*": ["../../packages/shared-types/src/*"]
     },
-    "types": ["node", "jest", "express"],
+    "types": ["node", "vitest/globals"],
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
