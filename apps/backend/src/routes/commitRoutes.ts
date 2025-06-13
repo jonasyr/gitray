@@ -6,28 +6,36 @@ import {
   ValidationChain,
 } from 'express-validator';
 import { gitService } from '../services/gitService';
-import redis from '../services/cache';
 import {
-  withTempRepository,
+  getCachedCommits,
+  getCachedAggregatedData,
+  getRepositoryCacheStats,
+  repositoryCache,
+  type CommitCacheOptions,
+} from '../services/repositoryCache';
+import {
   withTempRepositoryStreaming,
   getRepositoryInfo,
+  invalidateRepositoryCache,
+  getCoordinationMetrics,
+  getRepositoryStatus,
 } from '../utils/withTempRepository';
 import { createRequestLogger } from '../services/logger';
 import {
-  cacheHits,
-  cacheMisses,
+  // cacheHits,
+  // cacheMisses,
   recordStreamingBatch,
-  getRepositorySizeCategory,
+  // getRepositorySizeCategory,
 } from '../services/metrics';
 import {
   CommitFilterOptions,
   ERROR_MESSAGES,
   HTTP_STATUS,
-  TIME,
+  // TIME,
 } from '@gitray/shared-types';
 import { config } from '../config';
 
-// Router serving commit related data with streaming support
+// Router serving commit related data with unified caching
 const router = express.Router();
 
 // ---------------------------------------------------------------------------
@@ -168,6 +176,405 @@ const authorValidation = (): ValidationChain[] => [
     ),
 ];
 
+// ---------------------------------------------------------------------------
+// ENHANCED: GET / - paginated list of commits with unified caching
+// ---------------------------------------------------------------------------
+router.get(
+  '/',
+  [...repoUrlValidation(), ...paginationValidation()],
+  handleValidationErrors,
+  async (req: Request, res: Response, next: NextFunction) => {
+    const logger = createRequestLogger(req);
+    const { repoUrl, useStreaming } = req.query as Record<string, string>;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 100;
+    const forceStreaming = useStreaming === 'true';
+    const skip = (page - 1) * limit;
+
+    const startTime = Date.now();
+
+    try {
+      logger.info('Processing commits request with unified caching', {
+        repoUrl,
+        page,
+        limit,
+        forceStreaming,
+        coordinationEnabled: config.repositoryCache?.enabled,
+      });
+
+      // Prepare cache options for hierarchical caching
+      const cacheOptions: CommitCacheOptions = {
+        skip,
+        limit,
+      };
+
+      // Use unified cache manager (handles all three cache levels automatically)
+      const commits = await getCachedCommits(repoUrl, cacheOptions);
+
+      // Determine if streaming was used (check from repository info)
+      let streamingUsed = false;
+      let repositorySize = 'unknown';
+
+      try {
+        const repoInfo = await getRepositoryInfo(repoUrl);
+        streamingUsed = repoInfo.shouldUseStreaming || forceStreaming;
+        repositorySize = repoInfo.sizeCategory;
+
+        // Set repository size header for client optimization
+        res.setHeader('X-Repository-Size', repositorySize);
+        res.setHeader(
+          'X-Repository-Cached',
+          repoInfo.cached ? 'true' : 'false'
+        );
+        res.setHeader(
+          'X-Repository-Shared',
+          repoInfo.isShared ? 'true' : 'false'
+        );
+      } catch (repoInfoError) {
+        logger.warn('Failed to get repository info', {
+          repoUrl,
+          error: repoInfoError,
+        });
+      }
+
+      const result = {
+        commits,
+        page,
+        limit,
+        streamingUsed,
+        totalCommits: commits.length,
+        metadata: {
+          repositorySize,
+          cacheStrategy: 'unified_hierarchical',
+          processingTime: Date.now() - startTime,
+        },
+      };
+
+      // Set cache status header based on cache performance
+      const cacheStats = getRepositoryCacheStats();
+      const overallHitRatio = cacheStats.hitRatios.overall;
+
+      if (overallHitRatio > 0.8) {
+        res.setHeader('X-Cache-Status', 'HIT');
+        res.setHeader('X-Cache-Level', 'UNIFIED');
+      } else if (overallHitRatio > 0.3) {
+        res.setHeader('X-Cache-Status', 'PARTIAL');
+        res.setHeader('X-Cache-Level', 'MULTI_TIER');
+      } else {
+        res.setHeader('X-Cache-Status', 'MISS');
+        res.setHeader('X-Cache-Level', 'SOURCE');
+      }
+
+      res.setHeader('X-Cache-Hit-Ratio', overallHitRatio.toFixed(3));
+
+      logger.info('Commits request completed via unified caching', {
+        repoUrl,
+        page,
+        limit,
+        commitsReturned: commits.length,
+        streamingUsed,
+        repositorySize,
+        processingTime: Date.now() - startTime,
+        hitRatio: overallHitRatio,
+      });
+
+      res.status(HTTP_STATUS.OK).json(result);
+    } catch (error) {
+      logger.error('Error fetching commits via unified cache', {
+        error,
+        repoUrl,
+        page,
+        limit,
+      });
+      next(error);
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// ENHANCED: GET /heatmap - aggregated commit activity with unified caching
+// ---------------------------------------------------------------------------
+router.get(
+  '/heatmap',
+  [...repoUrlValidation(), ...dateValidation(), ...authorValidation()],
+  handleValidationErrors,
+  async (req: Request, res: Response, next: NextFunction) => {
+    const logger = createRequestLogger(req);
+    const { repoUrl, author, authors, fromDate, toDate, useStreaming } =
+      req.query as Record<string, string>;
+    const forceStreaming = useStreaming === 'true';
+
+    const startTime = Date.now();
+
+    const filters: CommitFilterOptions = {
+      author: author || undefined,
+      authors: authors ? authors.split(',').map((a) => a.trim()) : undefined,
+      fromDate: fromDate || undefined,
+      toDate: toDate || undefined,
+    };
+
+    try {
+      logger.info('Processing heatmap request with unified caching', {
+        repoUrl,
+        filters,
+        forceStreaming,
+        coordinationEnabled: config.repositoryCache?.enabled,
+      });
+
+      // Use unified cache manager for aggregated data (Level 3 cache)
+      const heatmapData = await getCachedAggregatedData(repoUrl, filters);
+
+      // Get repository information for metadata
+      let repositoryInfo;
+      try {
+        repositoryInfo = await getRepositoryInfo(repoUrl);
+        res.setHeader('X-Repository-Size', repositoryInfo.sizeCategory);
+        res.setHeader(
+          'X-Repository-Cached',
+          repositoryInfo.cached ? 'true' : 'false'
+        );
+        res.setHeader(
+          'X-Repository-Shared',
+          repositoryInfo.isShared ? 'true' : 'false'
+        );
+      } catch (repoInfoError) {
+        logger.warn('Failed to get repository info for heatmap', {
+          repoUrl,
+          error: repoInfoError,
+        });
+      }
+
+      // Enhanced metadata with coordination information
+      const enhancedHeatmapData = {
+        ...heatmapData,
+        metadata: {
+          ...heatmapData.metadata,
+          filterOptions: filters,
+          streamingUsed:
+            forceStreaming || (repositoryInfo?.shouldUseStreaming ?? false),
+          repositorySize: repositoryInfo?.sizeCategory || 'unknown',
+          cacheStrategy: 'unified_hierarchical',
+          processingTime: Date.now() - startTime,
+          coordinationMetrics: config.repositoryCache?.enabled
+            ? getCoordinationMetrics()
+            : null,
+        },
+      };
+
+      // Set cache status headers
+      const cacheStats = getRepositoryCacheStats();
+      const aggregatedHitRatio = cacheStats.hitRatios.aggregatedData;
+
+      if (aggregatedHitRatio > 0.8) {
+        res.setHeader('X-Cache-Status', 'HIT');
+        res.setHeader('X-Cache-Level', 'AGGREGATED');
+      } else if (cacheStats.hitRatios.filteredCommits > 0.5) {
+        res.setHeader('X-Cache-Status', 'PARTIAL');
+        res.setHeader('X-Cache-Level', 'FILTERED');
+      } else if (cacheStats.hitRatios.rawCommits > 0.3) {
+        res.setHeader('X-Cache-Status', 'PARTIAL');
+        res.setHeader('X-Cache-Level', 'RAW');
+      } else {
+        res.setHeader('X-Cache-Status', 'MISS');
+        res.setHeader('X-Cache-Level', 'SOURCE');
+      }
+
+      res.setHeader(
+        'X-Cache-Hit-Ratio',
+        cacheStats.hitRatios.overall.toFixed(3)
+      );
+
+      logger.info('Heatmap request completed via unified caching', {
+        repoUrl,
+        filters,
+        dataPoints: heatmapData.data.length,
+        totalCommits: heatmapData.metadata?.totalCommits || 0,
+        repositorySize: repositoryInfo?.sizeCategory,
+        processingTime: Date.now() - startTime,
+        hitRatio: cacheStats.hitRatios.overall,
+      });
+
+      res.status(HTTP_STATUS.OK).json(enhancedHeatmapData);
+    } catch (error) {
+      logger.error('Error generating heatmap via unified cache', {
+        error,
+        repoUrl,
+        filters,
+      });
+      next(error);
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// ENHANCED: GET /info - Repository information with coordination metrics
+// ---------------------------------------------------------------------------
+router.get(
+  '/info',
+  [
+    query('repoUrl')
+      .isURL({ protocols: ['http', 'https'] })
+      .withMessage(ERROR_MESSAGES.INVALID_REPO_URL),
+    handleValidationErrors,
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    const logger = createRequestLogger(req);
+    const { repoUrl } = req.query as Record<string, string>;
+
+    try {
+      const startTime = Date.now();
+
+      // Get repository information (uses coordination)
+      const info = await getRepositoryInfo(repoUrl);
+
+      // Get current cache statistics
+      const cacheStats = getRepositoryCacheStats();
+      const coordinationMetrics = getCoordinationMetrics();
+
+      const result = {
+        ...info,
+        streamingConfig: {
+          enabled: config.streaming.enabled,
+          threshold: config.streaming.commitThreshold,
+          defaultBatchSize: config.streaming.batchSize,
+        },
+        cacheInfo: {
+          hierarchicalCaching: config.cacheStrategy.hierarchicalCaching,
+          coordination: {
+            enabled: config.repositoryCache?.enabled,
+            metrics: coordinationMetrics,
+          },
+          performance: {
+            hitRatios: cacheStats.hitRatios,
+            efficiency: cacheStats.efficiency,
+          },
+        },
+        processingTime: Date.now() - startTime,
+      };
+
+      // Set response headers
+      res.setHeader('X-Cache-Status', info.cached ? 'HIT' : 'MISS');
+      res.setHeader(
+        'X-Coordination-Enabled',
+        config.repositoryCache?.enabled ? 'true' : 'false'
+      );
+
+      logger.info('Repository info request completed', {
+        repoUrl,
+        info: result,
+        processingTime: Date.now() - startTime,
+      });
+
+      res.status(HTTP_STATUS.OK).json(result);
+    } catch (error) {
+      logger.error('Error getting repository info', { error, repoUrl });
+      next(error);
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// NEW: Cache management endpoints
+// ---------------------------------------------------------------------------
+
+// GET /cache/stats - Get detailed cache statistics
+router.get('/cache/stats', (req: Request, res: Response) => {
+  const logger = createRequestLogger(req);
+
+  const cacheStats = getRepositoryCacheStats();
+  const coordinationMetrics = getCoordinationMetrics();
+  const repositoryStatus = getRepositoryStatus();
+
+  const result = {
+    cache: cacheStats,
+    coordination: coordinationMetrics,
+    repositories: {
+      cached: repositoryStatus.length,
+      details: repositoryStatus.slice(0, 10), // Limit to first 10 for performance
+    },
+    timestamp: new Date().toISOString(),
+  };
+
+  logger.debug('Cache stats requested', {
+    cachedRepositories: repositoryStatus.length,
+    overallHitRatio: cacheStats.hitRatios.overall,
+  });
+
+  res.status(HTTP_STATUS.OK).json(result);
+});
+
+// POST /cache/invalidate - Invalidate repository cache
+router.post(
+  '/cache/invalidate',
+  [
+    body('repoUrl')
+      .isURL({ protocols: ['http', 'https'] })
+      .withMessage(ERROR_MESSAGES.INVALID_REPO_URL),
+    handleValidationErrors,
+  ],
+  async (req: Request, res: Response) => {
+    const logger = createRequestLogger(req);
+    const { repoUrl } = req.body;
+
+    try {
+      // Invalidate both cache tiers
+      await invalidateRepositoryCache(repoUrl);
+      await repositoryCache.invalidateRepository(repoUrl);
+
+      logger.info('Repository cache invalidated', { repoUrl });
+
+      res.status(HTTP_STATUS.OK).json({
+        success: true,
+        message: 'Repository cache invalidated successfully',
+        repoUrl,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      logger.error('Error invalidating repository cache', { error, repoUrl });
+      res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+        error: 'Failed to invalidate repository cache',
+      });
+    }
+  }
+);
+
+// GET /cache/repositories - List all cached repositories
+router.get('/cache/repositories', (req: Request, res: Response) => {
+  const logger = createRequestLogger(req);
+
+  const repositoryStatus = getRepositoryStatus();
+  const coordinationMetrics = getCoordinationMetrics();
+
+  const result = {
+    repositories: repositoryStatus.map((repo) => ({
+      ...repo,
+      ageMinutes: Math.round(repo.age / (60 * 1000)),
+      lastAccessedFormatted: repo.lastAccessed.toISOString(),
+    })),
+    summary: {
+      total: repositoryStatus.length,
+      maxRepositories: config.repositoryCache?.maxRepositories || 50,
+      utilizationPercent: Math.round(
+        (repositoryStatus.length /
+          (config.repositoryCache?.maxRepositories || 50)) *
+          100
+      ),
+    },
+    coordination: coordinationMetrics,
+    timestamp: new Date().toISOString(),
+  };
+
+  logger.debug('Repository status requested', {
+    totalRepositories: repositoryStatus.length,
+  });
+
+  res.status(HTTP_STATUS.OK).json(result);
+});
+
+// ---------------------------------------------------------------------------
+// ENHANCED: Streaming endpoints (with coordination support)
+// ---------------------------------------------------------------------------
+
 // Streaming validation for POST /stream endpoint
 const streamingOptionsValidation = [
   body('repoUrl')
@@ -199,264 +606,7 @@ const streamingOptionsValidation = [
   handleValidationErrors,
 ];
 
-// ---------------------------------------------------------------------------
-// GET / - paginated list of commits
-// ---------------------------------------------------------------------------
-router.get(
-  '/',
-  [...repoUrlValidation(), ...paginationValidation()],
-  handleValidationErrors,
-  async (req: Request, res: Response, next: NextFunction) => {
-    const logger = createRequestLogger(req);
-    const { repoUrl, useStreaming } = req.query as Record<string, string>;
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 100;
-    const forceStreaming = useStreaming === 'true';
-    const skip = (page - 1) * limit;
-
-    try {
-      const cacheKey = `commits:${repoUrl}:${page}:${limit}:${forceStreaming}`;
-      const cached = await redis.get(cacheKey);
-
-      if (cached) {
-        cacheHits.inc({ operation: 'commits' });
-        res.setHeader('X-Cache-Status', 'HIT');
-        logger.info('Cache hit for commits', {
-          repoUrl,
-          page,
-          limit,
-          forceStreaming,
-        });
-        res.status(HTTP_STATUS.OK).json(JSON.parse(cached));
-        return;
-      }
-
-      cacheMisses.inc({ operation: 'commits' });
-      res.setHeader('X-Cache-Status', 'MISS');
-
-      let commits;
-      let streamingUsed = false;
-
-      if (forceStreaming) {
-        // Force streaming mode for testing/debugging
-        commits = await withTempRepositoryStreaming(
-          repoUrl,
-          async (tempDir) => {
-            streamingUsed = true;
-            return await gitService.getCommits(tempDir, { skip, limit });
-          }
-        );
-      } else {
-        // Use intelligent detection
-        commits = await withTempRepository(repoUrl, async (tempDir) => {
-          const shouldUseStreaming =
-            await gitService.shouldUseStreaming(tempDir);
-          streamingUsed = shouldUseStreaming;
-
-          if (shouldUseStreaming) {
-            logger.info('Using streaming for large repository', {
-              repoUrl,
-              page,
-              limit,
-            });
-          }
-
-          return await gitService.getCommits(tempDir, { skip, limit });
-        });
-      }
-
-      const result = {
-        commits,
-        page,
-        limit,
-        streamingUsed,
-        totalCommits: commits.length,
-      };
-
-      await redis.set(cacheKey, JSON.stringify(result), 'EX', TIME.HOUR / 1000);
-
-      logger.info('Fetched commits from repository', {
-        repoUrl,
-        page,
-        limit,
-        count: commits.length,
-        streamingUsed,
-      });
-
-      res.status(HTTP_STATUS.OK).json(result);
-    } catch (error) {
-      logger.error('Error fetching commits', { error, repoUrl });
-      next(error);
-    }
-  }
-);
-
-// ---------------------------------------------------------------------------
-// GET /heatmap - aggregated commit activity
-// ---------------------------------------------------------------------------
-router.get(
-  '/heatmap',
-  [...repoUrlValidation(), ...dateValidation(), ...authorValidation()],
-  handleValidationErrors,
-  async (req: Request, res: Response, next: NextFunction) => {
-    const logger = createRequestLogger(req);
-    const { repoUrl, author, authors, fromDate, toDate, useStreaming } =
-      req.query as Record<string, string>;
-    const forceStreaming = useStreaming === 'true';
-
-    const filters: CommitFilterOptions = {
-      author: author || undefined,
-      authors: authors ? authors.split(',').map((a) => a.trim()) : undefined,
-      fromDate: fromDate || undefined,
-      toDate: toDate || undefined,
-    };
-
-    try {
-      const cacheKey = `heatmap:${repoUrl}:${JSON.stringify(filters)}:${forceStreaming}`;
-      const cached = await redis.get(cacheKey);
-
-      if (cached) {
-        cacheHits.inc({ operation: 'heatmap' });
-        res.setHeader('X-Cache-Status', 'HIT');
-        logger.info('Cache hit for heatmap', {
-          repoUrl,
-          filters,
-          forceStreaming,
-        });
-        res.status(HTTP_STATUS.OK).json(JSON.parse(cached));
-        return;
-      }
-
-      cacheMisses.inc({ operation: 'heatmap' });
-      res.setHeader('X-Cache-Status', 'MISS');
-
-      let heatmapData;
-      let streamingUsed = false;
-
-      if (forceStreaming) {
-        // Force streaming mode
-        heatmapData = await withTempRepositoryStreaming(
-          repoUrl,
-          async (tempDir, commitCount) => {
-            streamingUsed = true;
-            res.setHeader(
-              'X-Repository-Size',
-              getRepositorySizeCategory(commitCount)
-            );
-
-            const commits = await gitService.getCommits(tempDir);
-            return gitService.aggregateCommitsByTime(commits, filters);
-          }
-        );
-      } else {
-        // Use intelligent detection
-        heatmapData = await withTempRepository(repoUrl, async (tempDir) => {
-          const shouldUseStreaming =
-            await gitService.shouldUseStreaming(tempDir);
-          streamingUsed = shouldUseStreaming;
-
-          if (shouldUseStreaming) {
-            const commitCount = await gitService.getCommitCount(tempDir);
-            res.setHeader(
-              'X-Repository-Size',
-              getRepositorySizeCategory(commitCount)
-            );
-            logger.info('Using streaming for large repository heatmap', {
-              repoUrl,
-              commitCount,
-            });
-          }
-
-          const commits = await gitService.getCommits(tempDir);
-          return gitService.aggregateCommitsByTime(commits, filters);
-        });
-      }
-
-      // Add streaming metadata to response
-      heatmapData.metadata = {
-        maxCommitCount: heatmapData.metadata?.maxCommitCount || 0,
-        totalCommits: heatmapData.metadata?.totalCommits || 0,
-        filterOptions: filters,
-        streamingUsed,
-      };
-
-      await redis.set(
-        cacheKey,
-        JSON.stringify(heatmapData),
-        'EX',
-        TIME.HOUR / 1000
-      );
-
-      logger.info('Generated heatmap data', {
-        repoUrl,
-        filters,
-        streamingUsed,
-      });
-      res.status(HTTP_STATUS.OK).json(heatmapData);
-    } catch (error) {
-      logger.error('Error generating heatmap', { error, repoUrl, filters });
-      next(error);
-    }
-  }
-);
-
-// ---------------------------------------------------------------------------
-// NEW: GET /commits/info - Repository information endpoint
-// ---------------------------------------------------------------------------
-router.get(
-  '/info',
-  [
-    query('repoUrl')
-      .isURL({ protocols: ['http', 'https'] })
-      .withMessage(ERROR_MESSAGES.INVALID_REPO_URL),
-    handleValidationErrors,
-  ],
-  async (req: Request, res: Response, next: NextFunction) => {
-    const logger = createRequestLogger(req);
-    const { repoUrl } = req.query as Record<string, string>;
-
-    try {
-      const cacheKey = `repo_info:${repoUrl}`;
-      const cached = await redis.get(cacheKey);
-
-      if (cached) {
-        cacheHits.inc({ operation: 'repo_info' });
-        res.setHeader('X-Cache-Status', 'HIT');
-        logger.info('Cache hit for repository info', { repoUrl });
-        res.status(HTTP_STATUS.OK).json(JSON.parse(cached));
-        return;
-      }
-
-      cacheMisses.inc({ operation: 'repo_info' });
-      res.setHeader('X-Cache-Status', 'MISS');
-
-      const info = await getRepositoryInfo(repoUrl);
-
-      const result = {
-        ...info,
-        streamingConfig: {
-          enabled: config.streaming.enabled,
-          threshold: config.streaming.commitThreshold,
-          defaultBatchSize: config.streaming.batchSize,
-        },
-        sizeCategory: getRepositorySizeCategory(info.commitCount),
-      };
-
-      await redis.set(cacheKey, JSON.stringify(result), 'EX', TIME.HOUR / 1000);
-
-      logger.info('Generated repository info', { repoUrl, info: result });
-      res.status(HTTP_STATUS.OK).json(result);
-      return;
-    } catch (error) {
-      logger.error('Error getting repository info', { error, repoUrl });
-      next(error);
-    }
-  }
-);
-
-// ---------------------------------------------------------------------------
-// NEW: POST /commits/stream - Streaming commits endpoint
-// ---------------------------------------------------------------------------
+// POST /stream - Enhanced streaming with coordination
 router.post(
   '/stream',
   streamingOptionsValidation,
@@ -465,11 +615,20 @@ router.post(
     const { repoUrl, batchSize, maxCommits, resumeFromSha } = req.body;
 
     try {
+      // Get repository info first (may use cached data)
+      const repoInfo = await getRepositoryInfo(repoUrl);
+
       // Set streaming response headers
       res.writeHead(200, {
         'Content-Type': 'application/json',
         'Transfer-Encoding': 'chunked',
         'X-Streaming-Mode': 'enabled',
+        'X-Repository-Size': repoInfo.sizeCategory,
+        'X-Repository-Cached': repoInfo.cached ? 'true' : 'false',
+        'X-Repository-Shared': repoInfo.isShared ? 'true' : 'false',
+        'X-Coordination-Enabled': config.repositoryCache?.enabled
+          ? 'true'
+          : 'false',
         'Cache-Control': 'no-cache',
       });
 
@@ -477,36 +636,48 @@ router.post(
       let batchCount = 0;
       const operationStart = Date.now();
 
+      // Send initial metadata with coordination info
+      res.write(
+        JSON.stringify({
+          type: 'metadata',
+          data: {
+            totalCommits: repoInfo.commitCount,
+            streamingOptions: {
+              batchSize: batchSize || config.streaming.batchSize,
+              maxCommits: maxCommits || repoInfo.commitCount,
+              resumeFromSha,
+            },
+            repository: {
+              sizeCategory: repoInfo.sizeCategory,
+              cached: repoInfo.cached,
+              shared: repoInfo.isShared,
+              coordinationEnabled: config.repositoryCache?.enabled,
+            },
+            estimatedBatches: Math.ceil(
+              repoInfo.commitCount / (batchSize || config.streaming.batchSize)
+            ),
+          },
+        }) + '\n'
+      );
+
+      // Use coordination-aware streaming (implementation would use shared repositories)
+      const streamingOptions = {
+        batchSize: batchSize || config.streaming.batchSize,
+        maxCommits: maxCommits || repoInfo.commitCount,
+        ...(resumeFromSha && { startFromCommit: resumeFromSha }),
+      };
+
+      logger.info('Starting coordinated streaming response', {
+        repoUrl,
+        commitCount: repoInfo.commitCount,
+        streamingOptions,
+        coordinationEnabled: config.repositoryCache?.enabled,
+      });
+
+      // Use withTempRepositoryStreaming for actual streaming implementation
       await withTempRepositoryStreaming(
         repoUrl,
         async (tempDir, commitCount) => {
-          const streamingOptions = {
-            batchSize: batchSize || config.streaming.batchSize,
-            maxCommits: maxCommits || commitCount,
-            ...(resumeFromSha && { startFromCommit: resumeFromSha }),
-          };
-
-          logger.info('Starting streaming response', {
-            repoUrl,
-            commitCount,
-            streamingOptions,
-          });
-
-          // Send initial metadata
-          res.write(
-            JSON.stringify({
-              type: 'metadata',
-              data: {
-                totalCommits: commitCount,
-                streamingOptions,
-                sizeCategory: getRepositorySizeCategory(commitCount),
-                estimatedBatches: Math.ceil(
-                  commitCount / streamingOptions.batchSize
-                ),
-              },
-            }) + '\n'
-          );
-
           // Stream batches
           for await (const batch of gitService.getCommitsStream(
             tempDir,
@@ -543,37 +714,41 @@ router.post(
               totalProcessed: totalCommits,
             });
           }
-
-          // Send completion metadata
-          const operationTime = Date.now() - operationStart;
-          res.write(
-            JSON.stringify({
-              type: 'complete',
-              data: {
-                totalCommits,
-                totalBatches: batchCount,
-                operationTime,
-                averageCommitsPerSecond: Math.round(
-                  totalCommits / (operationTime / 1000)
-                ),
-              },
-            }) + '\n'
-          );
-
-          logger.info('Streaming completed', {
-            repoUrl,
-            totalCommits,
-            totalBatches: batchCount,
-            operationTime,
-          });
         }
       );
 
+      // Send completion metadata
+      const operationTime = Date.now() - operationStart;
+      res.write(
+        JSON.stringify({
+          type: 'complete',
+          data: {
+            totalCommits,
+            totalBatches: batchCount,
+            operationTime,
+            averageCommitsPerSecond: Math.round(
+              totalCommits / (operationTime / 1000)
+            ),
+            cacheEfficiency: getRepositoryCacheStats().hitRatios.overall,
+          },
+        }) + '\n'
+      );
+
+      logger.info('Coordinated streaming completed', {
+        repoUrl,
+        totalCommits,
+        totalBatches: batchCount,
+        operationTime,
+        coordinationEnabled: config.repositoryCache?.enabled,
+      });
+
       res.end();
     } catch (error) {
-      logger.error('Error in streaming commits', { error, repoUrl });
+      logger.error('Error in coordinated streaming commits', {
+        error,
+        repoUrl,
+      });
 
-      // Try to send error in streaming format
       try {
         res.write(
           JSON.stringify({
@@ -586,7 +761,6 @@ router.post(
         );
         res.end();
       } catch {
-        // If we can't write the error, just end the response
         res.end();
       }
     }

@@ -3,9 +3,6 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Stats } from 'fs';
 
-// Define proper types for mocks
-type MockedFunction<T extends (...args: any[]) => any> = vi.MockedFunction<T>;
-
 // Create a proper Stats mock object
 const createMockStats = (mtimeMs: number = Date.now() - 1000): Stats =>
   ({
@@ -38,8 +35,8 @@ const createMockStats = (mtimeMs: number = Date.now() - 1000): Stats =>
 
 // Create comprehensive mocks before any imports
 const mockFileHandle = {
-  writeFile: vi.fn() as MockedFunction<(data: string) => Promise<void>>,
-  close: vi.fn() as MockedFunction<() => Promise<void>>,
+  writeFile: vi.fn(),
+  close: vi.fn(),
 };
 
 // Create comprehensive mocks using vi.hoisted

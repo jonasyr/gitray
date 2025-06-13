@@ -203,7 +203,9 @@ export const streamingErrors = new Counter({
 /**
  * Helper to categorize repository size for metrics
  */
-export function getRepositorySizeCategory(commitCount: number): string {
+export function getRepositorySizeCategory(
+  commitCount: number
+): 'small' | 'medium' | 'large' | 'huge' {
   if (commitCount < 1000) return 'small';
   if (commitCount < 10000) return 'medium';
   if (commitCount < 100000) return 'large';

@@ -163,11 +163,147 @@ export const config = {
     // Enable metrics collection
     enableMetrics: parseEnvBoolean(process.env.ENABLE_METRICS, true),
   },
+
+  /**
+   * NEW: Repository-level caching configuration
+   * Controls the shared repository coordinator and prevents duplicate clones
+   */
+  repositoryCache: {
+    // Enable/disable the repository coordination system
+    enabled: parseEnvBoolean(process.env.REPO_CACHE_ENABLED, true),
+
+    // Maximum number of repositories to keep cached
+    maxRepositories: parseEnvNumber(
+      process.env.REPO_CACHE_MAX_REPOSITORIES,
+      50
+    ),
+
+    // Maximum age of cached repositories in hours
+    maxAgeHours: parseEnvNumber(process.env.REPO_CACHE_MAX_AGE_HOURS, 24),
+
+    // Memory limit for repository metadata (in bytes)
+    memoryLimitBytes:
+      parseEnvNumber(process.env.REPO_CACHE_MEMORY_LIMIT_GB, 1) * 1024 ** 3,
+
+    // Disk limit for cached repositories (in bytes)
+    diskLimitBytes:
+      parseEnvNumber(process.env.REPO_CACHE_DISK_LIMIT_GB, 5) * 1024 ** 3,
+
+    // Cleanup interval for expired repositories (in milliseconds)
+    cleanupIntervalMs: parseEnvNumber(
+      process.env.REPO_CACHE_CLEANUP_INTERVAL_MS,
+      5 * 60 * 1000
+    ), // 5 minutes
+
+    // Enable aggressive cleanup when memory pressure is detected
+    aggressiveEviction: parseEnvBoolean(
+      process.env.REPO_CACHE_AGGRESSIVE_EVICTION,
+      true
+    ),
+
+    // Base directory for shared repository storage
+    basePath:
+      process.env.REPO_CACHE_BASE_PATH ||
+      path.join(os.tmpdir(), 'gitray-shared-repos'),
+  },
+
+  /**
+   * NEW: Operation coordination configuration
+   * Controls how parallel operations on the same repository are handled
+   */
+  operationCoordination: {
+    // Enable operation coordination and coalescing
+    enabled: parseEnvBoolean(
+      process.env.REPO_OPERATION_COORDINATION_ENABLED,
+      true
+    ),
+
+    // Timeout for coordinated operations (in milliseconds)
+    operationTimeoutMs: parseEnvNumber(
+      process.env.REPO_OPERATION_TIMEOUT_MS,
+      10 * 60 * 1000
+    ), // 10 minutes
+
+    // Enable coalescing of identical operations
+    coalescingEnabled: parseEnvBoolean(
+      process.env.REPO_OPERATION_COALESCING_ENABLED,
+      true
+    ),
+
+    // Maximum number of concurrent operations per repository
+    maxConcurrentOpsPerRepo: parseEnvNumber(
+      process.env.REPO_MAX_CONCURRENT_OPS,
+      3
+    ),
+
+    // Queue size limit for pending operations
+    maxQueueSize: parseEnvNumber(process.env.REPO_OPERATION_MAX_QUEUE_SIZE, 10),
+
+    // Enable detailed operation logging for debugging
+    enableOperationLogging: parseEnvBoolean(
+      process.env.DEBUG_REPO_OPERATIONS,
+      false
+    ),
+  },
+
+  /**
+   * NEW: Enhanced cache strategy configuration
+   * Controls the multi-level caching behavior
+   */
+  cacheStrategy: {
+    // Enable hierarchical caching (raw commits -> filtered -> aggregated)
+    hierarchicalCaching: parseEnvBoolean(
+      process.env.CACHE_HIERARCHICAL_ENABLED,
+      true
+    ),
+
+    // Memory pressure thresholds
+    memoryPressureThreshold:
+      parseEnvNumber(process.env.CACHE_MEMORY_PRESSURE_THRESHOLD, 80) / 100, // 80%
+
+    // Emergency eviction size (percentage of cache to evict under pressure)
+    emergencyEvictionPercent:
+      parseEnvNumber(process.env.CACHE_EMERGENCY_EVICTION_PERCENT, 30) / 100, // 30%
+
+    // Large value bypass threshold (percentage of memory limit)
+    largeValueBypassPercent:
+      parseEnvNumber(process.env.CACHE_LARGE_VALUE_BYPASS_PERCENT, 10) / 100, // 10%
+
+    // Cache key strategies
+    cacheKeys: {
+      // Time-to-live for different types of cached data
+      rawCommitsTTL: parseEnvNumber(
+        process.env.CACHE_RAW_COMMITS_TTL_SECONDS,
+        3600
+      ), // 1 hour
+      filteredCommitsTTL: parseEnvNumber(
+        process.env.CACHE_FILTERED_COMMITS_TTL_SECONDS,
+        1800
+      ), // 30 minutes
+      aggregatedDataTTL: parseEnvNumber(
+        process.env.CACHE_AGGREGATED_DATA_TTL_SECONDS,
+        900
+      ), // 15 minutes
+      repositoryInfoTTL: parseEnvNumber(
+        process.env.CACHE_REPOSITORY_INFO_TTL_SECONDS,
+        7200
+      ), // 2 hours
+    },
+
+    // Enable cache warming for frequently accessed repositories
+    cacheWarming: {
+      enabled: parseEnvBoolean(process.env.CACHE_WARMING_ENABLED, false),
+      maxWarmupRepos: parseEnvNumber(process.env.CACHE_WARMING_MAX_REPOS, 10),
+      warmupScheduleHours: parseEnvNumber(
+        process.env.CACHE_WARMING_SCHEDULE_HOURS,
+        6
+      ), // Every 6 hours
+    },
+  },
 };
 
 /**
- * Configuration validation
- * Ensures that the configuration is valid and logs warnings for potential issues
+ * ENHANCED: Configuration validation with new settings
  */
 export function validateConfig(): void {
   const warnings: string[] = [];
@@ -189,6 +325,88 @@ export function validateConfig(): void {
   // Validate Redis configuration
   if (config.redis.port <= 0 || config.redis.port > 65535) {
     errors.push('REDIS_PORT must be between 1 and 65535');
+  }
+
+  // Validate repository cache configuration
+  if (config.repositoryCache.enabled) {
+    if (config.repositoryCache.maxRepositories <= 0) {
+      errors.push('REPO_CACHE_MAX_REPOSITORIES must be greater than 0');
+    }
+
+    if (config.repositoryCache.maxAgeHours <= 0) {
+      errors.push('REPO_CACHE_MAX_AGE_HOURS must be greater than 0');
+    }
+
+    if (config.repositoryCache.diskLimitBytes < 100 * 1024 * 1024) {
+      // 100MB minimum
+      warnings.push(
+        'REPO_CACHE_DISK_LIMIT_GB is very low (<100MB), may cause frequent evictions'
+      );
+    }
+
+    if (config.repositoryCache.diskLimitBytes > 50 * 1024 ** 3) {
+      // 50GB
+      warnings.push(
+        'REPO_CACHE_DISK_LIMIT_GB is very high (>50GB), ensure sufficient disk space'
+      );
+    }
+  }
+
+  // Validate operation coordination
+  if (config.operationCoordination.enabled) {
+    if (config.operationCoordination.operationTimeoutMs < 30000) {
+      // 30 seconds minimum
+      warnings.push(
+        'REPO_OPERATION_TIMEOUT_MS is very low (<30s), may cause premature timeouts'
+      );
+    }
+
+    if (config.operationCoordination.maxConcurrentOpsPerRepo <= 0) {
+      errors.push('REPO_MAX_CONCURRENT_OPS must be greater than 0');
+    }
+  }
+
+  // Validate cache strategy
+  if (
+    config.cacheStrategy.memoryPressureThreshold <= 0 ||
+    config.cacheStrategy.memoryPressureThreshold >= 1
+  ) {
+    errors.push('CACHE_MEMORY_PRESSURE_THRESHOLD must be between 0 and 100');
+  }
+
+  if (
+    config.cacheStrategy.emergencyEvictionPercent <= 0 ||
+    config.cacheStrategy.emergencyEvictionPercent >= 1
+  ) {
+    errors.push('CACHE_EMERGENCY_EVICTION_PERCENT must be between 0 and 100');
+  }
+
+  // Performance warnings for cache strategy
+  if (config.cacheStrategy.cacheKeys.rawCommitsTTL < 300) {
+    // 5 minutes
+    warnings.push(
+      'CACHE_RAW_COMMITS_TTL_SECONDS is very low (<5min), may cause excessive recomputation'
+    );
+  }
+
+  if (config.cacheStrategy.cacheKeys.rawCommitsTTL > 86400) {
+    // 24 hours
+    warnings.push(
+      'CACHE_RAW_COMMITS_TTL_SECONDS is very high (>24h), may use excessive storage'
+    );
+  }
+
+  // Compatibility warnings
+  if (config.repositoryCache.enabled && !config.hybridCache.enableDisk) {
+    warnings.push(
+      'Repository cache is enabled but hybrid cache disk is disabled - may reduce effectiveness'
+    );
+  }
+
+  if (config.operationCoordination.enabled && !config.repositoryCache.enabled) {
+    warnings.push(
+      'Operation coordination is enabled but repository cache is disabled - limited benefits'
+    );
   }
 
   // Performance warnings
@@ -234,6 +452,29 @@ export function validateConfig(): void {
         db: config.redis.db,
       },
     });
+
+    // Log current repository cache configuration in debug mode
+    console.debug('Repository cache configuration:', {
+      repositoryCache: {
+        enabled: config.repositoryCache.enabled,
+        maxRepositories: config.repositoryCache.maxRepositories,
+        maxAgeHours: config.repositoryCache.maxAgeHours,
+        diskLimitGB: Math.round(
+          config.repositoryCache.diskLimitBytes / 1024 ** 3
+        ),
+        basePath: config.repositoryCache.basePath,
+      },
+      operationCoordination: {
+        enabled: config.operationCoordination.enabled,
+        coalescingEnabled: config.operationCoordination.coalescingEnabled,
+        operationTimeoutMs: config.operationCoordination.operationTimeoutMs,
+      },
+      cacheStrategy: {
+        hierarchicalCaching: config.cacheStrategy.hierarchicalCaching,
+        memoryPressureThreshold: `${config.cacheStrategy.memoryPressureThreshold * 100}%`,
+        ttl: config.cacheStrategy.cacheKeys,
+      },
+    });
   }
 }
 
@@ -243,6 +484,9 @@ export const {
   locks: lockConfig,
   streaming: streamingConfig,
   debug: debugConfig,
+  repositoryCache: repositoryCacheConfig,
+  operationCoordination: operationCoordinationConfig,
+  cacheStrategy: cacheStrategyConfig,
 } = config;
 
 export default config;

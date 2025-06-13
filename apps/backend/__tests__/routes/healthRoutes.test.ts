@@ -1,11 +1,4 @@
-import {
-  describe,
-  test,
-  expect,
-  vi,
-  beforeEach,
-  type MockedFunction,
-} from 'vitest';
+import { describe, test, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import express, { Application } from 'express';
 import healthRoutes from '../../src/routes/healthRoutes';
@@ -33,13 +26,26 @@ describe('Health Routes', () => {
     // Setup cache mock with proper getStats return value
     vi.mocked(redis.getStats).mockReturnValue({
       activeBackend: 'hybrid',
+      redis: {
+        healthy: true,
+        connected: true,
+      },
+      memory: {
+        entries: 0,
+      },
       hybrid: {
         memory: {
           usageBytes: 5 * 1024 * 1024, // 5MB
           entries: 100,
+          limitBytes: 10 * 1024 * 1024, // 10MB limit
         },
         disk: {
           entries: 50,
+          limitEntries: 100, // 100 entries limit
+        },
+        redis: {
+          healthy: true,
+          connected: true,
         },
       },
     });
