@@ -29,6 +29,21 @@ describe('Health Routes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Setup cache mock with proper getStats return value
+    vi.mocked(redis.getStats).mockReturnValue({
+      activeBackend: 'hybrid',
+      hybrid: {
+        memory: {
+          usageBytes: 5 * 1024 * 1024, // 5MB
+          entries: 100,
+        },
+        disk: {
+          entries: 50,
+        },
+      },
+    });
+
     app = express();
     app.use('/', healthRoutes);
   });

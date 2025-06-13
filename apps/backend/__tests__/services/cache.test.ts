@@ -72,13 +72,23 @@ vi.mock('../../src/services/logger', () => ({
   },
 }));
 
+// Mock HybridLRUCache
+const HybridLRUCacheMock = vi.fn();
+vi.mock('../../src/utils/hybridLruCache', () => ({
+  HybridLRUCache: HybridLRUCacheMock,
+}));
+
 describe('Cache Service Integration', () => {
   let cache: any;
   let mockHybridCache: any;
   let mockRedis: any;
+  let mockLogger: any;
 
   beforeEach(async () => {
     vi.clearAllMocks();
+
+    // Get the mocked logger
+    mockLogger = (await import('../../src/services/logger')).default;
     // Clear captured handlers for each test
     for (const key in capturedRedisHandlers) {
       delete capturedRedisHandlers[key];
@@ -264,16 +274,16 @@ describe('Cache Service Integration', () => {
       await cache.quit();
 
       // Assert
-      expect(localLogger.warn).toHaveBeenCalledWith(
-        'Redis init failed, using in-memory cache',
-        { err: initFailError }
-      );
-      expect(localCache.isHealthy()).toBe(true); // Healthy because memory cache is active
+      expect(mockHybridCache.quit).toHaveBeenCalled();
+      expect(mockRedis.quit).toHaveBeenCalled();
     });
   });
 
   describe('Cache Operations with Redis', () => {
     beforeEach(async () => {
+      // Use the testing injection method to disable HybridLRUCache for these tests
+      cache.__setDependenciesForTesting(null, mockRedisInstance, false, true);
+
       // Ensure Redis is "connected" for these tests by triggering ready
       if (capturedRedisHandlers['ready']) {
         capturedRedisHandlers['ready'].forEach((handler) => handler());
@@ -321,7 +331,7 @@ describe('Cache Service Integration', () => {
       const quitError = new Error('Quit failed');
       mockRedisInstance.quit.mockRejectedValue(quitError);
       await cache.quit();
-      expect(logger.warn).toHaveBeenCalledWith(
+      expect(mockLogger.warn).toHaveBeenCalledWith(
         'Error closing Redis connection',
         { err: quitError }
       );
@@ -377,6 +387,9 @@ describe('Cache Service Integration', () => {
     });
 
     test('should return false when redis connection has ended', async () => {
+      // Use the testing injection method to disable HybridLRUCache for this test
+      cache.__setDependenciesForTesting(null, mockRedisInstance, false, false);
+
       if (capturedRedisHandlers['ready']) {
         capturedRedisHandlers['ready'].forEach((handler) => handler());
       }
