@@ -1,5 +1,7 @@
-import { describe, test, expect } from 'vitest';
-import dotenv from 'dotenv';
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// Mock variable to track dotenv.config calls
+const mockDotenvConfig = vi.fn();
 
 // anying the modules
 vi.mock('express', () => {
@@ -28,8 +30,8 @@ vi.mock('cors', () => ({
   default: vi.fn(() => 'mockedCors'),
 }));
 vi.mock('dotenv', () => ({
-  default: { config: vi.fn() },
-  config: vi.fn(),
+  default: { config: mockDotenvConfig },
+  config: mockDotenvConfig,
 }));
 vi.mock('../src/routes', () => ({
   default: 'mockedRoutes',

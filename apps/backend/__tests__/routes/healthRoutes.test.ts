@@ -1,4 +1,11 @@
-import { describe, test, expect } from 'vitest';
+import {
+  describe,
+  test,
+  expect,
+  vi,
+  beforeEach,
+  type MockedFunction,
+} from 'vitest';
 import request from 'supertest';
 import express, { Application } from 'express';
 import healthRoutes from '../../src/routes/healthRoutes';
@@ -9,6 +16,7 @@ vi.mock('../../src/services/cache', () => ({
   default: {
     isHealthy: vi.fn(),
     quit: vi.fn(),
+    getStats: vi.fn(),
   },
 }));
 
@@ -73,8 +81,8 @@ describe('Health Routes', () => {
 
     test('returns detailed health status with memory-only cache', async () => {
       // Arrange
-      (redis.isHealthy as jest.Mock).mockReturnValue(true);
-      (redis.getStats as jest.Mock).mockReturnValue({
+      (redis.isHealthy as any).mockReturnValue(true);
+      (redis.getStats as any).mockReturnValue({
         activeBackend: 'memory',
         memory: { entries: 75 },
         redis: { healthy: false },
@@ -108,8 +116,8 @@ describe('Health Routes', () => {
 
     test('handles cache stats error gracefully', async () => {
       // Arrange
-      (redis.isHealthy as jest.Mock).mockReturnValue(true);
-      (redis.getStats as jest.Mock).mockImplementation(() => {
+      (redis.isHealthy as any).mockReturnValue(true);
+      (redis.getStats as any).mockImplementation(() => {
         throw new Error('Cache stats unavailable');
       });
 

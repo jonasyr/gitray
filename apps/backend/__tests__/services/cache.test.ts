@@ -74,7 +74,7 @@ vi.mock('../../src/services/logger', () => ({
 
 describe('Cache Service Integration', () => {
   let cache: any;
-  let mockHybridCache: jest.Mocked<HybridLRUCache<string>>;
+  let mockHybridCache: any;
   let mockRedis: any;
 
   beforeEach(async () => {
@@ -94,25 +94,31 @@ describe('Cache Service Integration', () => {
       () => mockRedisInstance
     );
 
-    // Properly setup the mock return values
-    mockHybridCache.quit.mockResolvedValue(undefined);
-    mockHybridCache.isHealthy.mockReturnValue(true);
+    // Create mockHybridCache
+    mockHybridCache = {
+      quit: vi.fn().mockResolvedValue(undefined),
+      isHealthy: vi.fn().mockReturnValue(true),
+      get: vi.fn(),
+      set: vi.fn(),
+      del: vi.fn(),
+      getStats: vi.fn(),
+    };
 
     HybridLRUCacheMock.mockImplementation(() => mockHybridCache);
 
     // Mock Redis
     mockRedis = {
-      get: jest.fn(),
-      set: jest.fn(),
-      del: jest.fn(),
-      quit: jest.fn(),
-      on: jest.fn((event: string, callback: any) => {
+      get: vi.fn(),
+      set: vi.fn(),
+      del: vi.fn(),
+      quit: vi.fn(),
+      on: vi.fn((event: string, callback: any) => {
         // Simulate successful connection
         if (event === 'ready') {
           setTimeout(() => callback(), 0);
         }
       }),
-      disconnect: jest.fn(),
+      disconnect: vi.fn(),
     };
 
     // Setup mock return values

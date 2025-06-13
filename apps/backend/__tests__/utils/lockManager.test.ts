@@ -1,22 +1,22 @@
 // apps/backend/__tests__/utils/lockManager.test.ts
 
-import { jest } from '@jest/globals';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Stats } from 'fs';
 
 // Define proper types for mocks
-type MockedFunction<T extends (...args: any[]) => any> = jest.MockedFunction<T>;
+type MockedFunction<T extends (...args: any[]) => any> = vi.MockedFunction<T>;
 
 // Create a proper Stats mock object
 const createMockStats = (mtimeMs: number = Date.now() - 1000): Stats =>
   ({
     mtimeMs,
-    isFile: jest.fn().mockReturnValue(true),
-    isDirectory: jest.fn().mockReturnValue(false),
-    isBlockDevice: jest.fn().mockReturnValue(false),
-    isCharacterDevice: jest.fn().mockReturnValue(false),
-    isSymbolicLink: jest.fn().mockReturnValue(false),
-    isFIFO: jest.fn().mockReturnValue(false),
-    isSocket: jest.fn().mockReturnValue(false),
+    isFile: vi.fn().mockReturnValue(true),
+    isDirectory: vi.fn().mockReturnValue(false),
+    isBlockDevice: vi.fn().mockReturnValue(false),
+    isCharacterDevice: vi.fn().mockReturnValue(false),
+    isSymbolicLink: vi.fn().mockReturnValue(false),
+    isFIFO: vi.fn().mockReturnValue(false),
+    isSocket: vi.fn().mockReturnValue(false),
     dev: 0,
     ino: 0,
     mode: 0,
@@ -38,27 +38,27 @@ const createMockStats = (mtimeMs: number = Date.now() - 1000): Stats =>
 
 // Create comprehensive mocks before any imports
 const mockFileHandle = {
-  writeFile: jest.fn() as MockedFunction<(data: string) => Promise<void>>,
-  close: jest.fn() as MockedFunction<() => Promise<void>>,
+  writeFile: vi.fn() as MockedFunction<(data: string) => Promise<void>>,
+  close: vi.fn() as MockedFunction<() => Promise<void>>,
 };
 
 const mockFs = {
-  mkdir: jest.fn() as MockedFunction<
+  mkdir: vi.fn() as MockedFunction<
     (path: string, options?: any) => Promise<void>
   >,
-  open: jest.fn() as MockedFunction<
+  open: vi.fn() as MockedFunction<
     (path: string, flags: string) => Promise<typeof mockFileHandle>
   >,
-  unlink: jest.fn() as MockedFunction<(path: string) => Promise<void>>,
-  readdir: jest.fn() as MockedFunction<(path: string) => Promise<string[]>>,
-  stat: jest.fn() as MockedFunction<(path: string) => Promise<Stats>>,
+  unlink: vi.fn() as MockedFunction<(path: string) => Promise<void>>,
+  readdir: vi.fn() as MockedFunction<(path: string) => Promise<string[]>>,
+  stat: vi.fn() as MockedFunction<(path: string) => Promise<Stats>>,
 };
 
 // Mock timer functions to prevent background intervals
 const originalSetInterval = global.setInterval;
 const originalClearInterval = global.clearInterval;
-const mockSetInterval = jest.fn();
-const mockClearInterval = jest.fn();
+const mockSetInterval = vi.fn();
+const mockClearInterval = vi.fn();
 
 // Store interval IDs to track them
 const activeIntervals = new Set<NodeJS.Timeout>();
@@ -84,23 +84,23 @@ global.clearInterval = mockClearInterval.mockImplementation(
 ) as any;
 
 // Mock fs/promises with proper pattern to match lockManager import
-jest.mock('fs', () => ({
+vi.mock('fs', () => ({
   promises: mockFs,
 }));
 
 // Mock logger
-jest.mock('../../src/services/logger', () => ({
+vi.mock('../../src/services/logger', () => ({
   __esModule: true,
   default: {
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
   },
 }));
 
 // Mock config
-jest.mock('../../src/config', () => ({
+vi.mock('../../src/config', () => ({
   lockConfig: {
     lockDir: '/tmp/test-locks',
     defaultTimeoutMs: 5000,
@@ -120,7 +120,7 @@ import {
 
 describe('Lock Manager', () => {
   beforeEach(async () => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Clear mock interval tracking
     activeIntervals.clear();

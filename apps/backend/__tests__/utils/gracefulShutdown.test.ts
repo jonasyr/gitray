@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, vi } from 'vitest';
 import { Server } from 'http';
 import actualLogger from '../../src/services/logger'; // Import for type
 // We need to get the mocked versions of these for assertion
@@ -37,7 +37,7 @@ vi.mock('../../src/services/cache', () => {
       // Add other methods if SUT uses them, e.g. isHealthy
     },
     // Add named exports that gracefulShutdown might import
-    getCacheStats: jest.fn().mockReturnValue({}),
+    getCacheStats: vi.fn().mockReturnValue({}),
     // Or if gracefulShutdown.ts does `import { quit } from '../services/cache'`
     // quit: mockRedisQuit,
   };
@@ -53,6 +53,9 @@ vi.mock('../../src/utils/cleanupScheduler', () => {
 
 const mockProcessOn = vi.fn();
 const mockProcessExit = vi.fn();
+const mockServerClose = vi.fn((callback?: () => void) => {
+  if (callback) callback();
+});
 
 global.process.on = mockProcessOn;
 global.process.exit = mockProcessExit as any;

@@ -1,44 +1,45 @@
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import simpleGit from 'simple-git';
 import { gitService } from '../../src/services/gitService';
 import logger from '../../src/services/logger';
 import redis from '../../src/services/cache';
 import { config } from '../../src/config';
 
-jest.mock('simple-git');
-jest.mock('ioredis');
-jest.mock('../../src/services/logger', () => ({
+vi.mock('simple-git');
+vi.mock('ioredis');
+vi.mock('../../src/services/logger', () => ({
   __esModule: true,
   default: {
-    info: jest.fn(),
-    error: jest.fn(),
-    warn: jest.fn(),
-    debug: jest.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
   },
 }));
 
-jest.mock('../../src/services/cache', () => ({
+vi.mock('../../src/services/cache', () => ({
   __esModule: true,
   default: {
-    get: jest.fn(),
-    set: jest.fn(),
-    del: jest.fn(),
+    get: vi.fn(),
+    set: vi.fn(),
+    del: vi.fn(),
   },
 }));
 
 describe('GitService Streaming Functionality', () => {
   const mockGit = {
-    raw: jest.fn(),
+    raw: vi.fn(),
   };
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    (simpleGit as jest.Mock).mockReturnValue(mockGit);
-    jest.spyOn(logger, 'info').mockReset();
-    jest.spyOn(logger, 'warn').mockReset();
-    jest.spyOn(logger, 'debug').mockReset();
-    (redis.get as jest.Mock).mockResolvedValue(null);
-    (redis.set as jest.Mock).mockResolvedValue('OK');
-    (redis.del as jest.Mock).mockResolvedValue(1);
+    vi.clearAllMocks();
+    (simpleGit as any).mockReturnValue(mockGit);
+    vi.spyOn(logger, 'info').mockReset();
+    vi.spyOn(logger, 'warn').mockReset();
+    vi.spyOn(logger, 'debug').mockReset();
+    (redis.get as any).mockResolvedValue(null);
+    (redis.set as any).mockResolvedValue('OK');
+    (redis.del as any).mockResolvedValue(1);
   });
 
   describe('getCommitCount', () => {
@@ -180,7 +181,7 @@ describe('GitService Streaming Functionality', () => {
       mockGit.raw.mockResolvedValueOnce('2\n'); // getCommitCount call
 
       // Mock cached batch
-      (redis.get as jest.Mock).mockResolvedValueOnce(
+      (redis.get as any).mockResolvedValueOnce(
         JSON.stringify([
           {
             sha: 'cached123',
@@ -263,7 +264,7 @@ describe('GitService Streaming Functionality', () => {
 
       // Mock high memory usage
       const originalMemoryUsage = process.memoryUsage;
-      const mockMemoryUsage = jest.fn(() => ({
+      const mockMemoryUsage = vi.fn(() => ({
         heapUsed: 600 * 1024 * 1024, // 600MB - above threshold
         heapTotal: 1024 * 1024 * 1024,
         external: 0,
@@ -337,7 +338,7 @@ describe('GitService Streaming Functionality', () => {
         startTime: Date.now(),
       };
 
-      (redis.get as jest.Mock).mockResolvedValue(JSON.stringify(resumeState));
+      (redis.get as any).mockResolvedValue(JSON.stringify(resumeState));
 
       // Act
       const retrieved = await gitService.getStreamingResumeState(localRepoPath);
@@ -361,7 +362,7 @@ describe('GitService Streaming Functionality', () => {
     test('should handle missing resume state', async () => {
       // Arrange
       const localRepoPath = '/tmp/test-repo';
-      (redis.get as jest.Mock).mockResolvedValue(null);
+      (redis.get as any).mockResolvedValue(null);
 
       // Act
       const retrieved = await gitService.getStreamingResumeState(localRepoPath);
@@ -373,7 +374,7 @@ describe('GitService Streaming Functionality', () => {
     test('should handle resume state errors gracefully', async () => {
       // Arrange
       const localRepoPath = '/tmp/test-repo';
-      (redis.get as jest.Mock).mockRejectedValue(new Error('Redis error'));
+      (redis.get as any).mockRejectedValue(new Error('Redis error'));
 
       // Act
       const retrieved = await gitService.getStreamingResumeState(localRepoPath);

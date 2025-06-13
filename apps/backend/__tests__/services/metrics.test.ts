@@ -1,3 +1,4 @@
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { register } from 'prom-client';
 import {
   updateCacheMetrics,
@@ -8,8 +9,8 @@ import {
 } from '../../src/services/metrics';
 
 // Mock the cache service
-const mockGetStats = jest.fn();
-jest.mock('../../src/services/cache', () => ({
+const mockGetStats = vi.fn();
+vi.mock('../../src/services/cache', () => ({
   getCacheStats: mockGetStats,
 }));
 
@@ -17,7 +18,7 @@ describe('Metrics Service', () => {
   beforeEach(() => {
     // Clear all metrics before each test
     register.clear();
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Re-register the metrics since they were cleared
     register.registerMetric(cacheHybridMemoryUsage);

@@ -1,22 +1,24 @@
 // apps/backend/__tests__/utils/hybridLruCache.test.ts
 
-import { jest } from '@jest/globals';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import type { Stats } from 'fs';
 
 // Define proper types for mocks
-type MockedFunction<T extends (...args: any[]) => any> = jest.MockedFunction<T>;
+type MockedFunction<T extends (...args: any[]) => any> = ReturnType<
+  typeof vi.fn<T>
+>;
 
 // Create a proper Stats mock object
 const createMockStats = (mtimeMs: number = Date.now()): Stats =>
   ({
     mtimeMs,
-    isFile: jest.fn().mockReturnValue(true),
-    isDirectory: jest.fn().mockReturnValue(false),
-    isBlockDevice: jest.fn().mockReturnValue(false),
-    isCharacterDevice: jest.fn().mockReturnValue(false),
-    isSymbolicLink: jest.fn().mockReturnValue(false),
-    isFIFO: jest.fn().mockReturnValue(false),
-    isSocket: jest.fn().mockReturnValue(false),
+    isFile: vi.fn().mockReturnValue(true),
+    isDirectory: vi.fn().mockReturnValue(false),
+    isBlockDevice: vi.fn().mockReturnValue(false),
+    isCharacterDevice: vi.fn().mockReturnValue(false),
+    isSymbolicLink: vi.fn().mockReturnValue(false),
+    isFIFO: vi.fn().mockReturnValue(false),
+    isSocket: vi.fn().mockReturnValue(false),
     dev: 0,
     ino: 0,
     mode: 0,
@@ -38,18 +40,18 @@ const createMockStats = (mtimeMs: number = Date.now()): Stats =>
 
 // Create comprehensive mocks before any imports
 const mockFs = {
-  mkdir: jest.fn() as MockedFunction<
+  mkdir: vi.fn() as MockedFunction<
     (path: string, options?: any) => Promise<void>
   >,
-  readdir: jest.fn() as MockedFunction<(path: string) => Promise<string[]>>,
-  writeFile: jest.fn() as MockedFunction<
+  readdir: vi.fn() as MockedFunction<(path: string) => Promise<string[]>>,
+  writeFile: vi.fn() as MockedFunction<
     (path: string, data: string) => Promise<void>
   >,
-  readFile: jest.fn() as MockedFunction<
+  readFile: vi.fn() as MockedFunction<
     (path: string, encoding?: string) => Promise<string>
   >,
-  unlink: jest.fn() as MockedFunction<(path: string) => Promise<void>>,
-  stat: jest.fn() as MockedFunction<(path: string) => Promise<Stats>>,
+  unlink: vi.fn() as MockedFunction<(path: string) => Promise<void>>,
+  stat: vi.fn() as MockedFunction<(path: string) => Promise<Stats>>,
 };
 
 // Initialize mock return values
@@ -62,16 +64,16 @@ mockFs.stat.mockResolvedValue(createMockStats());
 
 // Mock Redis
 const mockRedis = {
-  get: jest.fn() as MockedFunction<(key: string) => Promise<string | null>>,
-  set: jest.fn() as MockedFunction<
+  get: vi.fn() as MockedFunction<(key: string) => Promise<string | null>>,
+  set: vi.fn() as MockedFunction<
     (key: string, value: string) => Promise<string>
   >,
-  del: jest.fn() as MockedFunction<(key: string) => Promise<number>>,
-  quit: jest.fn() as MockedFunction<() => Promise<string>>,
-  on: jest.fn() as MockedFunction<
+  del: vi.fn() as MockedFunction<(key: string) => Promise<number>>,
+  quit: vi.fn() as MockedFunction<() => Promise<string>>,
+  on: vi.fn() as MockedFunction<
     (event: string, callback: (...args: any[]) => void) => void
   >,
-  disconnect: jest.fn() as MockedFunction<() => void>,
+  disconnect: vi.fn() as MockedFunction<() => void>,
 };
 
 // Initialize Redis mock return values
@@ -88,7 +90,7 @@ mockRedis.on.mockImplementation(
 );
 
 // Mock the withKeyLock function
-const mockWithKeyLock = jest.fn() as MockedFunction<
+const mockWithKeyLock = vi.fn() as MockedFunction<
   (key: string, fn: () => Promise<unknown>) => Promise<unknown>
 >;
 mockWithKeyLock.mockImplementation(
@@ -98,10 +100,10 @@ mockWithKeyLock.mockImplementation(
 );
 
 // Set up all mocks at the top level
-jest.mock('fs/promises', () => mockFs);
+vi.mock('fs/promises', () => mockFs);
 
 // Mock IORedis - need to handle both default export and named imports
-jest.mock('ioredis', () => {
+vi.mock('ioredis', () => {
   function MockRedisClass(this: any) {
     // Copy all properties from mockRedis to this instance
     Object.assign(this, mockRedis);
@@ -115,16 +117,16 @@ jest.mock('ioredis', () => {
   };
 });
 
-jest.mock('../../src/utils/lockManager', () => ({
+vi.mock('../../src/utils/lockManager', () => ({
   withKeyLock: mockWithKeyLock,
 }));
-jest.mock('../../src/services/logger', () => ({
+vi.mock('../../src/services/logger', () => ({
   __esModule: true,
   default: {
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
   },
 }));
 
@@ -136,7 +138,7 @@ describe('HybridLRUCache', () => {
   const testDiskPath = '/tmp/test-cache';
 
   beforeEach(async () => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Reset all mock implementations
     mockFs.mkdir.mockResolvedValue(undefined);

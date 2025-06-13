@@ -25,6 +25,7 @@ vi.mock('../../src/services/gitService', () => ({
     getCommits: vi.fn(),
     cleanupRepository: vi.fn(),
     aggregateCommitsByTime: vi.fn(),
+    shouldUseStreaming: vi.fn(),
   },
 }));
 vi.mock('../../src/services/logger', () => ({
@@ -43,6 +44,7 @@ vi.mock('../../src/services/cache', () => ({
 const mockCloneRepository = gitService.cloneRepository as any;
 const mockGetCommits = gitService.getCommits as any;
 const mockCleanupRepository = gitService.cleanupRepository as any;
+const mockShouldUseStreaming = gitService.shouldUseStreaming as any;
 
 describe('Repository API Extended Tests', () => {
   let app: Application;
