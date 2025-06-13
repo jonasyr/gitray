@@ -78,7 +78,10 @@ mockRedis.on.mockImplementation(
   }
 );
 
-vi.mock('fs/promises', () => mockFs);
+vi.mock('fs/promises', () => ({
+  default: mockFs,
+  ...mockFs,
+}));
 
 // Mock IORedis - need to handle both default export and named imports
 vi.mock('ioredis', () => {
