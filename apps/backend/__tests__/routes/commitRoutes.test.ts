@@ -13,8 +13,13 @@ vi.mock('../../src/services/gitService', () => ({
   gitService: {
     cloneRepository: vi.fn(),
     getCommits: vi.fn(),
+    getCommitCount: vi.fn(),
+    shouldUseStreaming: vi.fn(),
+    getCommitsStream: vi.fn(),
     aggregateCommitsByTime: vi.fn(),
     cleanupRepository: vi.fn(),
+    clearStreamingResumeState: vi.fn(),
+    getStreamingResumeState: vi.fn(),
   },
 }));
 vi.mock('../../src/services/cache', () => ({
@@ -24,10 +29,23 @@ vi.mock('../../src/services/cache', () => ({
 
 const mockClone = gitService.cloneRepository as ReturnType<typeof vi.fn>;
 const mockGetCommits = gitService.getCommits as ReturnType<typeof vi.fn>;
+const mockGetCommitCount = gitService.getCommitCount as ReturnType<
+  typeof vi.fn
+>;
+const mockShouldUseStreaming = gitService.shouldUseStreaming as ReturnType<
+  typeof vi.fn
+>;
+const mockGetCommitsStream = gitService.getCommitsStream as ReturnType<
+  typeof vi.fn
+>;
 const mockAggregate = gitService.aggregateCommitsByTime as ReturnType<
   typeof vi.fn
 >;
 const mockCleanup = gitService.cleanupRepository as ReturnType<typeof vi.fn>;
+const mockClearStreamingResumeState =
+  gitService.clearStreamingResumeState as ReturnType<typeof vi.fn>;
+const mockGetStreamingResumeState =
+  gitService.getStreamingResumeState as ReturnType<typeof vi.fn>;
 const mockRedisGet = redis.get as ReturnType<typeof vi.fn>;
 const mockRedisSet = redis.set as ReturnType<typeof vi.fn>;
 
@@ -238,7 +256,13 @@ describe('commitRoutes / list commits', () => {
 
     // Assert
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ commits, page: 2, limit: 1 });
+    expect(res.body).toEqual({
+      commits,
+      page: 2,
+      limit: 1,
+      streamingUsed: false,
+      totalCommits: 1,
+    });
     expect(res.headers['x-cache-status']).toBe('MISS');
     expect(mockGetCommits).toHaveBeenCalledWith(tempDir, { skip: 1, limit: 1 });
     expect(mockRedisSet).toHaveBeenCalled();
@@ -288,7 +312,13 @@ describe('commitRoutes / list commits', () => {
 
     // Assert
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ commits, page: 1, limit: 100 });
+    expect(res.body).toEqual({
+      commits,
+      page: 1,
+      limit: 100,
+      streamingUsed: false,
+      totalCommits: 0,
+    });
     expect(mockGetCommits).toHaveBeenCalledWith(tempDir, {
       skip: 0,
       limit: 100,

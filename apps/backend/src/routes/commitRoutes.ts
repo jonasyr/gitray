@@ -1,8 +1,17 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { query, validationResult, ValidationChain } from 'express-validator';
+import {
+  query,
+  body,
+  validationResult,
+  ValidationChain,
+} from 'express-validator';
 import { gitService } from '../services/gitService';
 import redis from '../services/cache';
-import { withTempRepository } from '../utils/withTempRepository';
+import {
+  withTempRepository,
+  withTempRepositoryStreaming,
+  getRepositoryInfo,
+} from '../utils/withTempRepository';
 import { createRequestLogger } from '../services/logger';
 import {
   cacheHits,
@@ -157,6 +166,37 @@ const authorValidation = (): ValidationChain[] => [
     .withMessage(
       'Authors must be comma-separated and maximum 10 authors allowed'
     ),
+];
+
+// Streaming validation for POST /stream endpoint
+const streamingOptionsValidation = [
+  body('repoUrl')
+    .notEmpty()
+    .withMessage('repoUrl is required')
+    .isURL({
+      protocols: ['http', 'https'],
+      require_protocol: true,
+      require_valid_protocol: true,
+    })
+    .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
+    .matches(/\.git$|github\.com|gitlab\.com|bitbucket\.org/)
+    .withMessage(ERROR_MESSAGES.INVALID_REPO_URL),
+  body('batchSize')
+    .optional()
+    .isInt({ min: 1, max: 10000 })
+    .withMessage('Batch size must be between 1 and 10000')
+    .toInt(),
+  body('maxCommits')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('Max commits must be a positive integer')
+    .toInt(),
+  body('resumeFromSha')
+    .optional()
+    .isString()
+    .isLength({ min: 40, max: 40 })
+    .withMessage('Resume SHA must be a valid 40-character hash'),
+  handleValidationErrors,
 ];
 
 // ---------------------------------------------------------------------------
