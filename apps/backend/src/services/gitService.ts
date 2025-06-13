@@ -60,7 +60,7 @@ export interface StreamingMetrics {
  * ENHANCED GITSERVICE WITH STREAMING CAPABILITIES
  */
 class GitService {
-  private git: SimpleGit;
+  private readonly git: SimpleGit;
 
   constructor() {
     const gitOptions: Partial<SimpleGitOptions> = {

@@ -122,7 +122,7 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
     commits.forEach((c) => {
       const d = new Date(c.date);
       if (d >= startDate && d <= endDate) {
-        counts.set(c.authorName, (counts.get(c.authorName) || 0) + 1);
+        counts.set(c.authorName, (counts.get(c.authorName) ?? 0) + 1);
       }
     });
     return counts;
@@ -134,8 +134,8 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
       Array.from(new Set(commits.map((c) => c.authorName)))
         .map((a) => ({
           value: a,
-          label: `${a} (${authorCommitCounts.get(a) || 0})`,
-          count: authorCommitCounts.get(a) || 0,
+          label: `${a} (${authorCommitCounts.get(a) ?? 0})`,
+          count: authorCommitCounts.get(a) ?? 0,
         }))
         .sort((a, b) => b.count - a.count),
     [commits, authorCommitCounts]
@@ -172,16 +172,20 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
   }, [containerWidth]);
 
   // Helper to compare author arrays
+  const compareAuthorArrays = (a: string[], b: string[]): boolean => {
+    if (a.length !== b.length) return false;
+    const sortedA = [...a].sort((x, y) => x.localeCompare(y));
+    const sortedB = [...b].sort((x, y) => x.localeCompare(y));
+    return sortedA.every((v, i) => v === sortedB[i]);
+  };
+
   const isFilterOptionsEqual = (
     a: CommitFilterOptions,
     b: CommitFilterOptions
   ) => {
     const A = a.authors ?? [];
     const B = b.authors ?? [];
-    if (A.length !== B.length) return false;
-    const sortedA = [...A].sort();
-    const sortedB = [...B].sort();
-    return sortedA.every((v, i) => v === sortedB[i]);
+    return compareAuthorArrays(A, B);
   };
 
   // Ref to hold last‐used filters
@@ -227,8 +231,11 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
     return `color-scale-${level}`;
   };
 
-  const titleForValue = (v?: HeatmapValue) =>
-    v ? `${v.count} commit${v.count === 1 ? '' : 's'} on ${v.date}` : null;
+  const titleForValue = (v?: HeatmapValue) => {
+    if (!v) return null;
+    const plural = v.count === 1 ? '' : 's';
+    return `${v.count} commit${plural} on ${v.date}`;
+  };
 
   return (
     <div className="w-full bg-gray-800 rounded-lg shadow-lg">
@@ -239,10 +246,14 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
 
         {/* Author selector with proper spacing */}
         <div className="mb-8 relative">
-          <label className="block text-sm font-medium text-gray-300 mb-2">
+          <label
+            htmlFor="author-filter"
+            className="block text-sm font-medium text-gray-300 mb-2"
+          >
             Filter by Authors
           </label>
           <Select
+            inputId="author-filter"
             isMulti
             options={authorOptions}
             className="w-full max-w-md text-sm"

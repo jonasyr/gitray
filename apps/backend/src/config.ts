@@ -30,10 +30,9 @@ function parseEnvBoolean(
 export const config = {
   // Port the backend listens on
   port: parseEnvNumber(process.env.PORT, 3001),
-
   // Allowed CORS origin for the frontend
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
     credentials: true,
   },
 
