@@ -24,7 +24,7 @@ import logger from '../services/logger';
 import { shallowClone } from '../utils/gitUtils';
 
 class GitService {
-  private git: SimpleGit;
+  private readonly git: SimpleGit;
 
   constructor() {
     const gitOptions: Partial<SimpleGitOptions> = {
