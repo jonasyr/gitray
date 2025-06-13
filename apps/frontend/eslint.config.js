@@ -26,27 +26,16 @@ export default tseslint.config(
       ],
     },
   },
-  // Neue Konfiguration für Jest-Setup-Dateien
+  // Configuration for test setup files
   {
-    files: ['**/jest.setup*.ts'],
+    files: ['**/test-setup*.ts'],
     rules: {
-      '@typescript-eslint/no-explicit-any': 'off', // Deaktiviere die any-Regel für Jest-Setup-Dateien
+      '@typescript-eslint/no-explicit-any': 'off', // Disable any rule for test setup files
     },
   },
-  // Neue Konfiguration für CommonJS-Dateien (jest.config.cjs, etc.)
+  // Configuration for CommonJS files (config files, etc.)
   {
-    files: ['**/*.cjs', '**/jest.config.js'],
-    languageOptions: {
-      globals: {
-        ...globals.node,
-        module: true,
-        require: true,
-      },
-    },
-  },
-  // Spezielle Konfiguration für die Jest-Transformer
-  {
-    files: ['**/jest-transforms/**'],
+    files: ['**/*.cjs', '**/vitest.config.ts'],
     languageOptions: {
       globals: {
         ...globals.node,

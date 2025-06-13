@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import CommitList from '../../src/components/CommitList';
 import { Commit } from '@gitray/shared-types';

@@ -1,3 +1,4 @@
+import { describe, test, expect } from 'vitest';
 import { gitService } from '../src/services/gitService';
 
 interface Commit {

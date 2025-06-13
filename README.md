@@ -45,7 +45,7 @@ pnpm dev
 ### Pre-commit Checks
 
 Husky is installed via the `"prepare": "husky install"` script in `package.json`
-(runs automatically on `pnpm install`).  
+(runs automatically on `pnpm install`).
 
 On each commit, Husky runs:
 

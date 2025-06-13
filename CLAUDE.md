@@ -114,7 +114,7 @@ The core backend functionality revolves around the `GitService` class, which:
 
 ### Testing Strategy
 
-- Jest configured for both backend and frontend
+- Vitest configured for both backend and frontend
 - Backend tests use Node.js environment
 - Frontend tests use JSDOM environment
 - Mock implementations for API services

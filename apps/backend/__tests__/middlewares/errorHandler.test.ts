@@ -1,12 +1,13 @@
+import { describe, test, expect } from 'vitest';
 // apps/backend/__tests__/middlewares/errorHandler.test.ts
 import { Request, Response, NextFunction } from 'express';
 import errorHandler from '../../src/middlewares/errorHandler';
 import logger from '../../src/services/logger';
 
-jest.mock('../../src/services/logger', () => ({
+vi.mock('../../src/services/logger', () => ({
   __esModule: true,
   default: {
-    error: jest.fn(),
+    error: vi.fn(),
   },
 }));
 
@@ -15,18 +16,18 @@ describe('Error Handler Middleware', () => {
   let mockRequest: Partial<Request>;
   let mockResponse: Partial<Response>;
   let mockNext: NextFunction;
-  let errorSpy: jest.SpyInstance;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     // Arrange
     mockRequest = {};
     mockResponse = {
-      status: jest.fn().mockReturnThis(),
-      json: jest.fn(),
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
     };
-    mockNext = jest.fn();
+    mockNext = vi.fn();
 
-    errorSpy = jest.spyOn(logger, 'error');
+    errorSpy = vi.spyOn(logger, 'error');
   });
 
   afterEach(() => {

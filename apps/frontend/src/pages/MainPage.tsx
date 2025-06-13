@@ -8,6 +8,8 @@ import React, { useState } from 'react';
 import RepoInput from '../components/RepoInput';
 import CommitList from '../components/CommitList';
 import ActivityHeatmap from '../components/ActivityHeatmap';
+import RiveLoader from '../components/RiveLoader';
+import RiveLogo from '../components/RiveLogo';
 import { getRepositoryFullData } from '../services/api';
 import { Commit } from '@gitray/shared-types';
 
@@ -53,14 +55,25 @@ const MainPage: React.FC = () => {
 
   return (
     <div className="bg-gray-900 min-h-screen flex flex-col text-white">
-      {/* Header with Login/Signup Buttons */}
-      <header className="w-full container mx-auto px-4 p-4 flex flex-wrap justify-end gap-2">
-        <button className="bg-gray-700 hover:bg-gray-600 text-green-400 font-bold py-2 px-4 rounded-md">
-          Login
-        </button>
-        <button className="bg-gray-700 hover:bg-gray-600 text-green-400 font-bold py-2 px-4 rounded-md">
-          Signup
-        </button>
+      {/* Header with Logo and Login/Signup Buttons */}
+      <header className="w-full container mx-auto px-4 p-4 flex justify-between items-center">
+        {/* Logo in top-left corner */}
+        <div className="flex items-center">
+          <RiveLogo
+            size={50}
+            className="hover:scale-110 transition-transform duration-300"
+          />
+        </div>
+
+        {/* Login/Signup buttons in top-right corner */}
+        <div className="flex gap-2">
+          <button className="bg-gray-700 hover:bg-gray-600 text-green-400 font-bold py-2 px-4 rounded-md">
+            Login
+          </button>
+          <button className="bg-gray-700 hover:bg-gray-600 text-green-400 font-bold py-2 px-4 rounded-md">
+            Signup
+          </button>
+        </div>
       </header>
 
       {/* Main area */}
@@ -69,8 +82,11 @@ const MainPage: React.FC = () => {
 
         {isLoading && (
           <div className="mt-8 text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto"></div>
-            <p className="mt-2 text-gray-400">Loading repository data...</p>
+            <RiveLoader
+              size={120}
+              message="Loading repository data..."
+              className="py-8"
+            />
           </div>
         )}
 

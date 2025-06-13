@@ -31,7 +31,7 @@ CI runs these steps and SonarCloud analysis. All must pass without errors.
 
 ## Testing Guidelines
 
-- Use **Jest** for unit tests.
+- Use **Vitest** for unit tests.
 - Follow the **Arrange–Act–Assert** and **Happy Path** patterns.
 - Achieve **≥ 80% coverage** using `pnpm test:coverage`.
 

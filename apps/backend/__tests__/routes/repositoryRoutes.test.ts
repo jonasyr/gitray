@@ -1,3 +1,13 @@
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+  beforeAll,
+  afterAll,
+} from 'vitest';
 // Additional tests for apps/backend/__tests__/routes/repositoryRoutes.test.ts
 
 import request from 'supertest';
@@ -8,65 +18,45 @@ import errorHandler from '../../src/middlewares/errorHandler';
 import logger from '../../src/services/logger';
 import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
 
-// Mock des gitService
-jest.mock('../../src/services/gitService', () => ({
+// any des gitService
+vi.mock('../../src/services/gitService', () => ({
   gitService: {
-    cloneRepository: jest.fn(),
-    getCommits: jest.fn(),
-    getCommitCount: jest.fn(),
-    shouldUseStreaming: jest.fn(),
-    getCommitsStream: jest.fn(),
-    cleanupRepository: jest.fn(),
-    aggregateCommitsByTime: jest.fn(),
-    clearStreamingResumeState: jest.fn(),
-    getStreamingResumeState: jest.fn(),
+    cloneRepository: vi.fn(),
+    getCommits: vi.fn(),
+    cleanupRepository: vi.fn(),
+    aggregateCommitsByTime: vi.fn(),
   },
 }));
-jest.mock('../../src/services/logger', () => ({
+vi.mock('../../src/services/logger', () => ({
   __esModule: true,
   default: {
-    info: jest.fn(),
-    error: jest.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
   },
 }));
-jest.mock('../../src/services/cache', () => ({
+vi.mock('../../src/services/cache', () => ({
   __esModule: true,
-  default: { get: jest.fn(), set: jest.fn() },
+  default: { get: vi.fn(), set: vi.fn() },
 }));
 
-// Typ-Casting für gemockte Funktionen
-const mockCloneRepository = gitService.cloneRepository as jest.MockedFunction<
-  typeof gitService.cloneRepository
->;
-const mockGetCommits = gitService.getCommits as jest.MockedFunction<
-  typeof gitService.getCommits
->;
-const mockShouldUseStreaming =
-  gitService.shouldUseStreaming as jest.MockedFunction<
-    typeof gitService.shouldUseStreaming
-  >;
-const mockAggregateCommitsByTime =
-  gitService.aggregateCommitsByTime as jest.MockedFunction<
-    typeof gitService.aggregateCommitsByTime
-  >;
-const mockCleanupRepository =
-  gitService.cleanupRepository as jest.MockedFunction<
-    typeof gitService.cleanupRepository
-  >;
+// Type casting for mocked functions
+const mockCloneRepository = gitService.cloneRepository as any;
+const mockGetCommits = gitService.getCommits as any;
+const mockCleanupRepository = gitService.cleanupRepository as any;
 
 describe('Repository API Extended Tests', () => {
   let app: Application;
 
   beforeEach(() => {
-    // Zurücksetzen aller Mocks für jeden Test
-    jest.clearAllMocks();
+    // Zurücksetzen aller anys für jeden Test
+    vi.clearAllMocks();
 
     // Express App für Tests einrichten
     app = express();
     app.use(express.json());
     app.use('/', repositoryRoutes);
     app.use(errorHandler);
-    jest.spyOn(logger, 'error').mockReset();
+    vi.spyOn(logger, 'error').mockReset();
   });
 
   test('sollte Fehler bei getCommits korrekt behandeln', async () => {
@@ -115,7 +105,7 @@ describe('Repository API Extended Tests', () => {
     mockGetCommits.mockResolvedValue(mockCommits);
     mockCleanupRepository.mockRejectedValue(cleanupError);
 
-    const errorSpy = jest.spyOn(logger, 'error');
+    const errorSpy = vi.spyOn(logger, 'error');
 
     // Act
     const response = await request(app)
@@ -137,7 +127,7 @@ describe('Repository API Extended Tests', () => {
 
   test('sollte mit verschiedenen URL-Formaten umgehen können', async () => {
     // Arrange
-    const errorSpy = jest.spyOn(logger, 'error');
+    const errorSpy = vi.spyOn(logger, 'error');
 
     // Test with empty string
     await request(app).post('/').send({ repoUrl: '' });
@@ -174,7 +164,7 @@ describe('Repository API Extended Tests', () => {
     mockCloneRepository.mockResolvedValue(tempDir);
     mockShouldUseStreaming.mockResolvedValue(false); // Mock streaming decision
     mockGetCommits.mockResolvedValue([]);
-    mockAggregateCommitsByTime.mockResolvedValue(mockHeatmapData);
+    (gitService.aggregateCommitsByTime as any).mockResolvedValue({});
     mockCleanupRepository.mockResolvedValue();
 
     // Act
@@ -198,8 +188,7 @@ describe('Repository API Extended Tests', () => {
     mockCloneRepository.mockResolvedValue(tempDir);
     mockShouldUseStreaming.mockResolvedValue(false); // Mock streaming decision
     mockGetCommits.mockResolvedValue([]);
-    mockAggregateCommitsByTime.mockResolvedValue(mockHeatmapData);
-    (gitService.aggregateCommitsByTime as jest.Mock).mockResolvedValue({});
+    (gitService.aggregateCommitsByTime as any).mockResolvedValue({});
     mockCleanupRepository.mockResolvedValue();
 
     // Act

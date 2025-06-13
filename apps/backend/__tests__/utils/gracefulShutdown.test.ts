@@ -1,36 +1,33 @@
+import { describe, test, expect } from 'vitest';
 import { Server } from 'http';
 import actualLogger from '../../src/services/logger'; // Import for type
 // We need to get the mocked versions of these for assertion
 // import redisCache from '../../src/services/cache';
 // import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
 
-// Mocks
-const mockServerClose = jest.fn((callback?: () => void) => {
-  if (callback) callback();
-});
-
-jest.mock('http', () => ({
-  Server: jest.fn(() => ({
-    close: mockServerClose,
+// anys
+vi.mock('http', () => ({
+  Server: vi.fn(() => ({
+    close: vi.fn((callback?: () => void) => {
+      if (callback) callback();
+    }),
   })),
 }));
-jest.mock('../../src/services/logger', () => ({
+vi.mock('../../src/services/logger', () => ({
   __esModule: true,
   default: {
-    info: jest.fn(),
-    error: jest.fn(),
-    warn: jest.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
   },
 }));
 
 // Hold references to the mocked functions to assert against
-let mockRunCleanupQueue: jest.Mock;
-let mockRedisQuit: jest.Mock;
-let mockShutdownLockManager: jest.Mock;
-let mockGetLockMetrics: jest.Mock;
+let mockRunCleanupQueue: any;
+let mockRedisQuit: any;
 
-jest.mock('../../src/services/cache', () => {
-  mockRedisQuit = jest.fn().mockResolvedValue(undefined);
+vi.mock('../../src/services/cache', () => {
+  mockRedisQuit = vi.fn().mockResolvedValue(undefined);
   return {
     // Ensure the mock provides what the SUT expects, typically a default export or named exports
     __esModule: true, // If cache.ts is an ES module
@@ -45,8 +42,8 @@ jest.mock('../../src/services/cache', () => {
     // quit: mockRedisQuit,
   };
 });
-jest.mock('../../src/utils/cleanupScheduler', () => {
-  mockRunCleanupQueue = jest.fn().mockResolvedValue(undefined);
+vi.mock('../../src/utils/cleanupScheduler', () => {
+  mockRunCleanupQueue = vi.fn().mockResolvedValue(undefined);
   return {
     // Ensure the mock provides what the SUT expects
     __esModule: true, // If cleanupScheduler.ts is an ES module
@@ -54,18 +51,8 @@ jest.mock('../../src/utils/cleanupScheduler', () => {
   };
 });
 
-jest.mock('../../src/utils/lockManager', () => {
-  mockShutdownLockManager = jest.fn().mockResolvedValue(undefined);
-  mockGetLockMetrics = jest.fn().mockReturnValue({});
-  return {
-    __esModule: true,
-    shutdownLockManager: mockShutdownLockManager,
-    getLockMetrics: mockGetLockMetrics,
-  };
-});
-
-const mockProcessOn = jest.fn();
-const mockProcessExit = jest.fn();
+const mockProcessOn = vi.fn();
+const mockProcessExit = vi.fn();
 
 global.process.on = mockProcessOn;
 global.process.exit = mockProcessExit as any;
@@ -75,19 +62,19 @@ describe('Graceful Shutdown', () => {
   let setupGracefulShutdown: (server: Server) => void;
   let isServerShuttingDown: () => boolean;
   let logger: typeof actualLogger;
-  let clearTimeoutSpy: jest.SpyInstance; // Added spy instance
+  let clearTimeoutSpy: any; // Added spy instance
 
   beforeEach(async () => {
-    jest.clearAllMocks();
-    jest.useFakeTimers();
-    clearTimeoutSpy = jest.spyOn(global, 'clearTimeout'); // Spy on clearTimeout
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    clearTimeoutSpy = vi.spyOn(global, 'clearTimeout'); // Spy on clearTimeout
 
-    jest.resetModules(); // This is key. It must happen before SUT is imported.
+    vi.resetModules(); // This is key. It must happen before SUT is imported.
 
     // Re-import logger for this test scope
     logger = (await import('../../src/services/logger')).default;
 
-    // The mocks for cache and cleanupScheduler are already set up by jest.mock above.
+    // The mocks for cache and cleanupScheduler are already set up by vi.mock above.
     // When gracefulShutdown is imported, it will use these hoisted mocks.
     const gracefulShutdownModule = await import(
       '../../src/utils/gracefulShutdown'
@@ -105,8 +92,8 @@ describe('Graceful Shutdown', () => {
   });
 
   afterEach(() => {
-    jest.clearAllTimers();
-    jest.useRealTimers();
+    vi.clearAllTimers();
+    vi.useRealTimers();
     clearTimeoutSpy.mockRestore(); // Restore the original clearTimeout
   });
 
@@ -136,9 +123,10 @@ describe('Graceful Shutdown', () => {
 
     // Act: Setup and trigger shutdown
     setupGracefulShutdown(server);
-    const sigtermHandler = mockProcessOn.mock.calls.find(
+    const sigtermCall = mockProcessOn.mock.calls.find(
       (call) => call[0] === 'SIGTERM'
-    )[1];
+    );
+    const sigtermHandler = sigtermCall![1];
     sigtermHandler('SIGTERM'); // Manually invoke the handler
 
     // Assert after shutdown initiated
@@ -165,7 +153,7 @@ describe('Graceful Shutdown', () => {
     }
     // Ensure all promise microtasks are flushed, then timers.
     await Promise.resolve();
-    await jest.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
     // Assert
     expect(logger.info).toHaveBeenCalledWith(
@@ -230,7 +218,7 @@ describe('Graceful Shutdown', () => {
 
     await Promise.allSettled([p1, p2]);
     await Promise.resolve();
-    await jest.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
     // Assert
     expect(logger.info).toHaveBeenCalledTimes(9); // Updated count to match actual implementation
@@ -250,7 +238,7 @@ describe('Graceful Shutdown', () => {
 
     // Act
     await sigtermHandler();
-    await jest.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
     // Assert
     expect(logger.error).toHaveBeenCalledWith(
@@ -270,7 +258,7 @@ describe('Graceful Shutdown', () => {
 
     // Act
     await sigtermHandler();
-    await jest.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
     // Assert
     expect(logger.error).toHaveBeenCalledWith('Cache shutdown failed', {
@@ -291,7 +279,7 @@ describe('Graceful Shutdown', () => {
     // We don't await sigtermHandler() here because it will never resolve due to the mock runCleanupQueue
     // Instead, we trigger it and then advance timers to hit the timeout.
     sigtermHandler();
-    await jest.advanceTimersByTimeAsync(30000); // Advance time to trigger timeout
+    await vi.advanceTimersByTimeAsync(30000); // Advance time to trigger timeout
 
     // Assert
     expect(logger.error).toHaveBeenCalledWith(

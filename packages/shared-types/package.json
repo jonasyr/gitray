@@ -1,16 +1,19 @@
 {
   "name": "@gitray/shared-types",
   "version": "1.0.0",
+  "type": "module",
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.json && tsc -p tsconfig.esm.json",
     "dev": "tsc",
-    "watch": "tsc --watch"
+    "watch": "tsc --watch --pretty false --preserveWatchOutput false"
   },
   "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
   "types": "./dist/cjs/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/cjs/index.d.ts",
+      "import": "./dist/esm/index.js",
       "require": "./dist/cjs/index.js",
       "default": "./dist/esm/index.js"
     }
