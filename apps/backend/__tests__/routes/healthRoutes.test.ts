@@ -17,6 +17,54 @@ vi.mock('../../src/utils/gracefulShutdown', () => ({
   isServerShuttingDown: vi.fn(() => false),
 }));
 
+// Mock the coordination modules
+vi.mock('../../src/services/repositoryCoordinator', () => ({
+  repositoryCoordinator: {
+    getMetrics: vi.fn(() => ({
+      cachedRepositories: 5,
+      activeClones: 1,
+      coalescedOperations: 10,
+      duplicateClonesPrevented: 3,
+      cacheHits: 25,
+      cacheMisses: 5,
+      totalDiskUsageBytes: 1024 * 1024 * 100, // 100MB
+    })),
+  },
+}));
+
+vi.mock('../../src/services/repositoryCache', () => ({
+  getRepositoryCacheStats: vi.fn(() => ({
+    hitRatios: {
+      overall: 0.8,
+      rawCommits: 0.7,
+      filteredCommits: 0.8,
+      aggregatedData: 0.9,
+    },
+    efficiency: 0.85,
+    entries: {
+      total: 150,
+      byLevel: { l1: 50, l2: 60, l3: 40 },
+    },
+  })),
+}));
+
+// Mock config
+vi.mock('../../src/config', () => ({
+  config: {
+    repositoryCache: {
+      enabled: true,
+      maxRepositories: 20,
+      maxAgeHours: 2,
+    },
+    operationCoordination: {
+      enabled: true,
+    },
+    cacheStrategy: {
+      hierarchicalCaching: true,
+    },
+  },
+}));
+
 describe('Health Routes', () => {
   let app: Application;
 
@@ -91,6 +139,10 @@ describe('Health Routes', () => {
           cacheMemoryEntries: '100',
           cacheDiskEntries: '50',
           git: expect.any(String),
+          coordination: expect.stringContaining('healthy'),
+          coordinationCachedRepos: expect.any(Number),
+          coordinationActiveClones: expect.any(Number),
+          coordinationDuplicatesPrevented: expect.any(Number),
         },
         system: {
           memory: expect.any(Object),
@@ -186,6 +238,28 @@ describe('Health Routes', () => {
       // Assert
       expect(res.status).toBe(503);
       expect(res.body).toEqual({ status: 'not_ready' });
+    });
+  });
+
+  describe('GET /coordination', () => {
+    test('returns coordination status when enabled', async () => {
+      // Act
+      const res = await request(app).get('/coordination');
+
+      // Assert
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        status: 'enabled',
+        message: 'Repository coordination system is enabled',
+        configuration: {
+          enabled: true,
+          maxRepositories: 20,
+          maxAgeHours: 2,
+          operationCoordination: true,
+          hierarchicalCaching: true,
+        },
+        timestamp: expect.any(String),
+      });
     });
   });
 });

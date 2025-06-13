@@ -1,7 +1,7 @@
 // apps/backend/src/services/repositoryCoordinator.ts
 
 import path from 'path';
-import { mkdtemp, rm, access } from 'fs/promises';
+import { mkdtemp, rm, access, mkdir } from 'fs/promises';
 import os from 'os';
 import { gitService } from './gitService';
 import logger from './logger';
@@ -391,12 +391,18 @@ class RepositoryCoordinator {
         logger.info('Starting repository clone', { repoUrl });
 
         // Create temp directory with specific prefix for coordination
-        const tempDirPrefix = path.join(
-          os.tmpdir(),
-          'gitray-coordinator-',
-          Buffer.from(repoUrl).toString('base64').slice(0, 10)
-        );
+        const baseCoordinatorDir = path.join(os.tmpdir(), 'gitray-coordinator');
+        const repoHash = Buffer.from(repoUrl).toString('base64').slice(0, 10);
 
+        // Ensure the base coordinator directory exists
+        try {
+          await mkdir(baseCoordinatorDir, { recursive: true });
+        } catch (error) {
+          // Directory might already exist, that's okay
+          logger.debug('Base coordinator directory creation result', { error });
+        }
+
+        const tempDirPrefix = path.join(baseCoordinatorDir, repoHash + '-');
         const localPath = await mkdtemp(tempDirPrefix);
 
         try {

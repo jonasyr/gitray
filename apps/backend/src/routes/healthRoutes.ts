@@ -3,6 +3,7 @@ import simpleGit from 'simple-git';
 import redis from '../services/cache';
 import logger from '../services/logger';
 import { isServerShuttingDown } from '../utils/gracefulShutdown';
+import { config } from '../config';
 
 // Health check endpoints used by Kubernetes and monitoring tools
 import os from 'os';
@@ -28,14 +29,14 @@ router.get('/health', (req: Request, res: Response) => {
   });
 });
 
-// Detailed health information including system stats
+// Detailed health information including system stats and coordination
 router.get('/health/detailed', async (_req: Request, res: Response) => {
-  const checks: Record<string, string> = {
+  const checks: Record<string, string | number> = {
     server: 'healthy',
     cache: 'unknown',
     git: 'unknown',
+    coordination: 'unknown',
   };
-
   let overallStatus = 200;
 
   try {
@@ -60,6 +61,42 @@ router.get('/health/detailed', async (_req: Request, res: Response) => {
     logger.error('Cache health check failed', error);
     checks.cache = 'error';
     overallStatus = 503;
+  }
+
+  // NEW: Repository coordination system health check
+  try {
+    if (config.repositoryCache?.enabled) {
+      const { repositoryCoordinator } = await import(
+        '../services/repositoryCoordinator'
+      );
+      const { getRepositoryCacheStats } = await import(
+        '../services/repositoryCache'
+      );
+
+      const coordinationMetrics = repositoryCoordinator.getMetrics();
+      const cacheStats = getRepositoryCacheStats();
+
+      const isCoordinationHealthy =
+        coordinationMetrics.activeClones < 10 &&
+        cacheStats.hitRatios.overall > 0.1;
+
+      if (isCoordinationHealthy) {
+        checks.coordination = `healthy (${coordinationMetrics.cachedRepositories} repos cached)`;
+        checks.coordinationCachedRepos = coordinationMetrics.cachedRepositories;
+        checks.coordinationActiveClones = coordinationMetrics.activeClones;
+        checks.coordinationDuplicatesPrevented =
+          coordinationMetrics.duplicateClonesPrevented;
+      } else {
+        checks.coordination = 'unhealthy';
+        overallStatus = 503;
+      }
+    } else {
+      checks.coordination = 'disabled';
+    }
+  } catch (error) {
+    logger.error('Coordination health check failed', error);
+    checks.coordination = 'error';
+    // Don't fail overall health for coordination issues
   }
 
   try {
@@ -90,6 +127,32 @@ router.get('/health/detailed', async (_req: Request, res: Response) => {
       loadAverage: os.loadavg(),
       cpus: os.cpus().length,
     },
+  });
+});
+
+// NEW: Dedicated coordination health endpoint for Step 3 testing
+router.get('/coordination', (_req: Request, res: Response) => {
+  if (!config.repositoryCache?.enabled) {
+    res.status(200).json({
+      status: 'disabled',
+      message: 'Repository coordination is disabled',
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
+  // Return basic coordination status even if modules aren't loaded yet
+  res.status(200).json({
+    status: 'enabled',
+    message: 'Repository coordination system is enabled',
+    configuration: {
+      enabled: config.repositoryCache?.enabled,
+      maxRepositories: config.repositoryCache?.maxRepositories,
+      maxAgeHours: config.repositoryCache?.maxAgeHours,
+      operationCoordination: config.operationCoordination?.enabled,
+      hierarchicalCaching: config.cacheStrategy?.hierarchicalCaching,
+    },
+    timestamp: new Date().toISOString(),
   });
 });
 
