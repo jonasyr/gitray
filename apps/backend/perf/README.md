@@ -106,14 +106,17 @@ The test suite enforces these performance thresholds:
 The load test simulates realistic usage patterns with weighted scenarios:
 
 1. **Health Check** (10% of traffic)
+
    - Simple GET requests to `/health`
    - Validates service availability
 
 2. **Get Repository Commits** (40% of traffic)
+
    - POST requests to `/api/repositories`
    - Tests git cloning and commit retrieval
 
 3. **Get Heatmap Data** (30% of traffic)
+
    - GET requests to `/api/commits/heatmap`
    - Tests data aggregation and caching
 

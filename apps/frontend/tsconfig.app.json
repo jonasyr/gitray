@@ -28,7 +28,9 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
-    "types": ["jest", "@testing-library/jest-dom"]
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["vitest/globals", "@testing-library/jest-dom"]
   },
   "include": ["src", "__tests__"],
   "references": [{ "path": "../../packages/shared-types" }]

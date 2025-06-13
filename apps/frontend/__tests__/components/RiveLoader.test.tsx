@@ -1,26 +1,29 @@
 import { render, screen, act } from '@testing-library/react';
+import { vi } from 'vitest';
 import RiveLoader from '../../src/components/RiveLoader';
 import { useRive } from '@rive-app/react-canvas';
 
-jest.mock('@rive-app/react-canvas', () => ({ useRive: jest.fn() }));
+vi.mock('@rive-app/react-canvas', () => ({ useRive: vi.fn() }));
 
-const mockedUseRive = useRive as jest.MockedFunction<typeof useRive>;
+const mockedUseRive = useRive as ReturnType<typeof vi.fn>;
 
 const MockRiveComponent = () => <div data-testid="rive" />;
 
 beforeEach(() => {
-  jest.clearAllMocks();
+  vi.clearAllMocks();
 });
 
 describe('RiveLoader Component (happy path, AAA)', () => {
   test('renders default loader and triggers callbacks', () => {
     // Arrange
-    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     let options: Parameters<typeof useRive>[0] | undefined;
     mockedUseRive.mockImplementation((opts) => {
       options = opts;
-      return { RiveComponent: MockRiveComponent } as any;
+      return { RiveComponent: MockRiveComponent } as unknown as ReturnType<
+        typeof useRive
+      >;
     });
 
     // Act
@@ -35,21 +38,24 @@ describe('RiveLoader Component (happy path, AAA)', () => {
 
     // Act
     act(() => {
+      // Mock the callback parameters as needed by the implementation
       options?.onLoad?.({} as any);
-      options?.onLoadError?.('oops' as any);
+      options?.onLoadError?.('test error' as any);
     });
 
     // Assert
     expect(logSpy).toHaveBeenCalledWith('Rive animation loaded successfully');
     expect(errSpy).toHaveBeenCalledWith(
       'Failed to load Rive animation:',
-      'oops'
+      'test error'
     );
   });
 
   test('accepts custom props', () => {
     // Arrange
-    mockedUseRive.mockReturnValue({ RiveComponent: MockRiveComponent } as any);
+    mockedUseRive.mockReturnValue({
+      RiveComponent: MockRiveComponent,
+    } as unknown as ReturnType<typeof useRive>);
 
     // Act
     const { container } = render(

@@ -1,3 +1,13 @@
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+  beforeAll,
+  afterAll,
+} from 'vitest';
 // apps/backend/__tests__/routes/index.test.ts
 import request from 'supertest';
 import express from 'express';

@@ -4,12 +4,12 @@ about: Optimized template for features, bugs, enhancements and tasks
 title: 'type(scope): brief description'
 labels: ''
 assignees: ''
-
 ---
 
 ## 🎯 Issue Type
 
 <!-- Select the type and delete the others -->
+
 - [ ] 🐛 **Bug** - Something doesn't work as expected
 - [ ] ✨ **Feature** - New functionality
 - [ ] 🔧 **Enhancement** - Improvement of existing functionality
@@ -20,12 +20,15 @@ assignees: ''
 ## 📋 Description
 
 ### Problem/Need
+
 <!-- Describe clearly and precisely the problem or need -->
 
 ### Expected Behavior
+
 <!-- What should happen? How should it work? -->
 
 ### Current Behavior
+
 <!-- What happens currently? (only for bugs/enhancements) -->
 
 ## 🔄 Steps to Reproduce
@@ -59,33 +62,39 @@ Code example or screenshot here
 ## 🛠 Technical Details
 
 ### Affected Files/Components
+
 <!-- Where in the code is the change necessary? -->
 
 ### Dependencies
+
 <!-- Are there other issues or PRs that need to be completed first? -->
 
 ### Breaking Changes
+
 - [ ] Yes, this change could affect existing functionality
 - [ ] No, backward compatible change
 
 ## 🏷 Categorization
 
 ### Scope
+
 - [ ] `scope:frontend` - Frontend/UI changes
-- [ ] `scope:backend` - Backend/API changes  
+- [ ] `scope:backend` - Backend/API changes
 - [ ] `scope:shared` - Shared types/utils
 - [ ] `scope:devops` - CI/CD, deployment, tools
 - [ ] `scope:docs` - Documentation
 
-### Priority  
+### Priority
+
 - [ ] `prio:critical` - Production-critical bug
 - [ ] `prio:high` - Important feature/bug
 - [ ] `prio:medium` - Normal priority
 - [ ] `prio:low` - Nice-to-have
 
 ### Effort
+
 - [ ] `effort:small` - < 2 hours
-- [ ] `effort:medium` - 2-8 hours  
+- [ ] `effort:medium` - 2-8 hours
 - [ ] `effort:large` - 1-3 days
 - [ ] `effort:xl` - > 3 days
 
@@ -103,7 +112,7 @@ Code example or screenshot here
 <!-- Links to other issues or pull requests -->
 
 - Relates to #
-- Blocks #  
+- Blocks #
 - Blocked by #
 
 ## 📝 Additional Notes

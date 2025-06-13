@@ -1,9 +1,8 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { query } from 'express-validator';
+import { query, validationResult, ValidationChain } from 'express-validator';
 import { gitService } from '../services/gitService';
 import redis from '../services/cache';
 import { withTempRepository } from '../utils/withTempRepository';
-import { handleValidationErrors } from '../middlewares/validation';
 import { createRequestLogger } from '../services/logger';
 import { cacheHits, cacheMisses } from '../services/metrics';
 import {
@@ -17,27 +16,150 @@ import {
 const router = express.Router();
 
 // ---------------------------------------------------------------------------
-// Query parameter validation
+// Custom validation error handler that formats errors correctly
 // ---------------------------------------------------------------------------
-const repoUrlValidation = [
+const handleValidationErrors = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    // Log validation errors for debugging
+    const logger = createRequestLogger(req);
+    logger.warn('Validation failed', {
+      errors: errors.array(),
+      query: req.query,
+      path: req.path,
+    });
+
+    // Return the expected error format
+    res.status(HTTP_STATUS.BAD_REQUEST).json({
+      error: 'Validation failed',
+      code: 'VALIDATION_ERROR',
+    });
+    return;
+  }
+  next();
+};
+
+// ---------------------------------------------------------------------------
+// Reusable validation chains with comprehensive security checks
+// ---------------------------------------------------------------------------
+const repoUrlValidation = (): ValidationChain[] => [
   query('repoUrl')
-    .isURL({ protocols: ['http', 'https'] })
+    .notEmpty()
+    .withMessage('repoUrl query parameter is required')
+    .isURL({
+      protocols: ['http', 'https'],
+      require_protocol: true,
+      require_valid_protocol: true,
+    })
     .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
     .matches(/\.git$|github\.com|gitlab\.com|bitbucket\.org/)
-    .withMessage(ERROR_MESSAGES.INVALID_REPO_URL),
-  query('fromDate').optional().isISO8601(),
-  query('toDate').optional().isISO8601(),
-  query('page').optional().isInt({ min: 1 }).toInt(),
-  query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
-  handleValidationErrors,
+    .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
+    // Additional security: prevent URL injection attacks
+    .custom((value) => {
+      try {
+        const url = new URL(value);
+        // Prevent localhost/private network access in production
+        if (process.env.NODE_ENV === 'production') {
+          const hostname = url.hostname.toLowerCase();
+          if (
+            hostname === 'localhost' ||
+            hostname === '127.0.0.1' ||
+            hostname.startsWith('192.168.') ||
+            hostname.startsWith('10.') ||
+            hostname.startsWith('172.')
+          ) {
+            return false;
+          }
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .withMessage('Invalid repository URL'),
+];
+
+const paginationValidation = (): ValidationChain[] => [
+  query('page')
+    .optional()
+    .isInt({ min: 1, max: 1000 })
+    .withMessage('Page must be between 1 and 1000')
+    .toInt(),
+  query('limit')
+    .optional()
+    .isInt({ min: 1, max: 100 })
+    .withMessage('Limit must be between 1 and 100')
+    .toInt(),
+];
+
+const dateValidation = (): ValidationChain[] => [
+  query('fromDate')
+    .optional()
+    .isISO8601({ strict: true })
+    .withMessage('fromDate must be a valid ISO 8601 date')
+    .custom((value) => {
+      // Ensure fromDate is not in the future
+      if (value && new Date(value) > new Date()) {
+        return false;
+      }
+      return true;
+    })
+    .withMessage('fromDate cannot be in the future'),
+  query('toDate')
+    .optional()
+    .isISO8601({ strict: true })
+    .withMessage('toDate must be a valid ISO 8601 date')
+    .custom((value, { req }) => {
+      // Ensure toDate is not in the future
+      if (value && new Date(value) > new Date()) {
+        return false;
+      }
+      // Ensure toDate is after fromDate if both are provided
+      const fromDate = req.query?.fromDate as string;
+      if (value && fromDate && new Date(value) < new Date(fromDate)) {
+        return false;
+      }
+      return true;
+    })
+    .withMessage('toDate must be after fromDate and not in the future'),
+];
+
+const authorValidation = (): ValidationChain[] => [
+  query('author')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Author must be between 1 and 100 characters')
+    // Sanitize to prevent XSS
+    .escape(),
+  query('authors')
+    .optional()
+    .isString()
+    .custom((value) => {
+      // Validate comma-separated authors
+      const authors = value.split(',');
+      return (
+        authors.length <= 10 &&
+        authors.every((a: string) => a.trim().length > 0)
+      );
+    })
+    .withMessage(
+      'Authors must be comma-separated and maximum 10 authors allowed'
+    ),
 ];
 
 // ---------------------------------------------------------------------------
-// GET /commits - paginated list of commits
+// GET / - paginated list of commits
 // ---------------------------------------------------------------------------
 router.get(
   '/',
-  repoUrlValidation,
+  [...repoUrlValidation(), ...paginationValidation()],
+  handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
     const logger = createRequestLogger(req);
     const { repoUrl } = req.query as Record<string, string>;
@@ -74,7 +196,6 @@ router.get(
         count: commits.length,
       });
       res.status(HTTP_STATUS.OK).json(result);
-      return;
     } catch (error) {
       logger.error('Error fetching commits', { error, repoUrl });
       next(error);
@@ -83,11 +204,12 @@ router.get(
 );
 
 // ---------------------------------------------------------------------------
-// GET /commits/heatmap - aggregated commit activity
+// GET /heatmap - aggregated commit activity
 // ---------------------------------------------------------------------------
 router.get(
   '/heatmap',
-  repoUrlValidation,
+  [...repoUrlValidation(), ...dateValidation(), ...authorValidation()],
+  handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
     const logger = createRequestLogger(req);
     const { repoUrl, author, authors, fromDate, toDate } = req.query as Record<
@@ -97,7 +219,7 @@ router.get(
 
     const filters: CommitFilterOptions = {
       author: author || undefined,
-      authors: authors ? authors.split(',') : undefined,
+      authors: authors ? authors.split(',').map((a) => a.trim()) : undefined,
       fromDate: fromDate || undefined,
       toDate: toDate || undefined,
     };
@@ -131,7 +253,6 @@ router.get(
 
       logger.info('Generated heatmap data', { repoUrl, filters });
       res.status(HTTP_STATUS.OK).json(heatmapData);
-      return;
     } catch (error) {
       logger.error('Error generating heatmap', { error, repoUrl, filters });
       next(error);

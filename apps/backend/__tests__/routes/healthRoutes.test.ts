@@ -1,25 +1,26 @@
+import { describe, test, expect } from 'vitest';
 import request from 'supertest';
 import express, { Application } from 'express';
 import healthRoutes from '../../src/routes/healthRoutes';
 import redis from '../../src/services/cache';
 
-jest.mock('../../src/services/cache', () => ({
+vi.mock('../../src/services/cache', () => ({
   __esModule: true,
   default: {
-    isHealthy: jest.fn(),
-    quit: jest.fn(),
+    isHealthy: vi.fn(),
+    quit: vi.fn(),
   },
 }));
 
-jest.mock('../../src/utils/gracefulShutdown', () => ({
-  isServerShuttingDown: jest.fn(() => false),
+vi.mock('../../src/utils/gracefulShutdown', () => ({
+  isServerShuttingDown: vi.fn(() => false),
 }));
 
 describe('Health Routes', () => {
   let app: Application;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     app = express();
     app.use('/', healthRoutes);
   });
@@ -42,7 +43,7 @@ describe('Health Routes', () => {
   describe('GET /health/detailed', () => {
     test('returns detailed health status when all services are healthy', async () => {
       // Arrange
-      (redis.isHealthy as jest.Mock).mockReturnValue(true);
+      vi.mocked(redis.isHealthy).mockReturnValue(true);
 
       // Act
       const res = await request(app).get('/health/detailed');
@@ -68,7 +69,7 @@ describe('Health Routes', () => {
 
     test('returns unhealthy status when Redis is down', async () => {
       // Arrange
-      (redis.isHealthy as jest.Mock).mockReturnValue(false);
+      vi.mocked(redis.isHealthy).mockReturnValue(false);
 
       // Act
       const res = await request(app).get('/health/detailed');
@@ -94,7 +95,7 @@ describe('Health Routes', () => {
   describe('GET /health/ready', () => {
     test('returns ready when Redis is healthy', async () => {
       // Arrange
-      (redis.isHealthy as jest.Mock).mockReturnValue(true);
+      vi.mocked(redis.isHealthy).mockReturnValue(true);
 
       // Act
       const res = await request(app).get('/health/ready');
@@ -106,7 +107,7 @@ describe('Health Routes', () => {
 
     test('returns not ready when Redis is unhealthy', async () => {
       // Arrange
-      (redis.isHealthy as jest.Mock).mockReturnValue(false);
+      vi.mocked(redis.isHealthy).mockReturnValue(false);
 
       // Act
       const res = await request(app).get('/health/ready');

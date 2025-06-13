@@ -1,3 +1,13 @@
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+  beforeAll,
+  afterAll,
+} from 'vitest';
 import simpleGit from 'simple-git';
 import { mkdtemp, rm } from 'fs/promises';
 import * as path from 'path';
@@ -6,33 +16,33 @@ import { gitService } from '../../src/services/gitService';
 import logger from '../../src/services/logger';
 import { GIT_SERVICE } from '@gitray/shared-types';
 
-jest.mock('simple-git');
-jest.mock('fs/promises');
-jest.mock('ioredis');
-jest.mock('../../src/services/logger', () => ({
+vi.mock('simple-git');
+vi.mock('fs/promises');
+vi.mock('ioredis');
+vi.mock('../../src/services/logger', () => ({
   __esModule: true,
   default: {
-    info: jest.fn(),
-    error: jest.fn(),
-    warn: jest.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
   },
 }));
 
 describe('GitService', () => {
   const mockGit = {
-    clone: jest.fn(),
-    log: jest.fn(),
-    raw: jest.fn(),
+    clone: vi.fn(),
+    log: vi.fn(),
+    raw: vi.fn(),
   };
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    (simpleGit as jest.Mock).mockReturnValue(mockGit);
-    (mkdtemp as jest.Mock).mockResolvedValue('/tmp/git-visualizer-test');
-    (rm as jest.Mock).mockResolvedValue(undefined);
-    jest.spyOn(logger, 'error').mockReset();
-    jest.spyOn(logger, 'warn').mockReset();
-    jest.spyOn(logger, 'info').mockReset();
+    vi.clearAllMocks();
+    (simpleGit as any).mockReturnValue(mockGit);
+    (mkdtemp as any).mockResolvedValue('/tmp/git-visualizer-test');
+    (rm as any).mockResolvedValue(undefined);
+    vi.spyOn(logger, 'error').mockReset();
+    vi.spyOn(logger, 'warn').mockReset();
+    vi.spyOn(logger, 'info').mockReset();
   });
 
   describe('cloneRepository', () => {
@@ -120,19 +130,19 @@ describe('GitService', () => {
 
 describe('GitService Extended Tests', () => {
   const mockGit = {
-    clone: jest.fn(),
-    log: jest.fn(),
-    raw: jest.fn(),
+    clone: vi.fn(),
+    log: vi.fn(),
+    raw: vi.fn(),
   };
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    (simpleGit as jest.Mock).mockReturnValue(mockGit);
-    (mkdtemp as jest.Mock).mockResolvedValue('/tmp/git-visualizer-test');
-    (rm as jest.Mock).mockResolvedValue(undefined);
-    jest.spyOn(logger, 'error').mockReset();
-    jest.spyOn(logger, 'warn').mockReset();
-    jest.spyOn(logger, 'info').mockReset();
+    vi.clearAllMocks();
+    (simpleGit as any).mockReturnValue(mockGit);
+    (mkdtemp as any).mockResolvedValue('/tmp/git-visualizer-test');
+    (rm as any).mockResolvedValue(undefined);
+    vi.spyOn(logger, 'error').mockReset();
+    vi.spyOn(logger, 'warn').mockReset();
+    vi.spyOn(logger, 'info').mockReset();
   });
 
   describe('cloneRepository error handling', () => {
@@ -158,8 +168,8 @@ describe('GitService Extended Tests', () => {
       const mockCleanupError = new Error('Cleanup failed');
       const mockTempDir = '/tmp/git-visualizer-test';
       mockGit.clone.mockRejectedValue(mockCloneError);
-      (rm as jest.Mock).mockRejectedValueOnce(mockCleanupError);
-      const errorSpy = jest.spyOn(logger, 'error');
+      (rm as any).mockRejectedValueOnce(mockCleanupError);
+      const errorSpy = vi.spyOn(logger, 'error');
       await expect(gitService.cloneRepository(repoUrl)).rejects.toThrow(
         'Failed to clone repository'
       );
@@ -194,7 +204,7 @@ describe('GitService Extended Tests', () => {
         'ghi789|2023-01-03T15:00:00Z|Another User|another@example.com|',
       ].join('\n');
       mockGit.raw.mockResolvedValue(mockRaw);
-      const warnSpy = jest.spyOn(logger, 'warn');
+      const warnSpy = vi.spyOn(logger, 'warn');
       const commits = await gitService.getCommits(localRepoPath);
       expect(commits).toHaveLength(1);
       expect(commits[0].sha).toBe('abc123');
@@ -223,7 +233,7 @@ describe('GitService Extended Tests', () => {
     test('should handle errors when cleaning up repository', async () => {
       const repoPath = '/tmp/git-visualizer-test';
       const mockError = new Error('Cleanup failed');
-      (rm as jest.Mock).mockRejectedValue(mockError);
+      (rm as any).mockRejectedValue(mockError);
       await expect(gitService.cleanupRepository(repoPath)).rejects.toThrow(
         'Failed to clean up repository directory'
       );
