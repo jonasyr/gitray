@@ -20,10 +20,12 @@ import {
   ERROR_MESSAGES,
   RepositoryError,
 } from '@gitray/shared-types';
-import logger from '../services/logger';
+import { getLogger } from '../services/logger';
 import { shallowClone } from '../utils/gitUtils';
 import { config } from '../config';
 import redis from '../services/cache';
+
+const logger = getLogger();
 
 /**
  * STREAMING SUPPORT FOR LARGE REPOSITORIES

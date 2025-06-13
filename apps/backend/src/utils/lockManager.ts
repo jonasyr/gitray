@@ -1,8 +1,10 @@
 import path from 'path';
 import { promises as fs } from 'fs';
 import os from 'os';
-import logger from '../services/logger';
+import { getLogger } from '../services/logger';
 import { lockConfig } from '../config';
+
+const logger = getLogger();
 
 /**
  * IMPROVEMENTS APPLIED:

@@ -2,12 +2,14 @@
 
 import crypto from 'crypto';
 import { gitService } from './gitService';
-import logger from './logger';
+import { getLogger } from './logger';
 import { withSharedRepository } from './repositoryCoordinator';
 import type { RepositoryHandle } from './repositoryCoordinator';
 import { config } from '../config';
 import HybridLRUCache from '../utils/hybridLruCache';
 import { cacheHits, cacheMisses, getRepositorySizeCategory } from './metrics';
+
+const logger = getLogger();
 import {
   Commit,
   CommitFilterOptions,

@@ -1,8 +1,10 @@
 import fs from 'fs/promises';
 import path from 'path';
 import Redis, { RedisOptions } from 'ioredis';
-import logger from '../services/logger';
+import { getLogger } from '../services/logger';
 import { withKeyLock } from './lockManager';
+
+const logger = getLogger();
 
 // Fix import path - ensure this matches your project structure
 // If config is in a different location, adjust accordingly

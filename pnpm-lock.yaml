@@ -113,6 +113,9 @@ importers:
       winston:
         specifier: ^3.17.0
         version: 3.17.0
+      winston-daily-rotate-file:
+        specifier: ^5.0.0
+        version: 5.0.0(winston@3.17.0)
       zod:
         specifier: ^3.25.28
         version: 3.25.64
@@ -3333,6 +3336,12 @@ packages:
       }
     engines: { node: '>=16.0.0' }
 
+  file-stream-rotator@0.6.1:
+    resolution:
+      {
+        integrity: sha512-u+dBid4PvZw17PmDeRcNOtCP9CCK/9lRN2w+r1xIS7yOL9JFrIBKTvrYsxT4P0pGtThYTn++QS5ChHaUov3+zQ==,
+      }
+
   filelist@1.0.4:
     resolution:
       {
@@ -4976,6 +4985,12 @@ packages:
     engines: { node: '>=10' }
     hasBin: true
 
+  moment@2.30.1:
+    resolution:
+      {
+        integrity: sha512-uEmtNhbDOrWPFS+hdjFCBfy9f2YoyzRpwcl+DqpC6taX21FzsTLQVbMV/W7PzNSX6x/bhC1zA3c2UQ5NzH6how==,
+      }
+
   mri@1.2.0:
     resolution:
       {
@@ -5093,6 +5108,13 @@ packages:
         integrity: sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg==,
       }
     engines: { node: '>=0.10.0' }
+
+  object-hash@3.0.0:
+    resolution:
+      {
+        integrity: sha512-RSn9F68PjH9HqtltsSnqYC1XXoWe9Bju5+213R98cNGttag9q9yAOTzdbsqvIa7aNm5WffBZFpWYr2aWrklWAw==,
+      }
+    engines: { node: '>= 6' }
 
   object-inspect@1.13.4:
     resolution:
@@ -6751,6 +6773,15 @@ packages:
       }
     engines: { node: '>=8' }
     hasBin: true
+
+  winston-daily-rotate-file@5.0.0:
+    resolution:
+      {
+        integrity: sha512-JDjiXXkM5qvwY06733vf09I2wnMXpZEhxEVOSPenZMii+g7pcDcTBt2MRugnoi8BwVSuCT2jfRXBUy+n1Zz/Yw==,
+      }
+    engines: { node: '>=8' }
+    peerDependencies:
+      winston: ^3
 
   winston-transport@4.9.0:
     resolution:
@@ -8890,6 +8921,10 @@ snapshots:
     dependencies:
       flat-cache: 4.0.1
 
+  file-stream-rotator@0.6.1:
+    dependencies:
+      moment: 2.30.1
+
   filelist@1.0.4:
     dependencies:
       minimatch: 5.1.6
@@ -9935,6 +9970,8 @@ snapshots:
 
   mkdirp@3.0.1: {}
 
+  moment@2.30.1: {}
+
   mri@1.2.0: {}
 
   mrmime@2.0.1: {}
@@ -10013,6 +10050,8 @@ snapshots:
       - supports-color
 
   object-assign@4.1.1: {}
+
+  object-hash@3.0.0: {}
 
   object-inspect@1.13.4: {}
 
@@ -11110,6 +11149,14 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+
+  winston-daily-rotate-file@5.0.0(winston@3.17.0):
+    dependencies:
+      file-stream-rotator: 0.6.1
+      object-hash: 3.0.0
+      triple-beam: 1.4.1
+      winston: 3.17.0
+      winston-transport: 4.9.0
 
   winston-transport@4.9.0:
     dependencies:

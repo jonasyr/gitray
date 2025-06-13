@@ -5,8 +5,10 @@
 // responses. Unknown errors fallback to HTTP 500.
 
 import { Request, Response, NextFunction, ErrorRequestHandler } from 'express';
-import logger from '../services/logger';
+import { getLogger } from '../services/logger';
 import { GitrayError, HTTP_STATUS } from '@gitray/shared-types';
+
+const logger = getLogger();
 
 const errorHandler: ErrorRequestHandler = (
   err: Error,

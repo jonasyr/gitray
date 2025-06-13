@@ -1,7 +1,9 @@
 import Redis from 'ioredis';
 import { config, hybridCacheConfig } from '../config';
-import logger from './logger';
+import { getLogger } from './logger';
 import HybridLRUCache from '../utils/hybridLruCache';
+
+const logger = getLogger();
 
 /**
  * INTEGRATION WRAPPER:

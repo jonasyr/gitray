@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import simpleGit from 'simple-git';
 import redis from '../services/cache';
-import logger from '../services/logger';
+import { getLogger } from '../services/logger';
 import { isServerShuttingDown } from '../utils/gracefulShutdown';
 import { config } from '../config';
 
@@ -9,6 +9,7 @@ import { config } from '../config';
 import os from 'os';
 
 const router = express.Router();
+const logger = getLogger();
 
 // ---------------------------------------------------------------------------
 // Liveness and readiness endpoints

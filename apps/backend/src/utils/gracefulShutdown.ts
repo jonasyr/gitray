@@ -1,8 +1,10 @@
 import { Server } from 'http';
-import logger from '../services/logger';
+import { getLogger } from '../services/logger';
 import redis from '../services/cache';
 import { runCleanupQueue } from './cleanupScheduler';
 import { shutdownLockManager } from './lockManager';
+
+const logger = getLogger();
 
 /**
  * ENHANCED GRACEFUL SHUTDOWN:

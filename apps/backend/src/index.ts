@@ -16,7 +16,7 @@ import dotenv from 'dotenv';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { config, validateConfig } from './config';
-import logger from './services/logger';
+import { initializeLogger } from './services/logger';
 import routes from './routes';
 import repositoryRoutes from './routes/repositoryRoutes';
 import commitRoutes from './routes/commitRoutes';
@@ -36,6 +36,9 @@ import { repositoryCache } from './services/repositoryCache';
 
 // Load environment variables
 dotenv.config();
+
+// Initialize logger after environment variables are loaded
+const logger = initializeLogger();
 
 /**
  * ENHANCED: Validate configuration with new coordination settings

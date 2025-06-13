@@ -4,10 +4,12 @@ import path from 'path';
 import { mkdtemp, rm, access, mkdir } from 'fs/promises';
 import os from 'os';
 import { gitService } from './gitService';
-import logger from './logger';
+import { getLogger } from './logger';
 import { withKeyLock } from '../utils/lockManager';
 import { config } from '../config';
 import { recordStreamingStart, getRepositorySizeCategory } from './metrics';
+
+const logger = getLogger();
 
 /**
  * REPOSITORY COORDINATOR: Single source of truth for repository management

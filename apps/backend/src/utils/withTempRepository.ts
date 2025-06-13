@@ -9,7 +9,7 @@ import {
   recordStreamingError,
   getRepositorySizeCategory,
 } from '../services/metrics';
-import logger from '../services/logger';
+import { getLogger } from '../services/logger';
 import { config } from '../config';
 import {
   repositoryCoordinator,
@@ -17,6 +17,8 @@ import {
   coordinatedOperation,
   type RepositoryHandle,
 } from '../services/repositoryCoordinator';
+
+const logger = getLogger();
 
 /**
  * ENHANCED: Helper that uses shared repositories to prevent duplicate clones
