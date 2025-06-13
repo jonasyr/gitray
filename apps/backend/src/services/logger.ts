@@ -16,43 +16,31 @@ export const initializeLogger = () => {
     fs.mkdirSync(logDir, { recursive: true });
   }
 
-  // Custom format for better readability
-  const customFormat = winston.format.combine(
+  // Simple console format with proper colors
+  const consoleFormat = winston.format.combine(
     winston.format.timestamp({
-      format: 'YYYY-MM-DD HH:mm:ss.SSS',
+      format: 'HH:mm:ss',
     }),
     winston.format.errors({ stack: true }),
+    winston.format.colorize(),
     winston.format.printf(
       ({
         timestamp,
         level,
         message,
-        service,
         requestId,
         method,
         path: reqPath,
-        ip,
         stack,
-        ...meta
       }) => {
-        let baseLog = `${timestamp} [${level.toUpperCase()}]`;
+        let baseLog = `${timestamp} ${level}`;
 
-        if (service) {
-          baseLog += ` [${service}]`;
-        }
-
-        if (requestId) {
-          baseLog += ` [${method} ${reqPath}] [${requestId}]`;
-          if (ip) baseLog += ` [${ip}]`;
+        // Add request info if present (simplified)
+        if (requestId && method && reqPath) {
+          baseLog += ` [${method} ${reqPath}]`;
         }
 
         baseLog += `: ${message}`;
-
-        // Add metadata if present
-        const metaKeys = Object.keys(meta);
-        if (metaKeys.length > 0) {
-          baseLog += ` | ${JSON.stringify(meta)}`;
-        }
 
         // Add stack trace for errors
         if (stack) {
@@ -74,11 +62,12 @@ export const initializeLogger = () => {
   // Create transports array
   const transports: winston.transport[] = [];
 
-  // Console transport (always enabled in development)
+  // Console transport (simple and clean)
   if (process.env.LOG_ENABLE_CONSOLE !== 'false') {
     transports.push(
       new winston.transports.Console({
-        format: winston.format.combine(winston.format.colorize(), customFormat),
+        level: process.env.LOG_CONSOLE_LEVEL || 'info',
+        format: consoleFormat,
       })
     );
   }
