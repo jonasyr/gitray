@@ -42,17 +42,14 @@ const mockFileHandle = {
   close: vi.fn() as MockedFunction<() => Promise<void>>,
 };
 
-const mockFs = {
-  mkdir: vi.fn() as MockedFunction<
-    (path: string, options?: any) => Promise<void>
-  >,
-  open: vi.fn() as MockedFunction<
-    (path: string, flags: string) => Promise<typeof mockFileHandle>
-  >,
-  unlink: vi.fn() as MockedFunction<(path: string) => Promise<void>>,
-  readdir: vi.fn() as MockedFunction<(path: string) => Promise<string[]>>,
-  stat: vi.fn() as MockedFunction<(path: string) => Promise<Stats>>,
-};
+// Create comprehensive mocks using vi.hoisted
+const mockFs = vi.hoisted(() => ({
+  mkdir: vi.fn(),
+  open: vi.fn(),
+  unlink: vi.fn(),
+  readdir: vi.fn(),
+  stat: vi.fn(),
+}));
 
 // Mock timer functions to prevent background intervals
 const originalSetInterval = global.setInterval;

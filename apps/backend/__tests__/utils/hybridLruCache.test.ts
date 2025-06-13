@@ -38,29 +38,18 @@ const createMockStats = (mtimeMs: number = Date.now()): Stats =>
     birthtime: new Date(mtimeMs),
   }) as Stats;
 
-// Create comprehensive mocks before any imports
-const mockFs = {
-  mkdir: vi.fn() as MockedFunction<
-    (path: string, options?: any) => Promise<void>
-  >,
-  readdir: vi.fn() as MockedFunction<(path: string) => Promise<string[]>>,
-  writeFile: vi.fn() as MockedFunction<
-    (path: string, data: string) => Promise<void>
-  >,
-  readFile: vi.fn() as MockedFunction<
-    (path: string, encoding?: string) => Promise<string>
-  >,
-  unlink: vi.fn() as MockedFunction<(path: string) => Promise<void>>,
-  stat: vi.fn() as MockedFunction<(path: string) => Promise<Stats>>,
-};
+// Create comprehensive mocks using vi.hoisted
+const mockFs = vi.hoisted(() => ({
+  mkdir: vi.fn(),
+  readdir: vi.fn(),
+  writeFile: vi.fn(),
+  readFile: vi.fn(),
+  unlink: vi.fn(),
+  stat: vi.fn(),
+}));
 
-// Initialize mock return values
-mockFs.mkdir.mockResolvedValue(undefined);
-mockFs.readdir.mockResolvedValue([]);
-mockFs.writeFile.mockResolvedValue(undefined);
-mockFs.readFile.mockResolvedValue('');
-mockFs.unlink.mockResolvedValue(undefined);
-mockFs.stat.mockResolvedValue(createMockStats());
+// Mock the withKeyLock function using vi.hoisted
+const mockWithKeyLock = vi.hoisted(() => vi.fn());
 
 // Mock Redis
 const mockRedis = {
@@ -89,17 +78,6 @@ mockRedis.on.mockImplementation(
   }
 );
 
-// Mock the withKeyLock function
-const mockWithKeyLock = vi.fn() as MockedFunction<
-  (key: string, fn: () => Promise<unknown>) => Promise<unknown>
->;
-mockWithKeyLock.mockImplementation(
-  async (key: string, fn: () => Promise<unknown>) => {
-    return await fn();
-  }
-);
-
-// Set up all mocks at the top level
 vi.mock('fs/promises', () => mockFs);
 
 // Mock IORedis - need to handle both default export and named imports
@@ -147,6 +125,13 @@ describe('HybridLRUCache', () => {
     mockFs.readFile.mockResolvedValue('');
     mockFs.unlink.mockResolvedValue(undefined);
     mockFs.stat.mockResolvedValue(createMockStats());
+
+    // Initialize mockWithKeyLock
+    mockWithKeyLock.mockImplementation(
+      async (key: string, fn: () => Promise<unknown>) => {
+        return await fn();
+      }
+    );
 
     mockRedis.get.mockResolvedValue(null);
     mockRedis.set.mockResolvedValue('OK');
