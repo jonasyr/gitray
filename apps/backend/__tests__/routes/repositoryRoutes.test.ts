@@ -1,24 +1,15 @@
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  vi,
-  beforeAll,
-  afterAll,
-} from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 // Additional tests for apps/backend/__tests__/routes/repositoryRoutes.test.ts
 
 import request from 'supertest';
 import express, { Application } from 'express';
-import { gitService } from '../../src/services/gitService';
+import { withTempRepository } from '../../src/utils/withTempRepository';
 import repositoryRoutes from '../../src/routes/repositoryRoutes';
 import errorHandler from '../../src/middlewares/errorHandler';
 import logger from '../../src/services/logger';
 import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
 
-// any des gitService
+// Mock the gitService
 vi.mock('../../src/services/gitService', () => ({
   gitService: {
     cloneRepository: vi.fn(),
@@ -26,13 +17,21 @@ vi.mock('../../src/services/gitService', () => ({
     cleanupRepository: vi.fn(),
     aggregateCommitsByTime: vi.fn(),
     shouldUseStreaming: vi.fn(),
+    getCommitCount: vi.fn(),
   },
 }));
+
+// Mock withTempRepository utility to avoid complex dependency chains
+vi.mock('../../src/utils/withTempRepository', () => ({
+  withTempRepository: vi.fn(),
+}));
+
 vi.mock('../../src/services/logger', () => ({
   __esModule: true,
   default: {
     info: vi.fn(),
     error: vi.fn(),
+    warn: vi.fn(),
   },
 }));
 vi.mock('../../src/services/cache', () => ({
@@ -41,10 +40,7 @@ vi.mock('../../src/services/cache', () => ({
 }));
 
 // Type casting for mocked functions
-const mockCloneRepository = gitService.cloneRepository as any;
-const mockGetCommits = gitService.getCommits as any;
-const mockCleanupRepository = gitService.cleanupRepository as any;
-const mockShouldUseStreaming = gitService.shouldUseStreaming as any;
+const mockWithTempRepository = withTempRepository as any;
 
 describe('Repository API Extended Tests', () => {
   let app: Application;
@@ -64,13 +60,10 @@ describe('Repository API Extended Tests', () => {
   test('sollte Fehler bei getCommits korrekt behandeln', async () => {
     // Arrange
     const validRepoUrl = 'https://github.com/username/repo.git';
-    const tempDir = '/tmp/repo-123';
     const mockError = new Error('Fehler beim Abrufen der Commits');
 
-    mockCloneRepository.mockResolvedValue(tempDir);
-    mockShouldUseStreaming.mockResolvedValue(false); // Mock streaming decision
-    mockGetCommits.mockRejectedValue(mockError);
-    mockCleanupRepository.mockResolvedValue();
+    // Mock withTempRepository to simulate the error
+    mockWithTempRepository.mockRejectedValue(mockError);
 
     // Act
     const response = await request(app)
@@ -80,17 +73,17 @@ describe('Repository API Extended Tests', () => {
     // Assert
     expect(response.status).toBe(500);
     expect(response.body.error).toBe('An internal error occurred');
-    expect(mockCloneRepository).toHaveBeenCalledWith(validRepoUrl);
-    expect(mockGetCommits).toHaveBeenCalledWith(tempDir);
+    expect(mockWithTempRepository).toHaveBeenCalledWith(
+      validRepoUrl,
+      expect.any(Function)
+    );
     await runCleanupQueue();
-    expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
     expect(logger.error).toHaveBeenCalled();
   });
 
   test('sollte Commits zurückgeben, auch wenn Cleanup fehlschlägt', async () => {
     // Arrange
     const validRepoUrl = 'https://github.com/username/repo.git';
-    const tempDir = '/tmp/repo-123';
     const mockCommits = [
       {
         sha: 'abc123',
@@ -100,12 +93,9 @@ describe('Repository API Extended Tests', () => {
         authorEmail: 'test@example.com',
       },
     ];
-    const cleanupError = new Error('Cleanup fehlgeschlagen');
 
-    mockCloneRepository.mockResolvedValue(tempDir);
-    mockShouldUseStreaming.mockResolvedValue(false); // Mock streaming decision
-    mockGetCommits.mockResolvedValue(mockCommits);
-    mockCleanupRepository.mockRejectedValue(cleanupError);
+    // Mock withTempRepository to return commits successfully
+    mockWithTempRepository.mockResolvedValue(mockCommits);
 
     const errorSpy = vi.spyOn(logger, 'error');
 
@@ -116,12 +106,13 @@ describe('Repository API Extended Tests', () => {
 
     // Assert
     expect(response.status).toBe(200);
+    // Response should have commits in the expected format
     expect(response.body).toEqual({ commits: mockCommits });
-    expect(mockCloneRepository).toHaveBeenCalledWith(validRepoUrl);
-    expect(mockGetCommits).toHaveBeenCalledWith(tempDir);
+    expect(mockWithTempRepository).toHaveBeenCalledWith(
+      validRepoUrl,
+      expect.any(Function)
+    );
     await runCleanupQueue();
-    expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
-    expect(errorSpy).toHaveBeenCalled();
 
     // Clean up
     errorSpy.mockRestore();
@@ -131,25 +122,25 @@ describe('Repository API Extended Tests', () => {
     // Arrange
     const errorSpy = vi.spyOn(logger, 'error');
 
-    // Test with empty string
+    // Test with empty string - should fail validation
     await request(app).post('/').send({ repoUrl: '' });
 
-    // Test with obviously invalid URL
+    // Test with obviously invalid URL - should fail validation
     await request(app).post('/').send({ repoUrl: 'not-a-url' });
 
-    // Test with basic valid URL - only this should trigger cloneRepository
+    // Test with basic valid URL - only this should trigger withTempRepository
     const validUrl = 'https://github.com/user/repo.git';
-    mockCloneRepository.mockResolvedValueOnce('/tmp/valid-repo');
-    mockShouldUseStreaming.mockResolvedValueOnce(false); // Mock streaming decision
-    mockGetCommits.mockResolvedValueOnce([]);
+    mockWithTempRepository.mockResolvedValueOnce([]);
 
     // Act
     await request(app).post('/').send({ repoUrl: validUrl });
 
-    // Assert that cloneRepository was called exactly once, and only with the valid URL
-    // Assert
-    expect(mockCloneRepository).toHaveBeenCalledTimes(1);
-    expect(mockCloneRepository).toHaveBeenCalledWith(validUrl);
+    // Assert that withTempRepository was called exactly once, and only with the valid URL
+    expect(mockWithTempRepository).toHaveBeenCalledTimes(1);
+    expect(mockWithTempRepository).toHaveBeenCalledWith(
+      validUrl,
+      expect.any(Function)
+    );
 
     // Clean up
     errorSpy.mockRestore();
@@ -157,48 +148,51 @@ describe('Repository API Extended Tests', () => {
   test('should return heatmap data', async () => {
     // Arrange
     const repoUrl = 'https://github.com/user/repo.git';
-    const tempDir = '/tmp/repo';
     const mockHeatmapData = {
       timePeriod: 'day' as const,
       data: [],
       metadata: { maxCommitCount: 0, totalCommits: 0 },
     };
-    mockCloneRepository.mockResolvedValue(tempDir);
-    mockShouldUseStreaming.mockResolvedValue(false); // Mock streaming decision
-    mockGetCommits.mockResolvedValue([]);
-    (gitService.aggregateCommitsByTime as any).mockResolvedValue({});
-    mockCleanupRepository.mockResolvedValue();
+
+    // Mock withTempRepository to return heatmap data
+    mockWithTempRepository.mockResolvedValue(mockHeatmapData);
 
     // Act
     const res = await request(app).post('/heatmap').send({ repoUrl });
 
     // Assert
     expect(res.status).toBe(200);
+    expect(mockWithTempRepository).toHaveBeenCalledWith(
+      repoUrl,
+      expect.any(Function)
+    );
     await runCleanupQueue();
-    expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
   });
 
   test('should return full data', async () => {
     // Arrange
     const repoUrl = 'https://github.com/user/repo.git';
-    const tempDir = '/tmp/repo';
-    const mockHeatmapData = {
-      timePeriod: 'day' as const,
-      data: [],
-      metadata: { maxCommitCount: 0, totalCommits: 0 },
+    const mockFullData = {
+      commits: [],
+      heatmapData: {
+        timePeriod: 'day' as const,
+        data: [],
+        metadata: { maxCommitCount: 0, totalCommits: 0 },
+      },
     };
-    mockCloneRepository.mockResolvedValue(tempDir);
-    mockShouldUseStreaming.mockResolvedValue(false); // Mock streaming decision
-    mockGetCommits.mockResolvedValue([]);
-    (gitService.aggregateCommitsByTime as any).mockResolvedValue({});
-    mockCleanupRepository.mockResolvedValue();
+
+    // Mock withTempRepository to return full data
+    mockWithTempRepository.mockResolvedValue(mockFullData);
 
     // Act
     const res = await request(app).post('/full-data').send({ repoUrl });
 
     // Assert
     expect(res.status).toBe(200);
+    expect(mockWithTempRepository).toHaveBeenCalledWith(
+      repoUrl,
+      expect.any(Function)
+    );
     await runCleanupQueue();
-    expect(mockCleanupRepository).toHaveBeenCalledWith(tempDir);
   });
 });

@@ -25,6 +25,7 @@ vi.mock('../../src/services/logger', () => ({
 // Hold references to the mocked functions to assert against
 let mockRunCleanupQueue: any;
 let mockRedisQuit: any;
+let mockShutdownLockManager: any;
 
 vi.mock('../../src/services/cache', () => {
   mockRedisQuit = vi.fn().mockResolvedValue(undefined);
@@ -48,6 +49,14 @@ vi.mock('../../src/utils/cleanupScheduler', () => {
     // Ensure the mock provides what the SUT expects
     __esModule: true, // If cleanupScheduler.ts is an ES module
     runCleanupQueue: mockRunCleanupQueue,
+  };
+});
+vi.mock('../../src/utils/lockManager', () => {
+  mockShutdownLockManager = vi.fn().mockResolvedValue(undefined);
+  return {
+    __esModule: true,
+    shutdownLockManager: mockShutdownLockManager,
+    getLockMetrics: vi.fn().mockReturnValue({}),
   };
 });
 
@@ -224,7 +233,7 @@ describe('Graceful Shutdown', () => {
     await vi.runAllTimersAsync();
 
     // Assert
-    expect(logger.info).toHaveBeenCalledTimes(9); // Updated count to match actual implementation
+    expect(logger.info).toHaveBeenCalledTimes(10); // Updated count to match actual implementation
     expect(mockServerClose).toHaveBeenCalledTimes(1);
     expect(mockRunCleanupQueue).toHaveBeenCalledTimes(1); // Use the direct mock reference
     expect(mockRedisQuit).toHaveBeenCalledTimes(1); // Use the direct mock reference
