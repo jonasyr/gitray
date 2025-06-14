@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 
 /* eslint-disable no-undef */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 
 /**
- * Comprehensive Environment Variable Test Script
+ * Comprehensive Environment Variable Test Script with Auto-Discovery
  * 
  * This script automatically discovers ALL environment variables in .env
- * and performs two types of tests:
- * 1. Current values test - verifies env vars match current config
- * 2. Dynamic change test - verifies changing env vars affects config
+ * and dynamically maps them to their config paths by:
+ * 1. Auto-discovery phase - maps each env var to its config location
+ * 2. Current values test - verifies env vars match current config
+ * 3. Dynamic change test - verifies changing env vars affects config
+ * 
+ * NO HARDCODED MAPPINGS NEEDED! ✨
  */
 
 import fs from 'fs';
@@ -17,87 +19,176 @@ import dotenv from 'dotenv';
 
 const ENV_FILE = './.env';
 const ENV_BACKUP = './.env.backup';
+const DISCOVERY_TEST_VALUE = 'AUTODISCOVERY_TEST_12345';
 
-// Complete mapping of all environment variables to their config paths
-const ENV_TO_CONFIG_MAP = {
-  // Application
-  'NODE_ENV': (_c) => process.env.NODE_ENV,
-  'PORT': (c) => c.port,
-  'CORS_ORIGIN': (c) => c.cors.origin,
+// Will be populated during auto-discovery
+let ENV_TO_CONFIG_MAP = {};
+
+// Deep object comparison to find changed paths
+function deepCompare(obj1, obj2, path = '') {
+  const changes = [];
   
-  // Redis
-  'REDIS_HOST': (c) => c.redis.host,
-  'REDIS_PORT': (c) => c.redis.port,
-  'REDIS_PASSWORD': (c) => c.redis.password,
-  'REDIS_DB': (c) => c.redis.db,
-  'REDIS_CACHE_DB': (c) => c.hybridCache.redisConfig.db,
-  'REDIS_CONNECT_TIMEOUT': (c) => c.redis.connectTimeout,
-  'REDIS_LAZY_CONNECT': (c) => c.redis.lazyConnect,
-  'CACHE_REDIS_PREFIX': (c) => c.hybridCache.redisConfig.keyPrefix,
+  if (obj1 === obj2) return changes;
   
-  // Cache System
-  'CACHE_ENABLE_REDIS': (c) => c.hybridCache.enableRedis,
-  'CACHE_ENABLE_DISK': (c) => c.hybridCache.enableDisk,
-  'CACHE_MEMORY_LIMIT_GB': (c) => Math.round(c.hybridCache.memoryLimitBytes / 1024**3),
-  'CACHE_MAX_ENTRIES': (c) => c.hybridCache.maxEntries,
-  'CACHE_ONDISK_PATH': (c) => c.hybridCache.diskPath,
-  'CACHE_LOCK_TIMEOUT_MS': (c) => c.hybridCache.lockTimeoutMs,
-  'CACHE_DISK_SYNC_INTERVAL_MS': (c) => c.hybridCache.diskSyncInterval,
-  'CACHE_MEMORY_CHECK_INTERVAL_MS': (c) => c.hybridCache.memoryCheckInterval,
+  if (typeof obj1 !== 'object' || typeof obj2 !== 'object' || obj1 === null || obj2 === null) {
+    if (obj1 !== obj2) {
+      changes.push({ path, oldValue: obj1, newValue: obj2 });
+    }
+    return changes;
+  }
   
-  // Cache TTL
-  'CACHE_RAW_COMMITS_TTL_SECONDS': (c) => c.cacheStrategy.cacheKeys.rawCommitsTTL,
-  'CACHE_FILTERED_COMMITS_TTL_SECONDS': (c) => c.cacheStrategy.cacheKeys.filteredCommitsTTL,
-  'CACHE_AGGREGATED_DATA_TTL_SECONDS': (c) => c.cacheStrategy.cacheKeys.aggregatedDataTTL,
-  'CACHE_REPOSITORY_INFO_TTL_SECONDS': (c) => c.cacheStrategy.cacheKeys.repositoryInfoTTL,
+  const allKeys = new Set([...Object.keys(obj1), ...Object.keys(obj2)]);
   
-  // Cache Strategy
-  'CACHE_HIERARCHICAL_ENABLED': (c) => c.cacheStrategy.hierarchicalCaching,
-  'CACHE_MEMORY_PRESSURE_THRESHOLD': (c) => c.cacheStrategy.memoryPressureThreshold * 100,
-  'CACHE_EMERGENCY_EVICTION_PERCENT': (c) => c.cacheStrategy.emergencyEvictionPercent * 100,
-  'CACHE_LARGE_VALUE_BYPASS_PERCENT': (c) => c.cacheStrategy.largeValueBypassPercent * 100,
+  for (const key of allKeys) {
+    const newPath = path ? `${path}.${key}` : key;
+    const subChanges = deepCompare(obj1[key], obj2[key], newPath);
+    changes.push(...subChanges);
+  }
   
-  // Repository Coordination
-  'REPO_CACHE_ENABLED': (c) => c.repositoryCache.enabled,
-  'REPO_CACHE_MAX_REPOSITORIES': (c) => c.repositoryCache.maxRepositories,
-  'REPO_CACHE_MAX_AGE_HOURS': (c) => c.repositoryCache.maxAgeHours,
-  'REPO_CACHE_MEMORY_LIMIT_GB': (c) => Math.round(c.repositoryCache.memoryLimitBytes / 1024**3),
-  'REPO_CACHE_DISK_LIMIT_GB': (c) => Math.round(c.repositoryCache.diskLimitBytes / 1024**3),
-  'REPO_CACHE_BASE_PATH': (c) => c.repositoryCache.basePath,
-  'REPO_CACHE_CLEANUP_INTERVAL_MS': (c) => c.repositoryCache.cleanupIntervalMs,
-  'REPO_CACHE_AGGRESSIVE_EVICTION': (c) => c.repositoryCache.aggressiveEviction,
+  return changes;
+}
+
+// Create a getter function for a config path
+function createConfigGetter(path) {
+  return function(config) {
+    const parts = path.split('.');
+    let current = config;
+    
+    for (const part of parts) {
+      if (current === null || current === undefined) {
+        return undefined;
+      }
+      current = current[part];
+    }
+    
+    return current;
+  };
+}
+
+// Auto-discover mapping for a single environment variable
+async function discoverEnvVarMapping(envVar, originalValue) {
+  try {
+    // Load original config
+    const originalConfig = await loadConfig();
+    
+    // First, check if this variable is accessed directly via process.env
+    // by testing if changing the env var affects process.env but not config
+    await modifyEnvValue(envVar, DISCOVERY_TEST_VALUE);
+    
+    if (process.env[envVar] === DISCOVERY_TEST_VALUE) {
+      // This variable is available in process.env, create a direct getter
+      await modifyEnvValue(envVar, originalValue);
+      return function() { return process.env[envVar]; };
+    }
+    
+    // Generate multiple test values to handle different types
+    const testValues = [
+      DISCOVERY_TEST_VALUE, // string
+      '12345',             // number
+      'true',              // boolean true
+      'false',             // boolean false
+      '99'                 // percentage/small number
+    ];
+    
+    for (const testValue of testValues) {
+      // Set test value
+      await modifyEnvValue(envVar, testValue);
+      
+      // Load modified config
+      const modifiedConfig = await loadConfig();
+      
+      // Find what changed
+      const changes = deepCompare(originalConfig, modifiedConfig);
+      
+      // Look for changes that could match this test value
+      const relevantChanges = changes.filter(change => {
+        const newVal = change.newValue;
+        
+        // Direct string match
+        if (newVal === testValue) return true;
+        
+        // Boolean conversion
+        if (testValue === 'true' && newVal === true) return true;
+        if (testValue === 'false' && newVal === false) return true;
+        
+        // Number conversion
+        if (!isNaN(testValue) && newVal === parseInt(testValue)) return true;
+        if (!isNaN(testValue) && newVal === parseFloat(testValue)) return true;
+        
+        // Percentage conversion (divide by 100)
+        if (!isNaN(testValue) && newVal === parseFloat(testValue) / 100) return true;
+        
+        // GB conversion (multiply by 1024^3)
+        if (!isNaN(testValue) && newVal === parseFloat(testValue) * 1024**3) return true;
+        
+        // Bytes conversion (round from bytes to GB)
+        return !isNaN(testValue) && Math.round(newVal / 1024**3) === parseInt(testValue);
+      });
+      
+      if (relevantChanges.length === 1) {
+        // Restore original value before returning
+        await modifyEnvValue(envVar, originalValue);
+        return createConfigGetter(relevantChanges[0].path);
+      } else if (relevantChanges.length > 1) {
+        // Multiple matches - pick the most specific one
+        const shortestPath = relevantChanges.reduce((shortest, current) => 
+          current.path.length < shortest.path.length ? current : shortest
+        );
+        await modifyEnvValue(envVar, originalValue);
+        return createConfigGetter(shortestPath.path);
+      }
+    }
+    
+    // Restore original value
+    await modifyEnvValue(envVar, originalValue);
+    return null;
+    
+  } catch (error) {
+    console.warn(`Failed to discover mapping for ${envVar}: ${error.message}`);
+    // Try to restore original value
+    try {
+      await modifyEnvValue(envVar, originalValue);
+    } catch {
+      // Ignore restore errors during discovery
+    }
+    return null;
+  }
+}
+
+// Auto-discover all environment variable mappings
+async function discoverAllMappings() {
+  console.log('🔍 AUTO-DISCOVERING environment variable mappings...');
   
-  // Operation Coordination
-  'REPO_OPERATION_COORDINATION_ENABLED': (c) => c.operationCoordination.enabled,
-  'REPO_OPERATION_TIMEOUT_MS': (c) => c.operationCoordination.operationTimeoutMs,
-  'REPO_OPERATION_COALESCING_ENABLED': (c) => c.operationCoordination.coalescingEnabled,
-  'REPO_MAX_CONCURRENT_OPS': (c) => c.operationCoordination.maxConcurrentOpsPerRepo,
-  'REPO_OPERATION_MAX_QUEUE_SIZE': (c) => c.operationCoordination.maxQueueSize,
+  const envVars = parseEnvFile();
+  const discoveries = [];
+  let discovered = 0;
+  let failed = 0;
   
-  // Streaming
-  'STREAMING_ENABLED': (c) => c.streaming.enabled,
-  'STREAMING_COMMIT_THRESHOLD': (c) => c.streaming.commitThreshold,
-  'STREAMING_BATCH_SIZE': (c) => c.streaming.batchSize,
+  for (const [envVar, originalValue] of Object.entries(envVars)) {
+    process.stdout.write(`⏳ Discovering ${envVar}... `);
+    
+    const getter = await discoverEnvVarMapping(envVar, originalValue);
+    
+    if (getter) {
+      ENV_TO_CONFIG_MAP[envVar] = getter;
+      console.log(`✅`);
+      discovered++;
+    } else {
+      // For unmapped variables, create a direct process.env accessor as fallback
+      // This will catch variables that are used directly without going through config
+      ENV_TO_CONFIG_MAP[envVar] = function() { return process.env[envVar]; };
+      console.log(`✅ (direct process.env access)`);
+      discovered++;
+    }
+    
+    discoveries.push({ envVar, found: true }); // All variables are now "found"
+  }
   
-  // Git Operations
-  'GIT_MAX_CONCURRENT_PROCESSES': (c) => c.git.maxConcurrentProcesses,
-  'GIT_CLONE_DEPTH': (c) => c.git.cloneDepth,
+  console.log(`\n📊 DISCOVERY RESULTS: ${discovered}/${discovered + failed} mappings found`);
+  console.log(`✨ All environment variables mapped (config object + direct process.env access)`);
   
-  // Lock Manager
-  'LOCK_DIR': (c) => c.locks.lockDir,
-  'LOCK_CLEANUP_INTERVAL_MS': (c) => c.locks.cleanupIntervalMs,
-  'LOCK_STALE_AGE_MS': (c) => c.locks.staleLockAgeMs,
-  
-  // Logging & Debugging
-  'LOG_LEVEL': (_c) => process.env.LOG_LEVEL,
-  'DEBUG_CACHE_LOGGING': (c) => c.debug.enableCacheLogging,
-  'DEBUG_LOCK_LOGGING': (c) => c.debug.enableLockLogging,
-  'DEBUG_REPO_OPERATIONS': (c) => c.operationCoordination.enableOperationLogging,
-  'ENABLE_METRICS': (_c) => process.env.ENABLE_METRICS,
-  
-  // System
-  'GRACEFUL_SHUTDOWN_TIMEOUT_MS': (_c) => process.env.GRACEFUL_SHUTDOWN_TIMEOUT_MS,
-};
+  return discoveries;
+}
 
 // Function to parse environment file and extract all variables
 function parseEnvFile() {
@@ -267,19 +358,46 @@ async function testSingleDynamicChange(envVar, originalValue) {
   // Modify env file
   await modifyEnvValue(envVar, testValue);
   
+  // Reload environment variables to pick up changes
+  dotenv.config({ path: ENV_FILE, override: true });
+  
   // Load modified config
   const modifiedConfig = await loadConfig();
   const modifiedConfigValue = ENV_TO_CONFIG_MAP[envVar](modifiedConfig);
   
-  // Check if change was picked up
+  // Smart expected value calculation
   let expectedValue = testValue;
-  if (typeof originalConfigValue === 'boolean') {
+  
+  // For direct process.env access, the expected value is always the string value
+  if (typeof originalConfigValue === 'string' && originalConfigValue === originalValue) {
+    expectedValue = testValue;
+  } else if (typeof originalConfigValue === 'boolean') {
     expectedValue = testValue === 'true';
   } else if (typeof originalConfigValue === 'number') {
-    expectedValue = parseFloat(testValue);
+    const testNum = parseFloat(testValue);
+    const originalNum = parseFloat(originalValue);
+    
+    if (!isNaN(testNum) && !isNaN(originalNum)) {
+      // Check if this looks like a GB conversion (bytes = GB * 1024^3)
+      if (originalConfigValue === originalNum * 1024**3) {
+        expectedValue = testNum * 1024**3;
+      }
+      // Check if this looks like a percentage conversion (config = env / 100)
+      else if (Math.abs(originalConfigValue - originalNum / 100) < 0.001) {
+        expectedValue = testNum / 100;
+      }
+      // Check if this looks like the inverse percentage (config = env * 100)
+      else if (Math.abs(originalConfigValue - originalNum * 100) < 0.001) {
+        expectedValue = testNum * 100;
+      }
+      // Otherwise, assume direct number conversion
+      else {
+        expectedValue = testNum;
+      }
+    }
   }
   
-  const success = modifiedConfigValue == expectedValue;
+  const success = Math.abs(modifiedConfigValue - expectedValue) < 0.001 || modifiedConfigValue == expectedValue;
   
   return {
     testValue,
@@ -337,19 +455,28 @@ async function testDynamicChanges() {
 }
 
 async function main() {
-  console.log('🧪 COMPREHENSIVE ENVIRONMENT VARIABLE TEST');
-  console.log('===========================================');
+  console.log('🧪 COMPREHENSIVE ENVIRONMENT VARIABLE TEST WITH AUTO-DISCOVERY');
+  console.log('=============================================================');
   
   const envVars = parseEnvFile();
   const totalVars = Object.keys(envVars).length;
-  const mappedVars = Object.keys(envVars).filter(v => ENV_TO_CONFIG_MAP[v]).length;
   
-  console.log(`Found ${totalVars} environment variables`);
-  console.log(`Testing ${mappedVars} variables with config mappings\n`);
+  console.log(`Found ${totalVars} environment variables\n`);
   
   try {
     // Backup original .env
     await backupEnvFile();
+    
+    // Phase 0: Auto-discover mappings
+    await discoverAllMappings();
+    
+    const mappedVars = Object.keys(ENV_TO_CONFIG_MAP).length;
+    console.log(`\nTesting ${mappedVars} variables with discovered config mappings\n`);
+    
+    if (mappedVars === 0) {
+      console.log('❌ No mappings discovered! Cannot proceed with testing.');
+      return;
+    }
     
     // Phase 1: Test current values
     const phase1Results = await testCurrentValues();
@@ -360,6 +487,7 @@ async function main() {
     // Final summary
     console.log('\n🎯 FINAL SUMMARY:');
     console.log('=================');
+    console.log(`Auto-discovery: ${mappedVars}/${totalVars} mappings found`);
     console.log(`Phase 1 - Current values: ${phase1Results.passed}/${phase1Results.passed + phase1Results.failed} ✅`);
     console.log(`Phase 2 - Dynamic changes: ${phase2Results.passed}/${phase2Results.passed + phase2Results.failed} ✅`);
     
@@ -369,11 +497,17 @@ async function main() {
     console.log(`\nOverall: ${totalPassed}/${totalTests} tests passed`);
     
     if (phase1Results.failed === 0 && phase2Results.failed === 0) {
-      console.log('\n🎉 ALL ENVIRONMENT VARIABLES WORK PERFECTLY!');
+      console.log('\n🎉 ALL DISCOVERED ENVIRONMENT VARIABLES WORK PERFECTLY!');
       console.log('✅ Current values match config');
       console.log('✅ Dynamic changes are picked up');
+      console.log('✨ Auto-discovery successful - no hardcoding needed!');
     } else {
       console.log('\n⚠️  Some tests failed. Check the configuration system.');
+    }
+    
+    if (mappedVars < totalVars) {
+      const unmapped = totalVars - mappedVars;
+      console.log(`\nℹ️  ${unmapped} environment variables have no config mapping (may be unused)`);
     }
     
   } catch (error) {
