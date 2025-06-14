@@ -725,6 +725,76 @@ describe('Startup Environment Validation', () => {
 
     errorSpy.mockRestore();
   });
+
+  test('should use default port when environment variable is not set', async () => {
+    // Arrange
+    delete process.env.PORT;
+
+    // Act - Import config to check default port
+    const { config } = await import('../src/config');
+
+    // Assert - Should use default port 3001
+    expect(config.port).toBe(3001);
+  });
+});
+
+describe('Server Error Handling', () => {
+  test('should create server successfully', async () => {
+    // Act
+    await import('../src/index');
+
+    // Assert - Check that express app was created and listen was called
+    expect(lastMockApp.listen).toHaveBeenCalled();
+  });
+
+  test('should register middleware', async () => {
+    // Act
+    await import('../src/index');
+
+    // Assert - Check that middleware was registered
+    expect(lastMockApp.use).toHaveBeenCalled();
+  });
+});
+
+describe('Coordination Health Endpoint', () => {
+  test('should register health coordination endpoint', async () => {
+    // Act
+    await import('../src/index');
+
+    // Assert - Check that the coordination health endpoint was registered
+    expect(lastMockApp.get).toHaveBeenCalledWith(
+      '/health/coordination',
+      expect.any(Function)
+    );
+  });
+
+  test('should handle coordination health endpoint when disabled', async () => {
+    // Act
+    await import('../src/index');
+
+    // Get the coordination handler
+    const coordinationHandler = lastMockApp.get.mock.calls.find(
+      (call: any) => call[0] === '/health/coordination'
+    )?.[1];
+
+    expect(coordinationHandler).toBeDefined();
+
+    // Test the endpoint handler
+    const mockReq = {};
+    const mockRes = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+
+    await coordinationHandler(mockReq, mockRes);
+
+    // Assert
+    expect(mockRes.status).toHaveBeenCalledWith(200);
+    expect(mockRes.json).toHaveBeenCalledWith({
+      status: 'disabled',
+      message: 'Repository coordination is disabled',
+    });
+  });
 });
 
 // Export lastMockApp for use in tests
