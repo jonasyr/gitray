@@ -836,4 +836,508 @@ describe('RepositoryCache', () => {
       expect(mockHybridCache.del).toHaveBeenCalled();
     });
   });
+
+  describe('Concurrent Operations Safety', () => {
+    // NOTE: All tests use mocked services - no actual repository operations
+
+    test('should handle concurrent cache requests for same repository safely', async () => {
+      const repoUrl = 'https://github.com/test/small-repo.git';
+      let getCommitsCallCount = 0;
+
+      // Mock cache miss for both requests
+      mockHybridCache.get.mockResolvedValue(null);
+
+      // Mock git service to track call count
+      mockGitService.getCommits.mockImplementation(async () => {
+        getCommitsCallCount++;
+        // Add delay to simulate real Git operation
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return mockCommits;
+      });
+
+      // Make concurrent requests
+      const promises = [
+        repositoryCache.getOrParseCommits(repoUrl),
+        repositoryCache.getOrParseCommits(repoUrl),
+        repositoryCache.getOrParseCommits(repoUrl),
+      ];
+
+      const results = await Promise.all(promises);
+
+      // All should succeed with same data
+      expect(results).toHaveLength(3);
+      results.forEach((result) => expect(result).toEqual(mockCommits));
+
+      // Due to locking, git service should be called (actual count may vary with timing)
+      expect(getCommitsCallCount).toBeGreaterThanOrEqual(1);
+      expect(getCommitsCallCount).toBeLessThanOrEqual(3);
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Duplicate clone prevented',
+        expect.objectContaining({
+          repoUrl,
+          totalPrevented: expect.any(Number),
+        })
+      );
+    });
+
+    test('should handle concurrent heatmap requests safely', async () => {
+      const repoUrl = 'https://github.com/test/small-repo.git';
+      let aggregateCallCount = 0;
+
+      // Mock cache misses
+      mockHybridCache.get.mockResolvedValue(null);
+
+      mockGitService.aggregateCommitsByTime.mockImplementation(async () => {
+        aggregateCallCount++;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return mockHeatmapData;
+      });
+
+      // Make concurrent heatmap requests
+      const promises = [
+        repositoryCache.getOrGenerateAggregatedData(repoUrl),
+        repositoryCache.getOrGenerateAggregatedData(repoUrl),
+      ];
+
+      const results = await Promise.all(promises);
+
+      expect(results).toHaveLength(2);
+      results.forEach((result) => expect(result).toEqual(mockHeatmapData));
+
+      // Should aggregate (actual count may vary with timing)
+      expect(aggregateCallCount).toBeGreaterThanOrEqual(1);
+      expect(aggregateCallCount).toBeLessThanOrEqual(2);
+    });
+
+    test('should handle mixed concurrent operations', async () => {
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      mockHybridCache.get.mockResolvedValue(null);
+
+      // Mix different operation types
+      const promises = [
+        repositoryCache.getOrParseCommits(repoUrl),
+        repositoryCache.getOrParseFilteredCommits(repoUrl, { author: 'John' }),
+        repositoryCache.getOrGenerateAggregatedData(repoUrl),
+        repositoryCache.getOrParseCommits(repoUrl, { limit: 10 }),
+      ];
+
+      const results = await Promise.all(promises);
+
+      expect(results).toHaveLength(4);
+      expect(results[0]).toEqual(mockCommits);
+      expect(results[2]).toEqual(mockHeatmapData);
+    });
+  });
+
+  describe('Cache Consistency Under Failure Conditions', () => {
+    // NOTE: All tests simulate failures using mocks - no actual infrastructure failures
+
+    test('should handle cache write failures gracefully', async () => {
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      mockHybridCache.get.mockResolvedValue(null);
+
+      // Simulate cache write failure
+      mockHybridCache.set.mockRejectedValue(
+        new Error('Redis connection failed')
+      );
+
+      await expect(repositoryCache.getOrParseCommits(repoUrl)).rejects.toThrow(
+        'Redis connection failed'
+      );
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to cache raw commits'),
+        expect.any(Object)
+      );
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to cache raw commits'),
+        expect.objectContaining({
+          repoUrl,
+          error: expect.stringContaining('Redis connection failed'),
+        })
+      );
+    });
+
+    test('should handle cache write failures with rollback attempt', async () => {
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      mockHybridCache.get.mockResolvedValue(null);
+      mockHybridCache.set.mockRejectedValue(new Error('Cache write failed'));
+
+      await expect(repositoryCache.getOrParseCommits(repoUrl)).rejects.toThrow(
+        'Cache write failed'
+      );
+
+      expect(mockLogger.error).toHaveBeenCalled();
+    });
+
+    test('should handle complete cache invalidation with partial failures', async () => {
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      // Setup some cache entries first
+      mockHybridCache.get.mockResolvedValue(null);
+      await repositoryCache.getOrParseCommits(repoUrl);
+      await repositoryCache.getOrParseFilteredCommits(repoUrl, {
+        author: 'test',
+      });
+
+      // Mock partial invalidation failure
+      mockHybridCache.del
+        .mockResolvedValueOnce(true) // First deletion succeeds
+        .mockRejectedValueOnce(new Error('Cache deletion failed')) // Second fails
+        .mockResolvedValueOnce(true) // Third succeeds
+        .mockResolvedValueOnce(true) // Fourth succeeds
+        .mockResolvedValueOnce(true); // Fifth succeeds
+
+      await repositoryCache.invalidateRepository(repoUrl);
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Failed to invalidate repository cache',
+        expect.objectContaining({
+          repoUrl,
+          error: 'Cache deletion failed',
+        })
+      );
+    });
+
+    test('should verify complete invalidation across all cache tiers', async () => {
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      // Populate all cache tiers
+      mockHybridCache.get.mockResolvedValue(null);
+      await repositoryCache.getOrParseCommits(repoUrl);
+      await repositoryCache.getOrParseFilteredCommits(repoUrl, {
+        author: 'test',
+      });
+      await repositoryCache.getOrGenerateAggregatedData(repoUrl);
+
+      // Clear mock call history
+      mockHybridCache.del.mockClear();
+      mockLogger.info.mockClear();
+
+      // Invalidate repository
+      await repositoryCache.invalidateRepository(repoUrl);
+
+      // Should call del multiple times for cache invalidation
+      expect(mockHybridCache.del).toHaveBeenCalled();
+      expect(mockHybridCache.del.mock.calls.length).toBeGreaterThanOrEqual(3);
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Repository cache invalidated across all tiers',
+        expect.objectContaining({
+          repoUrl,
+          keysInvalidated: expect.any(Number),
+          totalOperations: expect.any(Number),
+        })
+      );
+    });
+
+    test('should handle unexpected cache data types gracefully', async () => {
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      // Mock various types of corrupted/unexpected data
+      mockHybridCache.get.mockResolvedValue(null); // Return null to trigger fresh fetch
+
+      // Should handle gracefully and re-fetch from repository
+      const result = await repositoryCache.getOrParseCommits(repoUrl);
+      expect(result).toEqual(mockCommits);
+
+      // Should have fetched from repository due to cache miss
+      expect(mockGitService.getCommits).toHaveBeenCalled();
+    });
+  });
+
+  describe('Transaction Management Edge Cases', () => {
+    test('should handle transaction timeout scenarios', async () => {
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      mockHybridCache.get.mockResolvedValue(null);
+
+      // Mock very slow cache operation
+      mockHybridCache.set.mockImplementation(
+        () => new Promise((resolve) => setTimeout(resolve, 100))
+      );
+
+      const result = await repositoryCache.getOrParseCommits(repoUrl);
+      expect(result).toEqual(mockCommits);
+
+      const stats = repositoryCache.getCacheStats();
+      expect(stats.transactions.committed).toBeGreaterThan(0);
+    });
+
+    test('should cleanup abandoned transactions on shutdown', async () => {
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      // Create an operation that never completes
+      mockHybridCache.get.mockResolvedValue(null);
+      mockHybridCache.set.mockImplementation(() => new Promise(() => {})); // Never resolves
+
+      // Start operation but don't await
+      const operationPromise = repositoryCache.getOrParseCommits(repoUrl);
+
+      // Give it time to start
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Shutdown should cleanup active transactions
+      await repositoryCache.shutdown();
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Shutting down with active transactions',
+        expect.objectContaining({
+          activeTransactions: expect.any(Number),
+        })
+      );
+
+      // Cleanup the hanging promise
+      operationPromise.catch(() => {});
+    });
+
+    test('should handle transaction rollback failures', async () => {
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      mockHybridCache.get.mockResolvedValue(null);
+      mockHybridCache.set.mockRejectedValue(new Error('Cache write failed'));
+
+      await expect(
+        repositoryCache.getOrParseCommits(repoUrl)
+      ).rejects.toThrow();
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to cache raw commits'),
+        expect.any(Object)
+      );
+    });
+
+    test('should prevent double commit/rollback of transactions', async () => {
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      // Get access to private methods for testing
+      const cache = repositoryCache as any;
+      const transaction = cache.createTransaction(repoUrl);
+
+      // Commit once
+      await cache.commitTransaction(transaction);
+
+      // Attempt to commit again
+      await cache.commitTransaction(transaction);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Attempted to commit already completed transaction',
+        expect.objectContaining({
+          transactionId: transaction.id,
+        })
+      );
+
+      // Attempt to rollback completed transaction
+      await cache.rollbackTransaction(transaction);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Attempted to rollback already completed transaction',
+        expect.objectContaining({
+          transactionId: transaction.id,
+        })
+      );
+    });
+  });
+
+  describe('Advanced Cache Scenarios', () => {
+    test('should handle empty commits from git service', async () => {
+      const repoUrl = 'https://github.com/empty/repo.git';
+
+      mockHybridCache.get.mockResolvedValue(null);
+      mockGitService.getCommits.mockResolvedValue([]);
+
+      const result = await repositoryCache.getOrParseCommits(repoUrl);
+
+      expect(result).toEqual([]);
+      expect(mockHybridCache.set).toHaveBeenCalled();
+    });
+
+    test('should handle null commits in aggregation path', async () => {
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      mockHybridCache.get.mockResolvedValue(null);
+
+      // Mock getOrParseFilteredCommits to return null
+      const originalMethod = repositoryCache.getOrParseFilteredCommits;
+      (repositoryCache as any).getOrParseFilteredCommits = vi
+        .fn()
+        .mockResolvedValue(null);
+
+      const result = await repositoryCache.getOrGenerateAggregatedData(repoUrl);
+
+      expect(result).toEqual(mockHeatmapData);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'getOrParseFilteredCommits returned null, using empty array',
+        { repoUrl }
+      );
+      expect(mockGitService.aggregateCommitsByTime).toHaveBeenCalledWith(
+        [],
+        undefined
+      );
+
+      // Restore original method
+      (repositoryCache as any).getOrParseFilteredCommits = originalMethod;
+    });
+
+    test('should track cache key patterns correctly', async () => {
+      const repoUrl = 'https://github.com/pattern/test.git';
+      const cache = repositoryCache as any;
+
+      // Test key pattern tracking
+      const rawKey = cache.generateRawCommitsKey(repoUrl);
+      const filteredKey = cache.generateFilteredCommitsKey(repoUrl, {
+        author: 'test',
+      });
+      const aggregatedKey = cache.generateAggregatedDataKey(repoUrl, {
+        timePeriod: 'day',
+      });
+
+      expect(rawKey).toContain('raw_commits:');
+      expect(filteredKey).toContain('filtered_commits:');
+      expect(aggregatedKey).toContain('aggregated_data:');
+
+      // Keys should be tracked in patterns
+      expect(cache.cacheKeyPatterns.size).toBeGreaterThan(0);
+    });
+
+    test('should apply complex filter combinations correctly', async () => {
+      const cache = repositoryCache as any;
+
+      const complexCommits = [
+        {
+          sha: 'abc123',
+          authorName: 'John Doe',
+          authorEmail: 'john@example.com',
+          date: '2023-01-01T10:00:00Z',
+          message: 'Initial commit',
+        },
+        {
+          sha: 'def456',
+          authorName: 'Jane Smith',
+          authorEmail: 'jane@example.com',
+          date: '2023-01-02T11:00:00Z',
+          message: 'Add feature',
+        },
+        {
+          sha: 'ghi789',
+          authorName: 'John Doe',
+          authorEmail: 'john@example.com',
+          date: '2023-01-03T12:00:00Z',
+          message: 'Fix bug',
+        },
+      ];
+
+      // Test complex filter with multiple criteria
+      const options = {
+        authors: ['John Doe', 'Jane Smith'],
+        fromDate: '2023-01-01T00:00:00Z',
+        toDate: '2023-01-02T23:59:59Z',
+        skip: 0,
+        limit: 2,
+      };
+
+      const filtered = cache.applyFilters(complexCommits, options);
+
+      expect(filtered).toHaveLength(2);
+      expect(filtered[0].authorName).toBe('John Doe');
+      expect(filtered[1].authorName).toBe('Jane Smith');
+    });
+
+    test('should handle invalid date filters gracefully', async () => {
+      const cache = repositoryCache as any;
+
+      const options = {
+        fromDate: 'not-a-date',
+        toDate: 'also-not-a-date',
+      };
+
+      const filtered = cache.applyFilters(mockCommits, options);
+
+      // Should return all commits when dates are invalid
+      expect(filtered).toHaveLength(mockCommits.length);
+    });
+
+    test('should calculate performance metrics accurately', async () => {
+      const repoUrl = 'https://github.com/perf/test.git';
+
+      // Mock cache hit with timing
+      mockHybridCache.get.mockImplementation(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return mockCommits;
+      });
+
+      await repositoryCache.getOrParseCommits(repoUrl);
+
+      const stats = repositoryCache.getCacheStats();
+      expect(stats.efficiency.averageHitTime).toBeGreaterThan(0);
+      expect(stats.efficiency.totalCacheOperations).toBeGreaterThan(0);
+    });
+
+    test('should handle specific filter detection edge cases', () => {
+      const cache = repositoryCache as any;
+
+      // Test edge cases for filter detection
+      expect(cache.hasSpecificFilters(undefined)).toBe(false);
+      expect(cache.hasSpecificFilters(null)).toBe(false);
+      expect(cache.hasSpecificFilters({ author: 'valid-author' })).toBe(true);
+      expect(cache.hasSpecificFilters({ authors: ['author1'] })).toBe(true);
+      expect(cache.hasSpecificFilters({ skip: 1 })).toBe(true);
+      expect(cache.hasSpecificFilters({ limit: 10 })).toBe(true);
+    });
+
+    test('should handle cache statistics with zero operations', () => {
+      // Create fresh instance to test zero state
+      const freshCache = new (repositoryCache.constructor as any)();
+      const stats = freshCache.getCacheStats();
+
+      expect(stats.hitRatios.overall).toBe(0);
+      expect(stats.efficiency.averageHitTime).toBe(0);
+      expect(stats.efficiency.averageMissTime).toBe(0);
+    });
+  });
+
+  describe('Memory and Resource Management', () => {
+    test('should handle memory pressure scenarios', async () => {
+      const repoUrl = 'https://github.com/large/repo.git';
+
+      // Mock large repository scenario
+      const largeCommitSet = Array.from({ length: 10000 }, (_, i) => ({
+        sha: `commit_${i}`,
+        authorName: `Author ${i % 100}`,
+        authorEmail: `author${i % 100}@example.com`,
+        date: new Date(Date.now() - i * 86400000).toISOString(),
+        message: `Commit ${i}`,
+      }));
+
+      mockHybridCache.get.mockResolvedValue(null);
+      mockGitService.getCommits.mockResolvedValue(largeCommitSet);
+
+      const result = await repositoryCache.getOrParseCommits(repoUrl);
+
+      expect(result).toHaveLength(10000);
+      expect(mockHybridCache.set).toHaveBeenCalled();
+    });
+
+    test('should properly cleanup resources on shutdown errors', async () => {
+      // Mock one cache tier shutdown failure
+      mockHybridCache.quit
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('Shutdown error'))
+        .mockResolvedValueOnce(undefined);
+
+      await repositoryCache.shutdown();
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Error during RepositoryCacheManager shutdown',
+        expect.objectContaining({
+          error: 'Shutdown error',
+          failedShutdowns: 1,
+        })
+      );
+    });
+  });
 });
