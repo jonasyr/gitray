@@ -103,12 +103,8 @@ vi.mock('../../src/utils/lockManager', () => ({
 }));
 vi.mock('../../src/services/logger', () => ({
   __esModule: true,
-  default: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  },
+  default: global.mockLogger,
+  getLogger: global.getLogger,
 }));
 
 // Import after mocking

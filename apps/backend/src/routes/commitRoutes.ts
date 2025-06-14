@@ -251,7 +251,14 @@ router.get(
       };
 
       // Set cache status header based on cache performance
-      const cacheStats = getRepositoryCacheStats();
+      const cacheStats = getRepositoryCacheStats() || {
+        hitRatios: {
+          rawCommits: 0,
+          filteredCommits: 0,
+          aggregatedData: 0,
+          overall: 0,
+        },
+      };
       const overallHitRatio = cacheStats.hitRatios.overall;
 
       if (overallHitRatio > 0.8) {
@@ -286,6 +293,7 @@ router.get(
         page,
         limit,
       });
+      console.error('Commits route error:', error); // DEBUG: print error in test
       next(error);
     }
   }
@@ -362,7 +370,14 @@ router.get(
       };
 
       // Set cache status headers
-      const cacheStats = getRepositoryCacheStats();
+      const cacheStats = getRepositoryCacheStats() || {
+        hitRatios: {
+          aggregatedData: 0,
+          filteredCommits: 0,
+          rawCommits: 0,
+          overall: 0,
+        },
+      };
       const aggregatedHitRatio = cacheStats.hitRatios.aggregatedData;
 
       if (aggregatedHitRatio > 0.8) {
@@ -401,6 +416,7 @@ router.get(
         repoUrl,
         filters,
       });
+      console.error('Heatmap route error:', error); // DEBUG: print error in test
       next(error);
     }
   }

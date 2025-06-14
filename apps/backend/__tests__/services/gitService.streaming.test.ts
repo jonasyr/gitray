@@ -1,7 +1,6 @@
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import simpleGit from 'simple-git';
 import { gitService } from '../../src/services/gitService';
-import logger from '../../src/services/logger';
 import redis from '../../src/services/cache';
 import { config } from '../../src/config';
 
@@ -9,12 +8,8 @@ vi.mock('simple-git');
 vi.mock('ioredis');
 vi.mock('../../src/services/logger', () => ({
   __esModule: true,
-  default: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-    debug: vi.fn(),
-  },
+  default: global.mockLogger,
+  getLogger: global.getLogger,
 }));
 
 vi.mock('../../src/services/cache', () => ({
@@ -34,9 +29,9 @@ describe('GitService Streaming Functionality', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (simpleGit as any).mockReturnValue(mockGit);
-    vi.spyOn(logger, 'info').mockReset();
-    vi.spyOn(logger, 'warn').mockReset();
-    vi.spyOn(logger, 'debug').mockReset();
+    vi.spyOn(global.mockLogger, 'info').mockReset();
+    vi.spyOn(global.mockLogger, 'warn').mockReset();
+    vi.spyOn(global.mockLogger, 'debug').mockReset();
     (redis.get as any).mockResolvedValue(null);
     (redis.set as any).mockResolvedValue('OK');
     (redis.del as any).mockResolvedValue(1);
@@ -132,7 +127,7 @@ describe('GitService Streaming Functionality', () => {
 
       // Assert
       expect(shouldStream).toBe(false);
-      expect(logger.warn).toHaveBeenCalled();
+      expect(global.mockLogger.warn).toHaveBeenCalled();
     });
   });
 
@@ -283,7 +278,7 @@ describe('GitService Streaming Functionality', () => {
       }
 
       // Assert
-      expect(logger.warn).toHaveBeenCalledWith(
+      expect(global.mockLogger.warn).toHaveBeenCalledWith(
         'High memory usage detected during streaming',
         expect.objectContaining({
           memoryMB: 600,
@@ -320,7 +315,7 @@ describe('GitService Streaming Functionality', () => {
       // Assert
       expect(batches).toHaveLength(1); // Only successful batch
       expect(batches[0][0].sha).toBe('def456');
-      expect(logger.error).toHaveBeenCalledWith(
+      expect(global.mockLogger.error).toHaveBeenCalledWith(
         expect.stringContaining('Error processing batch'),
         expect.any(Object)
       );
@@ -381,7 +376,7 @@ describe('GitService Streaming Functionality', () => {
 
       // Assert
       expect(retrieved).toBeNull();
-      expect(logger.warn).toHaveBeenCalledWith(
+      expect(global.mockLogger.warn).toHaveBeenCalledWith(
         'Failed to get resume state',
         expect.any(Object)
       );
@@ -408,7 +403,7 @@ describe('GitService Streaming Functionality', () => {
       // Assert
       expect(commits).toHaveLength(1);
       expect(commits[0].sha).toBe('abc123');
-      expect(logger.info).toHaveBeenCalledWith(
+      expect(global.mockLogger.info).toHaveBeenCalledWith(
         'Using original getCommits for small repository'
       );
     });
@@ -434,7 +429,7 @@ describe('GitService Streaming Functionality', () => {
       // Assert
       expect(commits).toHaveLength(1);
       expect(commits[0].sha).toBe('abc123');
-      expect(logger.info).toHaveBeenCalledWith(
+      expect(global.mockLogger.info).toHaveBeenCalledWith(
         'Using streaming getCommits for large repository'
       );
     });

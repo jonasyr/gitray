@@ -6,9 +6,8 @@ import {
   vi,
   type MockInstance,
 } from 'vitest';
-import actualLogger from '../../src/services/logger'; // Import to get the type, but we'll use the mock
 
-// any ioredis and logger
+// Mock ioredis and logger
 const mockRedisInstance = {
   on: vi.fn(),
   get: vi.fn(),
@@ -63,13 +62,17 @@ vi.mock('../../src/config', () => ({
   },
 }));
 
+const mockLogger = {
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+};
+
 vi.mock('../../src/services/logger', () => ({
   __esModule: true,
-  default: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
+  default: mockLogger,
+  getLogger: vi.fn(() => mockLogger),
 }));
 
 // Mock HybridLRUCache

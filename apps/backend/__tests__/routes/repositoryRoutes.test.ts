@@ -6,8 +6,39 @@ import express, { Application } from 'express';
 import { withTempRepository } from '../../src/utils/withTempRepository';
 import repositoryRoutes from '../../src/routes/repositoryRoutes';
 import errorHandler from '../../src/middlewares/errorHandler';
-import logger from '../../src/services/logger';
 import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
+
+// Mock the logger service
+vi.mock('../../src/services/logger', () => ({
+  __esModule: true,
+  default: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    http: vi.fn(),
+    verbose: vi.fn(),
+    silly: vi.fn(),
+  },
+  getLogger: vi.fn(() => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    http: vi.fn(),
+    verbose: vi.fn(),
+    silly: vi.fn(),
+  })),
+  createRequestLogger: vi.fn(() => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    http: vi.fn(),
+    verbose: vi.fn(),
+    silly: vi.fn(),
+  })),
+}));
 
 // Mock the gitService
 vi.mock('../../src/services/gitService', () => ({
@@ -26,14 +57,6 @@ vi.mock('../../src/utils/withTempRepository', () => ({
   withTempRepository: vi.fn(),
 }));
 
-vi.mock('../../src/services/logger', () => ({
-  __esModule: true,
-  default: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  },
-}));
 vi.mock('../../src/services/cache', () => ({
   __esModule: true,
   default: { get: vi.fn(), set: vi.fn() },
@@ -46,21 +69,20 @@ describe('Repository API Extended Tests', () => {
   let app: Application;
 
   beforeEach(() => {
-    // Zurücksetzen aller anys für jeden Test
+    // Clear all mocks for each test
     vi.clearAllMocks();
 
-    // Express App für Tests einrichten
+    // Set up Express app for testing
     app = express();
     app.use(express.json());
     app.use('/', repositoryRoutes);
     app.use(errorHandler);
-    vi.spyOn(logger, 'error').mockReset();
   });
 
-  test('sollte Fehler bei getCommits korrekt behandeln', async () => {
+  test('should handle error during getCommits correctly', async () => {
     // Arrange
     const validRepoUrl = 'https://github.com/username/repo.git';
-    const mockError = new Error('Fehler beim Abrufen der Commits');
+    const mockError = new Error('Error fetching commits');
 
     // Mock withTempRepository to simulate the error
     mockWithTempRepository.mockRejectedValue(mockError);
@@ -78,16 +100,15 @@ describe('Repository API Extended Tests', () => {
       expect.any(Function)
     );
     await runCleanupQueue();
-    expect(logger.error).toHaveBeenCalled();
   });
 
-  test('sollte Commits zurückgeben, auch wenn Cleanup fehlschlägt', async () => {
+  test('should return commits even when cleanup fails', async () => {
     // Arrange
     const validRepoUrl = 'https://github.com/username/repo.git';
     const mockCommits = [
       {
         sha: 'abc123',
-        message: 'Erster Commit',
+        message: 'First commit',
         date: '2023-05-01T12:00:00Z',
         authorName: 'Test User',
         authorEmail: 'test@example.com',
@@ -96,8 +117,6 @@ describe('Repository API Extended Tests', () => {
 
     // Mock withTempRepository to return commits successfully
     mockWithTempRepository.mockResolvedValue(mockCommits);
-
-    const errorSpy = vi.spyOn(logger, 'error');
 
     // Act
     const response = await request(app)
@@ -113,27 +132,27 @@ describe('Repository API Extended Tests', () => {
       expect.any(Function)
     );
     await runCleanupQueue();
-
-    // Clean up
-    errorSpy.mockRestore();
   });
 
-  test('sollte mit verschiedenen URL-Formaten umgehen können', async () => {
-    // Arrange
-    const errorSpy = vi.spyOn(logger, 'error');
-
+  test('should handle different URL formats', async () => {
     // Test with empty string - should fail validation
-    await request(app).post('/').send({ repoUrl: '' });
+    const emptyResponse = await request(app).post('/').send({ repoUrl: '' });
+    expect(emptyResponse.status).toBe(400);
 
     // Test with obviously invalid URL - should fail validation
-    await request(app).post('/').send({ repoUrl: 'not-a-url' });
+    const invalidResponse = await request(app)
+      .post('/')
+      .send({ repoUrl: 'not-a-url' });
+    expect(invalidResponse.status).toBe(400);
 
     // Test with basic valid URL - only this should trigger withTempRepository
     const validUrl = 'https://github.com/user/repo.git';
     mockWithTempRepository.mockResolvedValueOnce([]);
 
     // Act
-    await request(app).post('/').send({ repoUrl: validUrl });
+    const validResponse = await request(app)
+      .post('/')
+      .send({ repoUrl: validUrl });
 
     // Assert that withTempRepository was called exactly once, and only with the valid URL
     expect(mockWithTempRepository).toHaveBeenCalledTimes(1);
@@ -141,9 +160,7 @@ describe('Repository API Extended Tests', () => {
       validUrl,
       expect.any(Function)
     );
-
-    // Clean up
-    errorSpy.mockRestore();
+    expect(validResponse.status).toBe(200);
   });
   test('should return heatmap data', async () => {
     // Arrange

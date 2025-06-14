@@ -1,31 +1,19 @@
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  vi,
-  beforeAll,
-  afterAll,
-} from 'vitest';
+import { describe, expect, beforeEach, vi } from 'vitest';
 import simpleGit from 'simple-git';
 import { mkdtemp, rm } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { gitService } from '../../src/services/gitService';
-import logger from '../../src/services/logger';
 import { GIT_SERVICE } from '@gitray/shared-types';
 
 vi.mock('simple-git');
+
 vi.mock('fs/promises');
 vi.mock('ioredis');
 vi.mock('../../src/services/logger', () => ({
   __esModule: true,
-  default: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  },
+  default: global.mockLogger,
+  getLogger: global.getLogger,
 }));
 
 describe('GitService', () => {
@@ -40,9 +28,6 @@ describe('GitService', () => {
     (simpleGit as any).mockReturnValue(mockGit);
     (mkdtemp as any).mockResolvedValue('/tmp/git-visualizer-test');
     (rm as any).mockResolvedValue(undefined);
-    vi.spyOn(logger, 'error').mockReset();
-    vi.spyOn(logger, 'warn').mockReset();
-    vi.spyOn(logger, 'info').mockReset();
   });
 
   describe('cloneRepository', () => {
@@ -140,9 +125,6 @@ describe('GitService Extended Tests', () => {
     (simpleGit as any).mockReturnValue(mockGit);
     (mkdtemp as any).mockResolvedValue('/tmp/git-visualizer-test');
     (rm as any).mockResolvedValue(undefined);
-    vi.spyOn(logger, 'error').mockReset();
-    vi.spyOn(logger, 'warn').mockReset();
-    vi.spyOn(logger, 'info').mockReset();
   });
 
   describe('cloneRepository error handling', () => {
@@ -169,7 +151,7 @@ describe('GitService Extended Tests', () => {
       const mockTempDir = '/tmp/git-visualizer-test';
       mockGit.clone.mockRejectedValue(mockCloneError);
       (rm as any).mockRejectedValueOnce(mockCleanupError);
-      const errorSpy = vi.spyOn(logger, 'error');
+      const errorSpy = vi.spyOn(global.mockLogger, 'error');
       await expect(gitService.cloneRepository(repoUrl)).rejects.toThrow(
         'Failed to clone repository'
       );
@@ -204,7 +186,7 @@ describe('GitService Extended Tests', () => {
         'ghi789|2023-01-03T15:00:00Z|Another User|another@example.com|',
       ].join('\n');
       mockGit.raw.mockResolvedValue(mockRaw);
-      const warnSpy = vi.spyOn(logger, 'warn');
+      const warnSpy = vi.spyOn(global.mockLogger, 'warn');
       const commits = await gitService.getCommits(localRepoPath);
       expect(commits).toHaveLength(1);
       expect(commits[0].sha).toBe('abc123');

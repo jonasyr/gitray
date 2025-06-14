@@ -1,11 +1,9 @@
 import { describe, test, expect, vi } from 'vitest';
 import { Server } from 'http';
-import actualLogger from '../../src/services/logger'; // Import for type
 // We need to get the mocked versions of these for assertion
 // import redisCache from '../../src/services/cache';
 // import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
 
-// anys
 vi.mock('http', () => ({
   Server: vi.fn(() => ({
     close: vi.fn((callback?: () => void) => {
@@ -13,13 +11,11 @@ vi.mock('http', () => ({
     }),
   })),
 }));
+
 vi.mock('../../src/services/logger', () => ({
   __esModule: true,
-  default: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  },
+  default: global.mockLogger,
+  getLogger: global.getLogger,
 }));
 
 // Hold references to the mocked functions to assert against
@@ -73,7 +69,6 @@ describe('Graceful Shutdown', () => {
   let server: Server;
   let setupGracefulShutdown: (server: Server) => void;
   let isServerShuttingDown: () => boolean;
-  let logger: typeof actualLogger;
   let clearTimeoutSpy: any; // Added spy instance
 
   beforeEach(async () => {
@@ -82,9 +77,6 @@ describe('Graceful Shutdown', () => {
     clearTimeoutSpy = vi.spyOn(global, 'clearTimeout'); // Spy on clearTimeout
 
     vi.resetModules(); // This is key. It must happen before SUT is imported.
-
-    // Re-import logger for this test scope
-    logger = (await import('../../src/services/logger')).default;
 
     // The mocks for cache and cleanupScheduler are already set up by vi.mock above.
     // When gracefulShutdown is imported, it will use these hoisted mocks.
@@ -124,7 +116,7 @@ describe('Graceful Shutdown', () => {
       'unhandledRejection',
       expect.any(Function)
     );
-    expect(logger.info).toHaveBeenCalledWith(
+    expect(mockLogger.info).toHaveBeenCalledWith(
       'Graceful shutdown handler registered'
     );
   });
@@ -168,19 +160,27 @@ describe('Graceful Shutdown', () => {
     await vi.runAllTimersAsync();
 
     // Assert
-    expect(logger.info).toHaveBeenCalledWith(
+    expect(mockLogger.info).toHaveBeenCalledWith(
       `Received ${signal}, starting graceful shutdown...`
     );
     expect(mockServerClose).toHaveBeenCalled();
     // Note: "HTTP server closed" is logged in a callback, timing may vary
-    expect(logger.info).toHaveBeenCalledWith('Running final cleanup queue...');
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'Running final cleanup queue...'
+    );
     expect(mockRunCleanupQueue).toHaveBeenCalled(); // Use the direct mock reference
-    expect(logger.info).toHaveBeenCalledWith('Shutting down lock manager...');
-    expect(logger.info).toHaveBeenCalledWith('Lock manager shutdown completed');
-    expect(logger.info).toHaveBeenCalledWith('Closing cache connections...');
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'Shutting down lock manager...'
+    );
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'Lock manager shutdown completed'
+    );
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'Closing cache connections...'
+    );
     expect(mockRedisQuit).toHaveBeenCalled(); // Use the direct mock reference
-    expect(logger.info).toHaveBeenCalledWith('Cache connections closed');
-    expect(logger.info).toHaveBeenCalledWith(
+    expect(mockLogger.info).toHaveBeenCalledWith('Cache connections closed');
+    expect(mockLogger.info).toHaveBeenCalledWith(
       'Graceful shutdown completed successfully'
     );
     expect(mockProcessExit).toHaveBeenCalledWith(0);
@@ -203,7 +203,10 @@ describe('Graceful Shutdown', () => {
     await testSignal('uncaughtException', async (handler) => {
       handler(mockError);
     });
-    expect(logger.error).toHaveBeenCalledWith('Uncaught exception', mockError);
+    expect(global.mockLogger.error).toHaveBeenCalledWith(
+      'Uncaught exception',
+      mockError
+    );
   });
 
   test('should handle unhandledRejection correctly', async () => {
@@ -211,7 +214,7 @@ describe('Graceful Shutdown', () => {
     await testSignal('unhandledRejection', async (handler) => {
       handler(mockReason);
     });
-    expect(logger.error).toHaveBeenCalledWith(
+    expect(global.mockLogger.error).toHaveBeenCalledWith(
       'Unhandled rejection',
       mockReason
     );
@@ -233,7 +236,7 @@ describe('Graceful Shutdown', () => {
     await vi.runAllTimersAsync();
 
     // Assert
-    expect(logger.info).toHaveBeenCalledTimes(10); // Updated count to match actual implementation
+    expect(mockLogger.info).toHaveBeenCalledTimes(10); // Updated count to match actual implementation
     expect(mockServerClose).toHaveBeenCalledTimes(1);
     expect(mockRunCleanupQueue).toHaveBeenCalledTimes(1); // Use the direct mock reference
     expect(mockRedisQuit).toHaveBeenCalledTimes(1); // Use the direct mock reference
@@ -253,7 +256,7 @@ describe('Graceful Shutdown', () => {
     await vi.runAllTimersAsync();
 
     // Assert
-    expect(logger.error).toHaveBeenCalledWith(
+    expect(global.mockLogger.error).toHaveBeenCalledWith(
       'Error during graceful shutdown',
       expect.any(Error)
     );
@@ -273,9 +276,12 @@ describe('Graceful Shutdown', () => {
     await vi.runAllTimersAsync();
 
     // Assert
-    expect(logger.error).toHaveBeenCalledWith('Cache shutdown failed', {
-      err: expect.any(Error),
-    });
+    expect(global.mockLogger.error).toHaveBeenCalledWith(
+      'Cache shutdown failed',
+      {
+        err: expect.any(Error),
+      }
+    );
     expect(mockProcessExit).toHaveBeenCalledWith(0);
   });
 
@@ -294,7 +300,7 @@ describe('Graceful Shutdown', () => {
     await vi.advanceTimersByTimeAsync(30000); // Advance time to trigger timeout
 
     // Assert
-    expect(logger.error).toHaveBeenCalledWith(
+    expect(global.mockLogger.error).toHaveBeenCalledWith(
       'Graceful shutdown timeout, forcing exit'
     );
     expect(mockProcessExit).toHaveBeenCalledWith(1);

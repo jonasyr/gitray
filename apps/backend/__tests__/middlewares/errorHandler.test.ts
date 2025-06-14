@@ -1,14 +1,48 @@
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, vi, beforeEach } from 'vitest';
 // apps/backend/__tests__/middlewares/errorHandler.test.ts
 import { Request, Response, NextFunction } from 'express';
 import errorHandler from '../../src/middlewares/errorHandler';
-import logger from '../../src/services/logger';
+import { GitrayError, HTTP_STATUS } from '@gitray/shared-types';
 
+// Mock the logger service using inline factory without variables
 vi.mock('../../src/services/logger', () => ({
   __esModule: true,
   default: {
+    info: vi.fn(),
+    warn: vi.fn(),
     error: vi.fn(),
+    debug: vi.fn(),
+    http: vi.fn(),
+    verbose: vi.fn(),
+    silly: vi.fn(),
   },
+  getLogger: vi.fn(() => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    http: vi.fn(),
+    verbose: vi.fn(),
+    silly: vi.fn(),
+  })),
+  initializeLogger: vi.fn(() => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    http: vi.fn(),
+    verbose: vi.fn(),
+    silly: vi.fn(),
+  })),
+  createRequestLogger: vi.fn(() => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    http: vi.fn(),
+    verbose: vi.fn(),
+    silly: vi.fn(),
+  })),
 }));
 
 describe('Error Handler Middleware', () => {
@@ -16,22 +50,21 @@ describe('Error Handler Middleware', () => {
   let mockRequest: Partial<Request>;
   let mockResponse: Partial<Response>;
   let mockNext: NextFunction;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     // Arrange
-    mockRequest = {};
+    mockRequest = {
+      path: '/test',
+      method: 'GET',
+    };
     mockResponse = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
     };
     mockNext = vi.fn();
 
-    errorSpy = vi.spyOn(logger, 'error');
-  });
-
-  afterEach(() => {
-    errorSpy.mockRestore();
+    // Clear all mocks
+    vi.clearAllMocks();
   });
 
   test('should log error stack and respond with 500 status and error message', () => {
@@ -47,11 +80,34 @@ describe('Error Handler Middleware', () => {
       mockNext
     );
 
-    // Assert
-    expect(errorSpy).toHaveBeenCalled();
+    // Assert - The middleware should respond with appropriate status and message
     expect(mockResponse.status).toHaveBeenCalledWith(500);
     expect(mockResponse.json).toHaveBeenCalledWith({
       error: 'An internal error occurred',
+    });
+  });
+
+  test('should handle GitrayError and respond with custom status and message', () => {
+    // Arrange
+    const gitrayError = new GitrayError(
+      'Custom error message',
+      HTTP_STATUS.BAD_REQUEST,
+      'VALIDATION_ERROR'
+    );
+
+    // Act
+    errorHandler(
+      gitrayError,
+      mockRequest as Request,
+      mockResponse as Response,
+      mockNext
+    );
+
+    // Assert - The middleware should respond with GitrayError status and message
+    expect(mockResponse.status).toHaveBeenCalledWith(HTTP_STATUS.BAD_REQUEST);
+    expect(mockResponse.json).toHaveBeenCalledWith({
+      error: 'Custom error message',
+      code: 'VALIDATION_ERROR',
     });
   });
 });

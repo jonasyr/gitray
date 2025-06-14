@@ -1,8 +1,6 @@
 // apps/backend/src/services/repositoryCoordinator.ts
 
-import path from 'path';
-import { mkdtemp, rm, access, mkdir } from 'fs/promises';
-import os from 'os';
+import { rm, access } from 'fs/promises';
 import { gitService } from './gitService';
 import { getLogger } from './logger';
 import { withKeyLock } from '../utils/lockManager';
@@ -206,67 +204,73 @@ class RepositoryCoordinator {
    * Get or create a shared repository handle
    */
   async getSharedRepository(repoUrl: string): Promise<RepositoryHandle> {
-    // Check if we have a valid cached handle
-    const existingHandle = this.sharedHandles.get(repoUrl);
-    if (existingHandle && (await this.isHandleValid(existingHandle))) {
-      existingHandle.lastAccessed = new Date();
-      existingHandle.refCount++;
-      this.metrics.cacheHits++;
+    return withKeyLock(`get-repo:${repoUrl}`, async () => {
+      // Check if we have a valid cached handle
+      const existingHandle = this.sharedHandles.get(repoUrl);
+      if (existingHandle && (await this.isHandleValid(existingHandle))) {
+        existingHandle.lastAccessed = new Date();
+        existingHandle.refCount++;
+        this.metrics.cacheHits++;
 
-      // Track duplicate clone prevention
-      if (existingHandle.refCount > 1) {
-        this.metrics.duplicateClonesPrevented++;
+        // Track duplicate clone prevention
+        if (existingHandle.refCount > 1) {
+          this.metrics.duplicateClonesPrevented++;
+        }
+
+        logger.debug('Reusing cached repository', {
+          repoUrl,
+          refCount: existingHandle.refCount,
+          age: Date.now() - existingHandle.lastAccessed.getTime(),
+        });
+
+        return existingHandle;
       }
 
-      logger.debug('Reusing cached repository', {
-        repoUrl,
-        refCount: existingHandle.refCount,
-        age: Date.now() - existingHandle.lastAccessed.getTime(),
-      });
+      // Check if clone is already in progress
+      const activeClone = this.activeClones.get(repoUrl);
+      if (activeClone) {
+        logger.info('Waiting for active clone operation', { repoUrl });
+        const handle = await activeClone;
+        handle.refCount++;
 
-      return existingHandle;
-    }
+        // Track duplicate clone prevention for active clones too
+        if (handle.refCount > 1) {
+          this.metrics.duplicateClonesPrevented++;
+        }
 
-    // Check if clone is already in progress
-    const activeClone = this.activeClones.get(repoUrl);
-    if (activeClone) {
-      logger.info('Waiting for active clone operation', { repoUrl });
-      const handle = await activeClone;
-      handle.refCount++;
-
-      // Track duplicate clone prevention for active clones too
-      if (handle.refCount > 1) {
-        this.metrics.duplicateClonesPrevented++;
+        return handle;
       }
 
-      return handle;
-    }
+      // Start new clone operation
+      this.metrics.cacheMisses++;
+      this.metrics.activeClones++;
 
-    // Start new clone operation
-    this.metrics.cacheMisses++;
-    this.metrics.activeClones++;
+      const clonePromise = this.performClone(repoUrl);
+      this.activeClones.set(repoUrl, clonePromise);
 
-    const clonePromise = this.performClone(repoUrl);
-    this.activeClones.set(repoUrl, clonePromise);
+      try {
+        const handle = await clonePromise;
+        this.sharedHandles.set(repoUrl, handle);
+        this.metrics.cachedRepositories = this.sharedHandles.size;
+        this.updateDiskUsageMetrics();
 
-    try {
-      const handle = await clonePromise;
-      this.sharedHandles.set(repoUrl, handle);
-      this.metrics.cachedRepositories = this.sharedHandles.size;
-      this.updateDiskUsageMetrics();
+        logger.info('Repository cloned and cached', {
+          repoUrl,
+          commitCount: handle.commitCount,
+          sizeCategory: handle.sizeCategory,
+          localPath: handle.localPath,
+        });
 
-      logger.info('Repository cloned and cached', {
-        repoUrl,
-        commitCount: handle.commitCount,
-        sizeCategory: handle.sizeCategory,
-        localPath: handle.localPath,
-      });
-
-      return handle;
-    } finally {
-      this.activeClones.delete(repoUrl);
-      this.metrics.activeClones--;
-    }
+        return handle;
+      } catch (error) {
+        // Remove from cache on failure
+        this.sharedHandles.delete(repoUrl);
+        throw error;
+      } finally {
+        this.activeClones.delete(repoUrl);
+        this.metrics.activeClones--;
+      }
+    });
   }
 
   /**
@@ -295,9 +299,26 @@ class RepositoryCoordinator {
   }
 
   /**
+   * Execute an operation with a repository, handling acquisition and cleanup automatically
+   */
+  async withRepository<T>(
+    repoUrl: string,
+    operation: (localPath: string) => Promise<T>
+  ): Promise<T> {
+    const handle = await this.getSharedRepository(repoUrl);
+
+    try {
+      const result = await operation(handle.localPath);
+      return result;
+    } finally {
+      await this.releaseRepository(repoUrl);
+    }
+  }
+
+  /**
    * Release a reference to a repository handle
    */
-  releaseRepository(repoUrl: string): void {
+  async releaseRepository(repoUrl: string): Promise<void> {
     const handle = this.sharedHandles.get(repoUrl);
     if (handle) {
       handle.refCount = Math.max(0, handle.refCount - 1);
@@ -307,6 +328,29 @@ class RepositoryCoordinator {
         repoUrl,
         refCount: handle.refCount,
       });
+
+      // Cleanup if no more references
+      if (handle.refCount === 0) {
+        logger.info('Repository reference count reached zero, cleaning up', {
+          repoUrl,
+          localPath: handle.localPath,
+        });
+
+        try {
+          await gitService.cleanupRepository(handle.localPath);
+        } catch (error) {
+          logger.error('Failed to cleanup repository', {
+            repoUrl,
+            localPath: handle.localPath,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+
+        this.sharedHandles.delete(repoUrl);
+        this.operationQueues.delete(repoUrl);
+        this.metrics.cachedRepositories = this.sharedHandles.size;
+        this.updateDiskUsageMetrics();
+      }
     }
   }
 
@@ -381,83 +425,82 @@ class RepositoryCoordinator {
     this.operationQueues.clear();
     this.activeClones.clear();
 
+    // Reset metrics for clean state
+    this.metrics = {
+      cachedRepositories: 0,
+      activeClones: 0,
+      coalescedOperations: 0,
+      duplicateClonesPrevented: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
+      totalDiskUsageBytes: 0,
+    };
+
     logger.info('RepositoryCoordinator shutdown completed');
   }
 
   // Private methods
 
   private async performClone(repoUrl: string): Promise<RepositoryHandle> {
-    return withKeyLock(
-      `clone:${repoUrl}`,
-      async () => {
-        logger.info('Starting repository clone', { repoUrl });
+    logger.info('Starting repository clone', { repoUrl });
 
-        // Create temp directory with specific prefix for coordination
-        const baseCoordinatorDir = path.join(os.tmpdir(), 'gitray-coordinator');
-        const repoHash = Buffer.from(repoUrl).toString('base64').slice(0, 10);
+    let actualPath: string | undefined;
 
-        // Ensure the base coordinator directory exists
+    try {
+      // Clone repository using existing git service
+      actualPath = await gitService.cloneRepository(repoUrl);
+
+      // Get repository information
+      const commitCount = await gitService.getCommitCount(actualPath);
+      const sizeCategory = getRepositorySizeCategory(commitCount);
+
+      // Create handle
+      const handle: RepositoryHandle = {
+        localPath: actualPath,
+        commitCount,
+        lastAccessed: new Date(),
+        repoUrl,
+        isShared: true,
+        sizeCategory,
+        refCount: 1,
+      };
+
+      // Start streaming metrics if this is a large repository
+      if (sizeCategory === 'large' || sizeCategory === 'huge') {
+        recordStreamingStart(commitCount);
+      }
+
+      logger.info('Repository clone completed', {
+        repoUrl,
+        localPath: handle.localPath,
+        commitCount,
+        sizeCategory,
+      });
+
+      return handle;
+    } catch (error) {
+      // Cleanup on any failure
+      if (actualPath) {
         try {
-          await mkdir(baseCoordinatorDir, { recursive: true });
-        } catch (error) {
-          // Directory might already exist, that's okay
-          logger.debug('Base coordinator directory creation result', { error });
-        }
-
-        const tempDirPrefix = path.join(baseCoordinatorDir, repoHash + '-');
-        const localPath = await mkdtemp(tempDirPrefix);
-
-        try {
-          // Clone repository using existing git service
-          await gitService.cloneRepository(repoUrl);
-          const actualPath = await gitService.cloneRepository(repoUrl);
-
-          // Move to our coordinated path would be ideal, but for now use git service path
-          // In a production implementation, we'd want more control over the clone location
-
-          // Get repository information
-          const commitCount = await gitService.getCommitCount(actualPath);
-          const sizeCategory = getRepositorySizeCategory(commitCount);
-
-          // Create handle
-          const handle: RepositoryHandle = {
-            localPath: actualPath, // Use the path from git service
-            commitCount,
-            lastAccessed: new Date(),
+          await gitService.cleanupRepository(actualPath);
+        } catch (cleanupError) {
+          logger.warn('Failed to cleanup repository after clone failure', {
             repoUrl,
-            isShared: true,
-            sizeCategory,
-            refCount: 1,
-          };
-
-          // Start streaming metrics if this is a large repository
-          if (sizeCategory === 'large' || sizeCategory === 'huge') {
-            recordStreamingStart(commitCount);
-          }
-
-          logger.info('Repository clone completed', {
-            repoUrl,
-            localPath: handle.localPath,
-            commitCount,
-            sizeCategory,
+            actualPath,
+            cleanupError:
+              cleanupError instanceof Error
+                ? cleanupError.message
+                : String(cleanupError),
           });
-
-          return handle;
-        } catch (error) {
-          // Cleanup on failure
-          try {
-            await rm(localPath, { recursive: true, force: true });
-          } catch (cleanupError) {
-            logger.warn('Failed to cleanup failed clone directory', {
-              localPath,
-              error: cleanupError,
-            });
-          }
-          throw error;
         }
-      },
-      5 * 60 * 1000
-    ); // 5-minute timeout for clones
+      }
+
+      logger.error('Repository clone failed', {
+        repoUrl,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   private async isHandleValid(handle: RepositoryHandle): Promise<boolean> {

@@ -10,6 +10,7 @@ export default defineConfig({
     include: ['**/*.{test,spec}.{ts,js}'],
     exclude: ['node_modules', 'dist', 'coverage'],
     testTimeout: 10000,
+    setupFiles: ['./__tests__/setup/global.setup.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**'], // Only include files from the src directory for this project
