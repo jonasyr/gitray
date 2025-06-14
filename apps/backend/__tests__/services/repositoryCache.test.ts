@@ -57,9 +57,26 @@ vi.mock('../../src/utils/lockManager', () => ({
 }));
 
 vi.mock('../../src/services/metrics', () => ({
+  // Basic metrics
   cacheHits: mockCacheHits,
   cacheMisses: mockCacheMisses,
   getRepositorySizeCategory: mockGetRepositorySizeCategory,
+
+  // Enhanced metrics functions
+  recordEnhancedCacheOperation: vi.fn(),
+  updateServiceHealthScore: vi.fn(),
+  recordDetailedError: vi.fn(),
+  recordFeatureUsage: vi.fn(),
+  updateCoordinationMetrics: vi.fn(),
+  recordApiMetrics: vi.fn(),
+  recordSLAMetrics: vi.fn(),
+  recordDataFreshness: vi.fn(),
+
+  // Utility functions
+  getUserType: vi.fn().mockReturnValue('anonymous'),
+  getRepositoryType: vi.fn().mockReturnValue('public'),
+  getTeamSizeCategory: vi.fn().mockReturnValue('individual'),
+  getCacheTier: vi.fn().mockReturnValue('L1'),
 }));
 
 vi.mock('../../src/config', () => ({
@@ -83,6 +100,19 @@ vi.mock('../../src/config', () => ({
       },
     },
   },
+}));
+
+// Mock Prometheus register to avoid duplicate metrics errors
+vi.mock('prom-client', () => ({
+  register: {
+    clear: vi.fn(),
+    metrics: vi.fn().mockResolvedValue(''),
+    registerMetric: vi.fn(),
+  },
+  collectDefaultMetrics: vi.fn(),
+  Counter: vi.fn(),
+  Histogram: vi.fn(),
+  Gauge: vi.fn(),
 }));
 
 describe('RepositoryCache', () => {
@@ -126,6 +156,12 @@ describe('RepositoryCache', () => {
   };
 
   beforeEach(async () => {
+    // Clear Prometheus registry to prevent duplicate metrics errors
+    const { register } = await import('prom-client');
+    if (register && typeof register.clear === 'function') {
+      register.clear();
+    }
+
     // Reset all mocks except the constructor mock
     mockGitService.getCommits.mockClear();
     mockGitService.aggregateCommits.mockClear();

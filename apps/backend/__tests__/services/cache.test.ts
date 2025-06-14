@@ -81,6 +81,50 @@ vi.mock('../../src/utils/hybridLruCache', () => ({
   HybridLRUCache: HybridLRUCacheMock,
 }));
 
+// Mock Prometheus register to avoid duplicate metrics errors
+vi.mock('prom-client', async () => {
+  const actual = await vi.importActual('prom-client');
+  return {
+    ...actual,
+    register: {
+      clear: vi.fn(),
+      metrics: vi.fn().mockResolvedValue(''),
+      registerMetric: vi.fn(),
+    },
+    collectDefaultMetrics: vi.fn(),
+  };
+});
+
+// Mock metrics service with all enhanced metrics functions
+vi.mock('../../src/services/metrics', () => ({
+  // Basic metrics
+  cacheHits: { inc: vi.fn() },
+  cacheMisses: { inc: vi.fn() },
+
+  // Enhanced metrics functions
+  recordEnhancedCacheOperation: vi.fn(),
+  updateServiceHealthScore: vi.fn(),
+  recordDetailedError: vi.fn(),
+  recordFeatureUsage: vi.fn(),
+  updateCoordinationMetrics: vi.fn(),
+  recordApiMetrics: vi.fn(),
+  recordSLAMetrics: vi.fn(),
+
+  // Utility functions
+  getUserType: vi.fn().mockReturnValue('anonymous'),
+  getRepositoryType: vi.fn().mockReturnValue('public'),
+  getTeamSizeCategory: vi.fn().mockReturnValue('individual'),
+  getCacheTier: vi.fn().mockReturnValue('L1'),
+  getRepositorySizeCategory: vi.fn().mockReturnValue('small'),
+
+  // Middleware and other exports
+  metricsMiddleware: vi.fn((req, res, next) => next()),
+  register: {
+    metrics: vi.fn().mockResolvedValue(''),
+    clear: vi.fn(),
+  },
+}));
+
 describe('Cache Service Integration', () => {
   let cache: any;
   let mockHybridCache: any;
@@ -89,6 +133,12 @@ describe('Cache Service Integration', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+
+    // Clear Prometheus registry to prevent duplicate metrics errors
+    const { register } = await import('prom-client');
+    if (register && typeof register.clear === 'function') {
+      register.clear();
+    }
 
     // Get the mocked logger
     mockLogger = (await import('../../src/services/logger')).default;
