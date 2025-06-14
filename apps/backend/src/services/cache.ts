@@ -2,6 +2,11 @@ import Redis from 'ioredis';
 import { config, hybridCacheConfig } from '../config';
 import { getLogger } from './logger';
 import HybridLRUCache from '../utils/hybridLruCache';
+import {
+  recordEnhancedCacheOperation,
+  updateServiceHealthScore,
+  recordDetailedError,
+} from './metrics';
 
 const logger = getLogger();
 
@@ -121,33 +126,77 @@ const cache = {
    * Priority: HybridLRUCache -> Redis -> Memory
    */
   async get(key: string): Promise<string | null> {
-    // Try HybridLRUCache first
-    if (hybridCache && hybridCacheHealthy) {
-      try {
-        const result = await hybridCache.get(key);
-        if (result !== null) {
-          return result;
+    const startTime = Date.now();
+    let cacheHit = false;
+
+    try {
+      // Try HybridLRUCache first
+      if (hybridCache && hybridCacheHealthy) {
+        try {
+          const result = await hybridCache.get(key);
+          if (result !== null) {
+            cacheHit = true;
+            recordEnhancedCacheOperation('get', true, undefined, key);
+            return result;
+          }
+        } catch (err) {
+          logger.warn('HybridLRUCache get failed, falling back', { key, err });
+          hybridCacheHealthy = false;
+          recordDetailedError(
+            'cache',
+            err instanceof Error ? err : new Error(String(err)),
+            {
+              userImpact: 'degraded',
+              recoveryAction: 'fallback',
+              severity: 'warning',
+            }
+          );
+          // Fall through to Redis
         }
-      } catch (err) {
-        logger.warn('HybridLRUCache get failed, falling back', { key, err });
-        hybridCacheHealthy = false;
-        // Fall through to Redis
       }
-    }
 
-    // Fall back to original Redis implementation
-    if (redis && redisHealthy) {
-      try {
-        return await redis.get(key);
-      } catch (err) {
-        logger.warn('Redis get failed, falling back to memory', { key, err });
-        redisHealthy = false;
-        // Fall through to memory
+      // Fall back to original Redis implementation
+      if (redis && redisHealthy) {
+        try {
+          const result = await redis.get(key);
+          if (result !== null) {
+            cacheHit = true;
+            recordEnhancedCacheOperation('get', true, undefined, key);
+            return result;
+          }
+        } catch (err) {
+          logger.warn('Redis get failed, falling back to memory', { key, err });
+          redisHealthy = false;
+          recordDetailedError(
+            'cache',
+            err instanceof Error ? err : new Error(String(err)),
+            {
+              userImpact: 'degraded',
+              recoveryAction: 'fallback',
+              severity: 'warning',
+            }
+          );
+          // Fall through to memory
+        }
       }
-    }
 
-    // Final fallback to memory cache
-    return memoryCache.get(key) ?? null;
+      // Final fallback to memory cache
+      const result = memoryCache.get(key) ?? null;
+      if (result !== null) {
+        cacheHit = true;
+      }
+
+      recordEnhancedCacheOperation('get', cacheHit, undefined, key);
+      return result;
+    } finally {
+      // Update service health
+      const responseTime = (Date.now() - startTime) / 1000;
+      updateServiceHealthScore('cache', {
+        errorRate: 0,
+        responseTime,
+        cacheHitRate: cacheHit ? 1 : 0,
+      });
+    }
   },
 
   /**
@@ -160,39 +209,75 @@ const cache = {
     mode?: 'EX' | 'PX',
     duration?: number
   ): Promise<void> {
-    // Try HybridLRUCache first
-    if (hybridCache && hybridCacheHealthy) {
-      try {
-        await hybridCache.set(key, value, mode, duration);
-        return; // Success - don't try other methods
-      } catch (err) {
-        logger.warn('HybridLRUCache set failed, falling back', { key, err });
-        hybridCacheHealthy = false;
-        // Fall through to Redis
-      }
-    }
+    const startTime = Date.now();
+    let success = false;
 
-    // Fall back to original Redis implementation
-    if (redis && redisHealthy) {
-      try {
-        if (mode && duration !== undefined) {
-          await (redis as any).set(key, value, mode, duration);
-        } else {
-          await redis.set(key, value);
+    try {
+      // Try HybridLRUCache first
+      if (hybridCache && hybridCacheHealthy) {
+        try {
+          await hybridCache.set(key, value, mode, duration);
+          success = true;
+          recordEnhancedCacheOperation('set', true, undefined, key);
+          return; // Success - don't try other methods
+        } catch (err) {
+          logger.warn('HybridLRUCache set failed, falling back', { key, err });
+          hybridCacheHealthy = false;
+          recordDetailedError(
+            'cache',
+            err instanceof Error ? err : new Error(String(err)),
+            {
+              userImpact: 'degraded',
+              recoveryAction: 'fallback',
+              severity: 'warning',
+            }
+          );
+          // Fall through to Redis
         }
-
-        // Also store in memory as backup
-        memoryCache.set(key, value);
-        return;
-      } catch (err) {
-        logger.warn('Redis set failed, falling back to memory', { key, err });
-        redisHealthy = false;
-        // Fall through to memory
       }
-    }
 
-    // Final fallback to memory cache
-    memoryCache.set(key, value);
+      // Fall back to original Redis implementation
+      if (redis && redisHealthy) {
+        try {
+          if (mode && duration !== undefined) {
+            await (redis as any).set(key, value, mode, duration);
+          } else {
+            await redis.set(key, value);
+          }
+
+          // Also store in memory as backup
+          memoryCache.set(key, value);
+          success = true;
+          recordEnhancedCacheOperation('set', true, undefined, key);
+          return;
+        } catch (err) {
+          logger.warn('Redis set failed, falling back to memory', { key, err });
+          redisHealthy = false;
+          recordDetailedError(
+            'cache',
+            err instanceof Error ? err : new Error(String(err)),
+            {
+              userImpact: 'degraded',
+              recoveryAction: 'fallback',
+              severity: 'warning',
+            }
+          );
+          // Fall through to memory
+        }
+      }
+
+      // Final fallback to memory cache
+      memoryCache.set(key, value);
+      success = true;
+      recordEnhancedCacheOperation('set', true, undefined, key);
+    } finally {
+      // Update service health
+      const responseTime = (Date.now() - startTime) / 1000;
+      updateServiceHealthScore('cache', {
+        errorRate: success ? 0 : 1,
+        responseTime,
+      });
+    }
   },
 
   /**

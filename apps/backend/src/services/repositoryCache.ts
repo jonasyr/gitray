@@ -7,7 +7,15 @@ import { withSharedRepository } from './repositoryCoordinator';
 import type { RepositoryHandle } from './repositoryCoordinator';
 import { config } from '../config';
 import HybridLRUCache from '../utils/hybridLruCache';
-import { cacheHits, cacheMisses, getRepositorySizeCategory } from './metrics';
+import {
+  cacheHits,
+  cacheMisses,
+  getRepositorySizeCategory,
+  recordEnhancedCacheOperation,
+  updateServiceHealthScore,
+  recordDataFreshness,
+  recordDetailedError,
+} from './metrics';
 import { withKeyLock } from '../utils/lockManager';
 
 const logger = getLogger();
@@ -385,6 +393,17 @@ class RepositoryCacheManager {
       try {
         commits = await this.rawCommitsCache.get(rawKey);
       } catch (error) {
+        // Record detailed error for enhanced metrics
+        recordDetailedError(
+          'cache',
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            userImpact: 'degraded',
+            recoveryAction: 'fallback',
+            severity: 'warning',
+          }
+        );
+
         logger.error('Cache operation failed', {
           operation: 'get',
           key: rawKey,
@@ -397,6 +416,17 @@ class RepositoryCacheManager {
         this.metrics.operations.rawHits++;
         this.recordHitTime(startTime);
         cacheHits.inc({ operation: 'raw_commits' });
+        recordEnhancedCacheOperation(
+          'raw_commits',
+          true,
+          undefined,
+          repoUrl,
+          commits.length
+        );
+
+        // Record data freshness
+        const cacheAge = Date.now() - startTime;
+        recordDataFreshness('commits', cacheAge);
 
         logger.debug('Raw commits cache hit', {
           repoUrl,
@@ -411,6 +441,7 @@ class RepositoryCacheManager {
       this.metrics.operations.rawMisses++;
       this.recordMissTime(startTime);
       cacheMisses.inc({ operation: 'raw_commits' });
+      recordEnhancedCacheOperation('raw_commits', false, undefined, repoUrl);
 
       logger.info('Raw commits cache miss, fetching from repository', {
         repoUrl,
@@ -479,10 +510,30 @@ class RepositoryCacheManager {
           transactionId: transaction.id,
         });
 
+        // Update service health score on successful cache operation
+        updateServiceHealthScore('cache', {
+          cacheHitRate: 1.0,
+          errorRate: 0.0,
+        });
+
         return commits;
       } catch (error) {
         // Increment failure counter
         this.metrics.transactions.failed++;
+
+        // Record detailed error for enhanced metrics
+        recordDetailedError(
+          'cache',
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            userImpact: 'degraded',
+            recoveryAction: 'retry',
+            severity: 'warning',
+          }
+        );
+
+        // Update service health score on error
+        updateServiceHealthScore('cache', { errorRate: 1.0 });
 
         // Rollback transaction on any error
         await this.rollbackTransaction(transaction);
@@ -516,6 +567,17 @@ class RepositoryCacheManager {
         this.metrics.operations.filteredHits++;
         this.recordHitTime(startTime);
         cacheHits.inc({ operation: 'filtered_commits' });
+        recordEnhancedCacheOperation(
+          'filtered_commits',
+          true,
+          undefined,
+          repoUrl,
+          filteredCommits.length
+        );
+
+        // Record data freshness
+        const cacheAge = Date.now() - startTime;
+        recordDataFreshness('commits', cacheAge);
 
         logger.debug('Filtered commits cache hit', {
           repoUrl,
@@ -531,6 +593,12 @@ class RepositoryCacheManager {
       this.metrics.operations.filteredMisses++;
       this.recordMissTime(startTime);
       cacheMisses.inc({ operation: 'filtered_commits' });
+      recordEnhancedCacheOperation(
+        'filtered_commits',
+        false,
+        undefined,
+        repoUrl
+      );
 
       logger.debug(
         'Filtered commits cache miss, applying filters to raw commits',
@@ -573,10 +641,30 @@ class RepositoryCacheManager {
           transactionId: transaction.id,
         });
 
+        // Update service health score on successful cache operation
+        updateServiceHealthScore('cache', {
+          cacheHitRate: 1.0,
+          errorRate: 0.0,
+        });
+
         return filteredCommits;
       } catch (error) {
         // Increment failure counter
         this.metrics.transactions.failed++;
+
+        // Record detailed error for enhanced metrics
+        recordDetailedError(
+          'cache',
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            userImpact: 'degraded',
+            recoveryAction: 'retry',
+            severity: 'warning',
+          }
+        );
+
+        // Update service health score on error
+        updateServiceHealthScore('cache', { errorRate: 1.0 });
 
         // Rollback transaction on any error
         await this.rollbackTransaction(transaction);
@@ -616,6 +704,16 @@ class RepositoryCacheManager {
         this.metrics.operations.aggregatedHits++;
         this.recordHitTime(startTime);
         cacheHits.inc({ operation: 'aggregated_data' });
+        recordEnhancedCacheOperation(
+          'aggregated_data',
+          true,
+          undefined,
+          repoUrl
+        );
+
+        // Record data freshness
+        const cacheAge = Date.now() - startTime;
+        recordDataFreshness('aggregated_data', cacheAge);
 
         logger.debug('Aggregated data cache hit', {
           repoUrl,
@@ -630,6 +728,12 @@ class RepositoryCacheManager {
       this.metrics.operations.aggregatedMisses++;
       this.recordMissTime(startTime);
       cacheMisses.inc({ operation: 'aggregated_data' });
+      recordEnhancedCacheOperation(
+        'aggregated_data',
+        false,
+        undefined,
+        repoUrl
+      );
 
       logger.debug('Aggregated data cache miss, generating from commits', {
         repoUrl,
@@ -696,10 +800,30 @@ class RepositoryCacheManager {
           transactionId: transaction.id,
         });
 
+        // Update service health score on successful cache operation
+        updateServiceHealthScore('cache', {
+          cacheHitRate: 1.0,
+          errorRate: 0.0,
+        });
+
         return aggregatedData;
       } catch (error) {
         // Increment failure counter
         this.metrics.transactions.failed++;
+
+        // Record detailed error for enhanced metrics
+        recordDetailedError(
+          'cache',
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            userImpact: 'degraded',
+            recoveryAction: 'retry',
+            severity: 'warning',
+          }
+        );
+
+        // Update service health score on error
+        updateServiceHealthScore('cache', { errorRate: 1.0 });
 
         // Rollback transaction on any error
         await this.rollbackTransaction(transaction);
