@@ -4,6 +4,7 @@ import redis from '../services/cache';
 import { getLogger } from '../services/logger';
 import { isServerShuttingDown } from '../utils/gracefulShutdown';
 import { config } from '../config';
+import { recordFeatureUsage, getUserType } from '../services/metrics';
 
 // Health check endpoints used by Kubernetes and monitoring tools
 import os from 'os';
@@ -15,7 +16,10 @@ const logger = getLogger();
 // Liveness and readiness endpoints
 // ---------------------------------------------------------------------------
 router.get('/health', (req: Request, res: Response) => {
+  const userType = getUserType(req);
+
   if (isServerShuttingDown()) {
+    recordFeatureUsage('health_check', userType, false, 'api_call');
     res.status(503).json({
       status: 'shutting_down',
       timestamp: new Date().toISOString(),
@@ -23,6 +27,7 @@ router.get('/health', (req: Request, res: Response) => {
     return;
   }
 
+  recordFeatureUsage('health_check', userType, true, 'api_call');
   res.status(200).json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -31,7 +36,8 @@ router.get('/health', (req: Request, res: Response) => {
 });
 
 // Detailed health information including system stats and coordination
-router.get('/health/detailed', async (_req: Request, res: Response) => {
+router.get('/health/detailed', async (req: Request, res: Response) => {
+  const userType = getUserType(req);
   const checks: Record<string, string | number> = {
     server: 'healthy',
     cache: 'unknown',
@@ -110,6 +116,14 @@ router.get('/health/detailed', async (_req: Request, res: Response) => {
     overallStatus = 503;
   }
 
+  // Record successful health check feature usage
+  recordFeatureUsage(
+    'detailed_health_check',
+    userType,
+    overallStatus === 200,
+    'api_call'
+  );
+
   res.status(overallStatus).json({
     status: overallStatus === 200 ? 'healthy' : 'unhealthy',
     timestamp: new Date().toISOString(),
@@ -132,8 +146,11 @@ router.get('/health/detailed', async (_req: Request, res: Response) => {
 });
 
 // NEW: Dedicated coordination health endpoint for Step 3 testing
-router.get('/coordination', (_req: Request, res: Response) => {
+router.get('/coordination', (req: Request, res: Response) => {
+  const userType = getUserType(req);
+
   if (!config.repositoryCache?.enabled) {
+    recordFeatureUsage('coordination_health_check', userType, true, 'api_call');
     res.status(200).json({
       status: 'disabled',
       message: 'Repository coordination is disabled',
@@ -143,6 +160,7 @@ router.get('/coordination', (_req: Request, res: Response) => {
   }
 
   // Return basic coordination status even if modules aren't loaded yet
+  recordFeatureUsage('coordination_health_check', userType, true, 'api_call');
   res.status(200).json({
     status: 'enabled',
     message: 'Repository coordination system is enabled',
@@ -158,13 +176,20 @@ router.get('/coordination', (_req: Request, res: Response) => {
 });
 
 // Kubernetes liveness probe
-router.get('/health/live', (_req: Request, res: Response) => {
+router.get('/health/live', (req: Request, res: Response) => {
+  const userType = getUserType(req);
+  recordFeatureUsage('liveness_probe', userType, true, 'api_call');
   res.status(200).json({ status: 'alive' });
 });
 
 // Kubernetes readiness probe
-router.get('/health/ready', (_req: Request, res: Response) => {
-  if (isServerShuttingDown() || !redis.isHealthy()) {
+router.get('/health/ready', (req: Request, res: Response) => {
+  const userType = getUserType(req);
+  const isReady = !isServerShuttingDown() && redis.isHealthy();
+
+  recordFeatureUsage('readiness_probe', userType, isReady, 'api_call');
+
+  if (!isReady) {
     res.status(503).json({ status: 'not_ready' });
     return;
   }
