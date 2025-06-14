@@ -139,23 +139,7 @@ export const initializeLogger = () => {
         level: 'info',
         format: winston.format.combine(
           winston.format.timestamp(),
-          winston.format.json(),
-          winston.format((info: winston.Logform.TransformableInfo) => {
-            // Only log performance-related entries
-            const message = info.message as string;
-            if (
-              info.type === 'performance' ||
-              (info as any).cacheHit !== undefined ||
-              (info as any).processingTime !== undefined ||
-              (info as any).coordination !== undefined ||
-              message?.includes('cache') ||
-              message?.includes('coordination') ||
-              message?.includes('performance')
-            ) {
-              return info;
-            }
-            return false;
-          })()
+          winston.format.json()
         ),
       })
     );
