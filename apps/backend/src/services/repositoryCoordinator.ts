@@ -5,7 +5,14 @@ import { gitService } from './gitService';
 import { getLogger } from './logger';
 import { withKeyLock } from '../utils/lockManager';
 import { config } from '../config';
-import { recordStreamingStart, getRepositorySizeCategory } from './metrics';
+import {
+  recordStreamingStart,
+  getRepositorySizeCategory,
+  updateCoordinationMetrics,
+  recordEnhancedCacheOperation,
+  updateServiceHealthScore,
+  recordDetailedError,
+} from './metrics';
 
 const logger = getLogger();
 
@@ -202,6 +209,7 @@ class RepositoryCoordinator {
 
   constructor() {
     this.startCleanupScheduler();
+    this.startMetricsUpdater();
     logger.info('RepositoryCoordinator initialized', {
       maxCachedRepos: config.repositoryCache?.maxRepositories || 50,
       maxAgeHours: config.repositoryCache?.maxAgeHours || 24,
@@ -209,13 +217,61 @@ class RepositoryCoordinator {
   }
 
   /**
+   * Start periodic metrics updates
+   */
+  private startMetricsUpdater(): void {
+    // Update coordination metrics every 30 seconds
+    setInterval(() => {
+      try {
+        updateCoordinationMetrics();
+      } catch (error) {
+        logger.warn('Failed to update coordination metrics', { error });
+      }
+    }, 30000);
+  }
+
+  /**
+   * Calculate average repository age for metrics
+   */
+  private getAverageRepositoryAge(): number {
+    const handles = Array.from(this.sharedHandles.values());
+    if (handles.length === 0) return 0;
+
+    const now = Date.now();
+    const totalAge = handles.reduce((sum, handle) => {
+      return sum + (now - handle.lastAccessed.getTime());
+    }, 0);
+
+    return totalAge / handles.length / 1000; // Return in seconds
+  }
+
+  /**
    * FIX: Get or create a shared repository handle with atomic reference counting
    */
   async getSharedRepository(repoUrl: string): Promise<RepositoryHandle> {
+    const startTime = Date.now();
+
     return withKeyLock(`repo-access:${repoUrl}`, async () => {
       // Check if we have a valid cached handle
       const existingHandle = this.sharedHandles.get(repoUrl);
       if (existingHandle && (await this.isHandleValid(existingHandle))) {
+        // Cache hit - record enhanced metrics
+        const duration = (Date.now() - startTime) / 1000;
+        recordEnhancedCacheOperation(
+          'repository',
+          true,
+          undefined,
+          repoUrl,
+          existingHandle.commitCount
+        );
+        updateServiceHealthScore('coordination', {
+          errorRate: 0,
+          responseTime: duration,
+          cacheHitRate:
+            this.metrics.cacheHits /
+            (this.metrics.cacheHits + this.metrics.cacheMisses),
+        });
+
         // FIX: Atomic reference count increment
         return this.incrementReference(existingHandle);
       }
@@ -230,7 +286,7 @@ class RepositoryCoordinator {
         return this.incrementReference(handle);
       }
 
-      // Start new clone operation
+      // Start new clone operation - cache miss
       this.metrics.cacheMisses++;
       this.metrics.activeClones++;
 
@@ -243,6 +299,23 @@ class RepositoryCoordinator {
         this.metrics.cachedRepositories = this.sharedHandles.size;
         this.updateDiskUsageMetrics();
 
+        // Cache miss - record enhanced metrics
+        const duration = (Date.now() - startTime) / 1000;
+        recordEnhancedCacheOperation(
+          'repository',
+          false,
+          undefined,
+          repoUrl,
+          handle.commitCount
+        );
+        updateServiceHealthScore('coordination', {
+          errorRate: 0,
+          responseTime: duration,
+          cacheHitRate:
+            this.metrics.cacheHits /
+            (this.metrics.cacheHits + this.metrics.cacheMisses),
+        });
+
         logger.info('Repository cloned and cached', {
           repoUrl,
           commitCount: handle.commitCount,
@@ -253,6 +326,23 @@ class RepositoryCoordinator {
 
         return handle;
       } catch (error) {
+        // Record coordination error
+        const duration = (Date.now() - startTime) / 1000;
+        recordDetailedError(
+          'coordination',
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            userImpact: 'blocking',
+            recoveryAction: 'retry',
+            severity: 'critical',
+          }
+        );
+
+        updateServiceHealthScore('coordination', {
+          errorRate: 1,
+          responseTime: duration,
+        });
+
         // Remove from cache on failure
         this.sharedHandles.delete(repoUrl);
         throw error;

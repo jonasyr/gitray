@@ -26,6 +26,19 @@ import {
   repositorySizeDistribution,
   streamingErrors,
   streamingMemoryUsage,
+  // Enhanced metrics imports
+  recordEnhancedCacheOperation,
+  recordFeatureUsage,
+  recordDetailedError,
+  updateServiceHealthScore,
+  serviceHealthScore,
+  detailedErrors,
+  featureUsage,
+  cacheHitsEnhanced,
+  cacheMissesEnhanced,
+  getUserType,
+  getRepositoryType,
+  updateAllEnhancedMetrics,
 } from '../../src/services/metrics';
 
 // Mock the cache service
@@ -483,6 +496,236 @@ describe('Metrics Service', () => {
       expect(memoryUsageValue.values[0].value).toBe(0);
       expect(memoryEntriesValue.values[0].value).toBe(0);
       expect(diskEntriesValue.values[0].value).toBe(0);
+    });
+  });
+
+  // ========================================================================
+  // NEW: ENHANCED METRICS TESTS
+  // ========================================================================
+
+  describe('Enhanced Metrics Helper Functions', () => {
+    test('should correctly categorize user types', () => {
+      const mockReq = {
+        headers: {
+          'user-agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'x-api-key': 'test-key',
+        },
+        path: '/api/test',
+      } as any;
+
+      expect(getUserType(mockReq)).toBe('api'); // API key takes precedence
+
+      const uiReq = {
+        headers: { 'user-agent': 'Mozilla/5.0 browser' },
+        path: '/dashboard',
+      } as any;
+
+      expect(getUserType(uiReq)).toBe('ui');
+    });
+
+    test('should correctly categorize repository types', () => {
+      expect(getRepositoryType('https://github.com/user/repo.git')).toBe(
+        'public'
+      );
+      expect(getRepositoryType('https://gitlab.com/user/repo.git')).toBe(
+        'public'
+      );
+      expect(getRepositoryType('https://localhost:3000/repo.git')).toBe(
+        'private'
+      );
+      expect(getRepositoryType('https://custom-domain.com/repo.git')).toBe(
+        'unknown'
+      );
+    });
+  });
+
+  describe('Enhanced Cache Operations', () => {
+    test('should record enhanced cache hit with full context', async () => {
+      // Arrange
+      const mockReq = {
+        headers: { 'user-agent': 'api-client' },
+        path: '/api/commits',
+      } as any;
+
+      // Act
+      recordEnhancedCacheOperation(
+        'commits',
+        true,
+        mockReq,
+        'https://github.com/test/repo.git',
+        5000
+      );
+
+      // Assert
+      const enhancedHits = await cacheHitsEnhanced.get();
+      expect(enhancedHits.values.length).toBeGreaterThan(0);
+
+      const hitRecord = enhancedHits.values[0];
+      expect(hitRecord.labels.operation).toBe('commits');
+      expect(hitRecord.labels.tier).toBe('hybrid');
+      expect(hitRecord.labels.repo_type).toBe('public');
+      expect(hitRecord.labels.user_type).toBe('unknown');
+      expect(hitRecord.labels.repo_size).toBe('medium');
+    });
+
+    test('should record enhanced cache miss with context', async () => {
+      // Act
+      recordEnhancedCacheOperation(
+        'raw_commits',
+        false,
+        undefined,
+        'https://private.com/repo.git',
+        150000
+      );
+
+      // Assert
+      const enhancedMisses = await cacheMissesEnhanced.get();
+      expect(enhancedMisses.values.length).toBeGreaterThan(0);
+
+      const missRecord = enhancedMisses.values[0];
+      expect(missRecord.labels.operation).toBe('raw_commits');
+      expect(missRecord.labels.repo_size).toBe('huge');
+      expect(missRecord.labels.repo_type).toBe('unknown');
+    });
+  });
+
+  describe('Feature Usage Tracking', () => {
+    test('should record feature usage correctly', async () => {
+      // Act
+      recordFeatureUsage('heatmap_view', 'ui', true, 'click');
+
+      // Assert
+      const featureMetrics = await featureUsage.get();
+      expect(featureMetrics.values.length).toBeGreaterThan(0);
+
+      const usageRecord = featureMetrics.values[0];
+      expect(usageRecord.labels.feature).toBe('heatmap_view');
+      expect(usageRecord.labels.user_type).toBe('ui');
+      expect(usageRecord.labels.success).toBe('true');
+      expect(usageRecord.labels.interaction_type).toBe('click');
+    });
+
+    test('should record failed feature usage', async () => {
+      // Act
+      recordFeatureUsage('export_data', 'api', false, 'api_call');
+
+      // Assert
+      const featureMetrics = await featureUsage.get();
+      const failureRecord = featureMetrics.values.find(
+        (v) => v.labels.success === 'false'
+      );
+      expect(failureRecord).toBeDefined();
+      expect(failureRecord!.labels.feature).toBe('export_data');
+      expect(failureRecord!.labels.interaction_type).toBe('api_call');
+    });
+  });
+
+  describe('Detailed Error Tracking', () => {
+    test('should categorize and record network errors', async () => {
+      // Arrange
+      const networkError = new Error('Connection timeout');
+
+      // Act
+      recordDetailedError('git', networkError, {
+        userImpact: 'blocking',
+        recoveryAction: 'retry',
+        repoType: 'public',
+        severity: 'critical',
+      });
+
+      // Assert
+      const errorMetrics = await detailedErrors.get();
+      expect(errorMetrics.values.length).toBeGreaterThan(0);
+
+      const errorRecord = errorMetrics.values[0];
+      expect(errorRecord.labels.component).toBe('git');
+      expect(errorRecord.labels.error_category).toBe('network');
+      expect(errorRecord.labels.error_severity).toBe('critical');
+      expect(errorRecord.labels.user_impact).toBe('blocking');
+      expect(errorRecord.labels.recovery_action).toBe('retry');
+      expect(errorRecord.labels.repo_type).toBe('public');
+    });
+
+    test('should categorize filesystem errors', async () => {
+      // Arrange
+      const fsError = new Error('ENOENT: no such file or directory');
+
+      // Act
+      recordDetailedError('cache', fsError, {
+        severity: 'warning',
+      });
+
+      // Assert
+      const errorMetrics = await detailedErrors.get();
+      const fsErrorRecord = errorMetrics.values.find(
+        (v) => v.labels.error_category === 'filesystem'
+      );
+      expect(fsErrorRecord).toBeDefined();
+      expect(fsErrorRecord!.labels.component).toBe('cache');
+      expect(fsErrorRecord!.labels.error_severity).toBe('warning');
+    });
+  });
+
+  describe('Service Health Score', () => {
+    test('should calculate and update service health score', async () => {
+      // Act
+      updateServiceHealthScore('api', {
+        errorRate: 0.02, // 2% error rate
+        responseTime: 1.5, // 1.5s response time
+        cacheHitRate: 0.85, // 85% cache hit rate
+        memoryUtilization: 0.7, // 70% memory usage
+      });
+
+      // Assert
+      const healthMetrics = await serviceHealthScore.get();
+      expect(healthMetrics.values.length).toBeGreaterThan(0);
+
+      const healthRecord = healthMetrics.values[0];
+      expect(healthRecord.labels.component).toBe('api');
+      expect(healthRecord.labels.time_window).toBe('5m');
+      expect(healthRecord.value).toBeGreaterThan(0);
+      expect(healthRecord.value).toBeLessThanOrEqual(100);
+    });
+
+    test('should penalize high error rates in health score', async () => {
+      // Act - High error rate scenario
+      updateServiceHealthScore('cache', {
+        errorRate: 0.1, // 10% error rate (high)
+        responseTime: 0.5, // Fast response
+        cacheHitRate: 0.9, // Good cache hit rate
+        memoryUtilization: 0.5, // Normal memory usage
+      });
+
+      // Assert
+      const healthMetrics = await serviceHealthScore.get();
+      const cacheHealthRecord = healthMetrics.values.find(
+        (v) => v.labels.component === 'cache'
+      );
+      expect(cacheHealthRecord).toBeDefined();
+      expect(cacheHealthRecord!.value).toBeLessThan(90); // Should be penalized for high error rate
+    });
+  });
+
+  describe('Enhanced Metrics Update', () => {
+    test('should update all enhanced metrics without errors', async () => {
+      // Mock repositoryCoordinator for coordination metrics
+      vi.doMock('../../src/services/repositoryCoordinator', () => ({
+        repositoryCoordinator: {
+          getMetrics: () => ({
+            cachedRepositories: 10,
+            activeClones: 2,
+            coalescedOperations: 5,
+            duplicateClonesPrevented: 3,
+            cacheHits: 100,
+            cacheMisses: 20,
+            totalDiskUsageBytes: 1024 * 1024 * 100,
+          }),
+        },
+      }));
+
+      // Act & Assert - should not throw
+      await expect(updateAllEnhancedMetrics()).resolves.not.toThrow();
     });
   });
 });

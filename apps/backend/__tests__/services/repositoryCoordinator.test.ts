@@ -35,6 +35,10 @@ vi.mock('../../src/config', () => ({
 vi.mock('../../src/services/metrics', () => ({
   recordStreamingStart: vi.fn(),
   getRepositorySizeCategory: vi.fn().mockReturnValue('medium'),
+  updateCoordinationMetrics: vi.fn(),
+  recordEnhancedCacheOperation: vi.fn(),
+  updateServiceHealthScore: vi.fn(),
+  recordDetailedError: vi.fn(),
 }));
 
 // Mock fs/promises

@@ -55,6 +55,12 @@ vi.mock('../../src/services/metrics', () => ({
   updateCacheMetrics: vi.fn(),
   tempDirectories: { inc: vi.fn(), dec: vi.fn() },
   cleanupQueueSize: { set: vi.fn() },
+  recordFeatureUsage: vi.fn(),
+  recordEnhancedCacheOperation: vi.fn(),
+  recordSLACompliance: vi.fn(),
+  getUserType: vi.fn(() => 'api'),
+  getRepositoryType: vi.fn(() => 'public'),
+  updateServiceHealthScore: vi.fn(),
 }));
 
 // Mock the repository cache

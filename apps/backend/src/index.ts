@@ -28,6 +28,7 @@ import {
   metricsMiddleware,
   metricsHandler,
   updateCacheMetrics,
+  updateAllEnhancedMetrics,
 } from './services/metrics';
 
 // NEW IMPORTS: Repository coordination system
@@ -378,9 +379,10 @@ startApplication()
           logger.info('Repository coordination system disabled');
         }
 
-        // Start metrics update scheduler (enhanced with coordination metrics)
+        // Start enhanced metrics update scheduler
         metricsInterval = setInterval(async () => {
-          await updateCacheMetrics();
+          await updateCacheMetrics(); // Backward compatibility
+          await updateAllEnhancedMetrics(); // New comprehensive metrics
 
           // Note: Coordination metrics are updated automatically by the coordinator
           // No need for separate updateCoordinationMetrics function

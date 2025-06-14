@@ -1,7 +1,19 @@
+import { rm, mkdtemp } from 'fs/promises';
+import * as path from 'path';
+import * as os from 'os';
 import simpleGit, { SimpleGit, SimpleGitOptions } from 'simple-git';
-import { mkdtemp, rm } from 'fs/promises';
-import path from 'path';
-import os from 'os';
+import { config } from '../config';
+import { getLogger } from './logger';
+import {
+  recordStreamingStart,
+  recordStreamingCompletion,
+  recordStreamingBatch,
+  recordStreamingError,
+  recordEnhancedCacheOperation,
+  recordDetailedError,
+  updateServiceHealthScore,
+  getRepositoryType,
+} from './metrics';
 import {
   parseISO,
   eachDayOfInterval,
@@ -20,9 +32,7 @@ import {
   ERROR_MESSAGES,
   RepositoryError,
 } from '@gitray/shared-types';
-import { getLogger } from '../services/logger';
 import { shallowClone } from '../utils/gitUtils';
-import { config } from '../config';
 import redis from '../services/cache';
 
 const logger = getLogger();
@@ -169,6 +179,9 @@ class GitService {
       // Get total count for progress tracking
       metrics.totalCommits = await this.getCommitCount(localRepoPath);
 
+      // Record streaming start
+      recordStreamingStart(metrics.totalCommits);
+
       let currentSkip = options.resumeState?.processedCount || 0;
       const batchSize = options.batchSize || config.streaming.batchSize;
       const maxCommits = options.maxCommits || metrics.totalCommits;
@@ -200,9 +213,12 @@ class GitService {
           let batch: Commit[];
           if (cached) {
             batch = JSON.parse(cached);
+            // Safely update cache hit rate
+            const totalBatches = metrics.batchesProcessed + 1;
+            const currentHits =
+              metrics.cacheHitRate * metrics.batchesProcessed + 1;
             metrics.cacheHitRate =
-              (metrics.cacheHitRate * metrics.batchesProcessed + 1) /
-              (metrics.batchesProcessed + 1);
+              totalBatches > 0 ? currentHits / totalBatches : 1;
             logger.debug(
               `Cache hit for batch ${currentSkip}-${currentSkip + currentBatchSize}`
             );
@@ -244,9 +260,11 @@ class GitService {
 
             // Cache this batch for future use
             await redis.set(cacheKey, JSON.stringify(batch), 'EX', 3600); // Cache for 1 hour
+            // Safely update cache hit rate (cache miss case)
+            const totalBatches = metrics.batchesProcessed + 1;
+            const currentHits = metrics.cacheHitRate * metrics.batchesProcessed;
             metrics.cacheHitRate =
-              (metrics.cacheHitRate * metrics.batchesProcessed) /
-              (metrics.batchesProcessed + 1);
+              totalBatches > 0 ? currentHits / totalBatches : 0;
 
             logger.debug(
               `Fetched and cached batch ${currentSkip}-${currentSkip + currentBatchSize}`,
@@ -266,6 +284,23 @@ class GitService {
             metrics.batchesProcessed;
           metrics.lastBatchTime = batchTime;
           metrics.memoryUsageMB = process.memoryUsage().heapUsed / 1024 / 1024;
+
+          // Record enhanced streaming batch metrics
+          recordStreamingBatch(
+            batch.length,
+            batchTime,
+            cached ? true : false,
+            metrics.totalCommits
+          );
+
+          // Record enhanced cache operation
+          recordEnhancedCacheOperation(
+            'batch_cache',
+            cached ? true : false,
+            undefined,
+            localRepoPath,
+            metrics.totalCommits
+          );
 
           // Store resume state for error recovery
           const resumeState: StreamingResumeState = {
@@ -334,14 +369,30 @@ class GitService {
         logger.warn('Failed to clean up resume state', { error: cleanupError });
       }
 
+      // Record streaming completion
+      const totalDuration = Date.now() - metrics.startTime;
+      recordStreamingCompletion(
+        metrics.totalCommits,
+        totalDuration,
+        metrics.processedCommits,
+        metrics.batchesProcessed,
+        metrics.cacheHitRate,
+        metrics.memoryUsageMB
+      );
+
       logger.info(`Streaming completed for ${localRepoPath}`, {
         totalProcessed: metrics.processedCommits,
         totalBatches: metrics.batchesProcessed,
-        totalTime: Date.now() - metrics.startTime,
+        totalTime: totalDuration,
         avgBatchTime: metrics.averageBatchTime,
         cacheHitRate: `${(metrics.cacheHitRate * 100).toFixed(1)}%`,
       });
     } catch (error) {
+      // Record streaming error
+      const errorType =
+        error instanceof Error ? error.constructor.name : 'UnknownError';
+      recordStreamingError(errorType, false, metrics.totalCommits);
+
       logger.error(`Error in commit streaming for ${localRepoPath}`, {
         error,
         metrics,
@@ -522,7 +573,10 @@ class GitService {
    */
   async cloneRepository(repoUrl: string): Promise<string> {
     let tempDir: string | undefined = undefined;
-    logger.info(`Attempting to clone repository: ${repoUrl}`);
+    const startTime = Date.now();
+    const repoType = getRepositoryType(repoUrl);
+
+    logger.info(`Attempting to clone repository: ${repoUrl}`, { repoType });
 
     try {
       const tempDirPrefix = path.join(os.tmpdir(), GIT_SERVICE.TEMP_DIR_PREFIX);
@@ -532,9 +586,45 @@ class GitService {
       await shallowClone(repoUrl, tempDir);
       logger.info(`Successfully cloned ${repoUrl} into ${tempDir}.`);
 
+      // Record successful git operation
+      const duration = (Date.now() - startTime) / 1000;
+      updateServiceHealthScore('git', {
+        errorRate: 0,
+        responseTime: duration,
+      });
+
       return tempDir;
     } catch (error) {
-      logger.error(`Error cloning repository ${repoUrl}`, { error, repoUrl });
+      const duration = (Date.now() - startTime) / 1000;
+
+      // Record detailed error metrics
+      recordDetailedError(
+        'git',
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          userImpact: 'blocking',
+          recoveryAction: 'retry',
+          repoType:
+            repoType === 'unknown'
+              ? undefined
+              : (repoType as 'public' | 'private'),
+          severity: 'critical',
+        }
+      );
+
+      // Update service health with error
+      updateServiceHealthScore('git', {
+        errorRate: 1,
+        responseTime: duration,
+      });
+
+      logger.error(`Error cloning repository ${repoUrl}`, {
+        error,
+        repoUrl,
+        repoType,
+        duration,
+      });
+
       if (tempDir) {
         try {
           logger.info(

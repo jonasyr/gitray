@@ -12,6 +12,17 @@ vi.mock('../../src/services/logger', () => ({
   getLogger: global.getLogger,
 }));
 
+vi.mock('../../src/services/metrics', () => ({
+  recordStreamingStart: vi.fn(),
+  recordStreamingCompletion: vi.fn(),
+  recordStreamingBatch: vi.fn(),
+  recordStreamingError: vi.fn(),
+  recordEnhancedCacheOperation: vi.fn(),
+  recordDetailedError: vi.fn(),
+  updateServiceHealthScore: vi.fn(),
+  getRepositoryType: vi.fn(() => 'public'),
+}));
+
 vi.mock('../../src/services/cache', () => ({
   __esModule: true,
   default: {

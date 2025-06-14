@@ -22,16 +22,18 @@ import {
 } from '../utils/withTempRepository';
 import { createRequestLogger } from '../services/logger';
 import {
-  // cacheHits,
-  // cacheMisses,
   recordStreamingBatch,
-  // getRepositorySizeCategory,
+  recordFeatureUsage,
+  recordEnhancedCacheOperation,
+  recordSLACompliance,
+  getUserType,
+  getRepositoryType,
+  updateServiceHealthScore,
 } from '../services/metrics';
 import {
   CommitFilterOptions,
   ERROR_MESSAGES,
   HTTP_STATUS,
-  // TIME,
 } from '@gitray/shared-types';
 import { config } from '../config';
 
@@ -274,6 +276,33 @@ router.get(
 
       res.setHeader('X-Cache-Hit-Ratio', overallHitRatio.toFixed(3));
 
+      // Record enhanced metrics
+      const responseTime = (Date.now() - startTime) / 1000;
+      const userType = getUserType(req);
+      const repoType = getRepositoryType(repoUrl);
+
+      // Record feature usage
+      recordFeatureUsage('commit_list', userType, true, 'api_call');
+
+      // Record cache operation
+      recordEnhancedCacheOperation(
+        'commits',
+        overallHitRatio > 0.5,
+        req,
+        repoUrl,
+        commits.length
+      );
+
+      // Record SLA compliance
+      recordSLACompliance(req.path, responseTime, userType);
+
+      // Update service health
+      updateServiceHealthScore('api', {
+        errorRate: 0,
+        responseTime,
+        cacheHitRate: overallHitRatio,
+      });
+
       logger.info('Commits request completed via unified caching', {
         repoUrl,
         page,
@@ -283,15 +312,29 @@ router.get(
         repositorySize,
         processingTime: Date.now() - startTime,
         hitRatio: overallHitRatio,
+        userType,
+        repoType,
       });
 
       res.status(HTTP_STATUS.OK).json(result);
     } catch (error) {
+      // Record error metrics
+      const responseTime = (Date.now() - startTime) / 1000;
+      const userType = getUserType(req);
+
+      recordFeatureUsage('commit_list', userType, false, 'api_call');
+      updateServiceHealthScore('api', {
+        errorRate: 1,
+        responseTime,
+      });
+
       logger.error('Error fetching commits via unified cache', {
         error,
         repoUrl,
         page,
         limit,
+        userType,
+        responseTime,
       });
       console.error('Commits route error:', error); // DEBUG: print error in test
       next(error);
