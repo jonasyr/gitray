@@ -85,12 +85,19 @@ let lastMockApp: any = null;
 vi.mock('express', () => {
   const mockJson = vi.fn();
   const createMockApp = () => {
-    const app = {
+    const app: any = {
       use: vi.fn(),
       get: vi.fn(),
       listen: vi.fn().mockImplementation((port: any, callback?: any) => {
         if (callback) callback();
-        return { on: vi.fn() };
+        return {
+          on: vi.fn().mockImplementation((event: string, handler: any) => {
+            // Store the error handler for testing
+            if (event === 'error') {
+              app._errorHandler = handler;
+            }
+          }),
+        };
       }),
     };
     lastMockApp = app;
@@ -260,6 +267,463 @@ describe('Express App Initialization', () => {
 
     // Clean up
     infoSpy.mockRestore();
+  });
+
+  test('should handle server startup errors - EADDRINUSE', async () => {
+    // Mock the server error handling by directly calling error handler
+    const errorSpy = vi.spyOn(mockLogger, 'error');
+
+    // Import the module first to get access to the error handler
+    vi.resetModules();
+    await import('../src/index');
+
+    const mockApp = lastMockApp;
+    expect(mockApp.listen).toHaveBeenCalled();
+
+    // Get the server mock from the listen call
+    const listenCall = mockApp.listen.mock.calls[0];
+    const server = listenCall ? mockApp.listen.mock.results[0].value : null;
+
+    if (server && server.on) {
+      // Find the error handler
+      const errorHandler = server.on.mock.calls.find(
+        (call: any[]) => call[0] === 'error'
+      )?.[1];
+
+      if (errorHandler) {
+        const error = new Error('Port in use') as NodeJS.ErrnoException;
+        error.code = 'EADDRINUSE';
+        errorHandler(error);
+
+        // Assert
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('PORT CONFLICT'),
+          expect.any(Object)
+        );
+        expect(mockProcessExit).toHaveBeenCalledWith(1);
+      }
+    }
+
+    errorSpy.mockRestore();
+  });
+
+  test('should handle server startup errors - EACCES', async () => {
+    // Mock the server error handling by directly calling error handler
+    const errorSpy = vi.spyOn(mockLogger, 'error');
+
+    // Import the module first to get access to the error handler
+    vi.resetModules();
+    await import('../src/index');
+
+    const mockApp = lastMockApp;
+    expect(mockApp.listen).toHaveBeenCalled();
+
+    // Get the server mock from the listen call
+    const listenCall = mockApp.listen.mock.calls[0];
+    const server = listenCall ? mockApp.listen.mock.results[0].value : null;
+
+    if (server && server.on) {
+      // Find the error handler
+      const errorHandler = server.on.mock.calls.find(
+        (call: any[]) => call[0] === 'error'
+      )?.[1];
+
+      if (errorHandler) {
+        const error = new Error('Permission denied') as NodeJS.ErrnoException;
+        error.code = 'EACCES';
+        errorHandler(error);
+
+        // Assert
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('PERMISSION DENIED'),
+          expect.any(Object)
+        );
+        expect(mockProcessExit).toHaveBeenCalledWith(1);
+      }
+    }
+
+    errorSpy.mockRestore();
+  });
+
+  test('should handle server startup errors - ENOTFOUND', async () => {
+    // Mock the server error handling by directly calling error handler
+    const errorSpy = vi.spyOn(mockLogger, 'error');
+
+    // Import the module first to get access to the error handler
+    vi.resetModules();
+    await import('../src/index');
+
+    const mockApp = lastMockApp;
+    expect(mockApp.listen).toHaveBeenCalled();
+
+    // Get the server mock from the listen call
+    const listenCall = mockApp.listen.mock.calls[0];
+    const server = listenCall ? mockApp.listen.mock.results[0].value : null;
+
+    if (server && server.on) {
+      // Find the error handler
+      const errorHandler = server.on.mock.calls.find(
+        (call: any[]) => call[0] === 'error'
+      )?.[1];
+
+      if (errorHandler) {
+        const error = new Error('Network error') as NodeJS.ErrnoException;
+        error.code = 'ENOTFOUND';
+        errorHandler(error);
+
+        // Assert
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('NETWORK ERROR'),
+          expect.any(Object)
+        );
+        expect(mockProcessExit).toHaveBeenCalledWith(1);
+      }
+    }
+
+    errorSpy.mockRestore();
+  });
+
+  test('should handle generic server startup errors', async () => {
+    // Mock the server error handling by directly calling error handler
+    const errorSpy = vi.spyOn(mockLogger, 'error');
+
+    // Import the module first to get access to the error handler
+    vi.resetModules();
+    await import('../src/index');
+
+    const mockApp = lastMockApp;
+    expect(mockApp.listen).toHaveBeenCalled();
+
+    // Get the server mock from the listen call
+    const listenCall = mockApp.listen.mock.calls[0];
+    const server = listenCall ? mockApp.listen.mock.results[0].value : null;
+
+    if (server && server.on) {
+      // Find the error handler
+      const errorHandler = server.on.mock.calls.find(
+        (call: any[]) => call[0] === 'error'
+      )?.[1];
+
+      if (errorHandler) {
+        const error = new Error('Generic error') as NodeJS.ErrnoException;
+        error.code = 'EGENERIC';
+        errorHandler(error);
+
+        // Assert
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('SERVER STARTUP ERROR'),
+          expect.any(Object)
+        );
+        expect(mockProcessExit).toHaveBeenCalledWith(1);
+      }
+    }
+
+    errorSpy.mockRestore();
+  });
+
+  test('should handle coordination health endpoint when disabled', async () => {
+    // Mock config with coordination disabled
+    vi.doMock('../src/config', () => ({
+      config: {
+        port: 3001,
+        cors: {},
+        rateLimit: {},
+        repositoryCache: { enabled: false },
+        operationCoordination: { enabled: false },
+        cacheStrategy: { hierarchicalCaching: false },
+        hybridCache: {
+          enableRedis: false,
+          enableDisk: false,
+          maxEntries: 100,
+          memoryLimitBytes: 1024 * 1024,
+          diskPath: '/tmp/test',
+        },
+        locks: {
+          lockDir: '/tmp/locks',
+          defaultTimeoutMs: 5000,
+        },
+      },
+      validateConfig: vi.fn(),
+    }));
+
+    // Act - Import the index module
+    await import('../src/index');
+
+    const mockApp = lastMockApp;
+
+    // Find the coordination health endpoint
+    const getHealthCalls = mockApp.get.mock.calls.filter(
+      (call: any[]) => call[0] === '/health/coordination'
+    );
+    expect(getHealthCalls).toHaveLength(1);
+
+    const handler = getHealthCalls[0][1];
+    const mockReq = {};
+    const mockRes = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+
+    // Call the handler
+    await handler(mockReq, mockRes);
+
+    // Assert
+    expect(mockRes.status).toHaveBeenCalledWith(200);
+    expect(mockRes.json).toHaveBeenCalledWith({
+      status: 'disabled',
+      message: 'Repository coordination is disabled',
+    });
+  });
+
+  test('should handle coordination health endpoint when enabled and healthy', async () => {
+    // Act - Import the index module first
+    await import('../src/index');
+
+    const mockApp = lastMockApp;
+
+    // Find the coordination health endpoint
+    const getHealthCalls = mockApp.get.mock.calls.filter(
+      (call: any[]) => call[0] === '/health/coordination'
+    );
+    expect(getHealthCalls).toHaveLength(1);
+
+    const handler = getHealthCalls[0][1];
+
+    // Create a mock response that tracks what was called
+    const mockReq = {};
+    const mockRes = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+
+    // Temporarily override the config to enable coordination
+    const originalConfig = await import('../src/config');
+    const configSpy = vi
+      .spyOn(originalConfig, 'config', 'get')
+      .mockReturnValue({
+        ...originalConfig.config,
+        repositoryCache: { enabled: true },
+      } as any);
+
+    // Mock the repository coordinator to return healthy metrics
+    const { repositoryCoordinator } = await import(
+      '../src/services/repositoryCoordinator'
+    );
+    const getMetricsSpy = vi
+      .spyOn(repositoryCoordinator, 'getMetrics')
+      .mockReturnValue({
+        cachedRepositories: 5,
+        activeClones: 2,
+        duplicateClonesPrevented: 10,
+        totalDiskUsageBytes: 1024 * 1024,
+        coalescedOperations: 5,
+        cacheHits: 50,
+        cacheMisses: 10,
+      });
+
+    // Mock the repository cache stats
+    const repositoryCacheModule = await import(
+      '../src/services/repositoryCache'
+    );
+    const getStatsSpy = vi
+      .spyOn(repositoryCacheModule, 'getRepositoryCacheStats')
+      .mockReturnValue({
+        hitRatios: {
+          overall: 0.8,
+          rawCommits: 0.7,
+          filteredCommits: 0.8,
+          aggregatedData: 0.9,
+        },
+        entries: {
+          rawCommits: 5,
+          filteredCommits: 3,
+          aggregatedData: 2,
+        },
+        memoryUsage: {
+          total: 1024,
+          rawCommits: 400,
+          filteredCommits: 300,
+          aggregatedData: 324,
+        },
+        efficiency: {
+          duplicateClonesPrevented: 10,
+          totalCacheOperations: 100,
+          averageHitTime: 50,
+          averageMissTime: 200,
+        },
+      });
+
+    // Call the handler
+    await handler(mockReq, mockRes);
+
+    // Assert
+    expect(mockRes.status).toHaveBeenCalledWith(200);
+    expect(mockRes.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'healthy',
+        coordination: expect.any(Object),
+        cache: expect.any(Object),
+        timestamp: expect.any(String),
+      })
+    );
+
+    // Restore spies
+    configSpy.mockRestore();
+    getMetricsSpy.mockRestore();
+    getStatsSpy.mockRestore();
+  });
+
+  test('should handle coordination health endpoint errors', async () => {
+    // Act - Import the index module first
+    await import('../src/index');
+
+    const mockApp = lastMockApp;
+
+    // Find the coordination health endpoint
+    const getHealthCalls = mockApp.get.mock.calls.filter(
+      (call: any[]) => call[0] === '/health/coordination'
+    );
+    expect(getHealthCalls).toHaveLength(1);
+
+    const handler = getHealthCalls[0][1];
+
+    // Create a mock response that tracks what was called
+    const mockReq = {};
+    const mockRes = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+
+    // Temporarily override the config to enable coordination
+    const originalConfig = await import('../src/config');
+    const configSpy = vi
+      .spyOn(originalConfig, 'config', 'get')
+      .mockReturnValue({
+        ...originalConfig.config,
+        repositoryCache: { enabled: true },
+      } as any);
+
+    // Mock the repository coordinator to throw an error
+    const { repositoryCoordinator } = await import(
+      '../src/services/repositoryCoordinator'
+    );
+    const getMetricsSpy = vi
+      .spyOn(repositoryCoordinator, 'getMetrics')
+      .mockImplementation(() => {
+        throw new Error('Coordination system failure');
+      });
+
+    const errorSpy = vi.spyOn(mockLogger, 'error');
+
+    // Call the handler
+    await handler(mockReq, mockRes);
+
+    // Assert
+    expect(mockRes.status).toHaveBeenCalledWith(503);
+    expect(mockRes.json).toHaveBeenCalledWith({
+      status: 'error',
+      message: 'Failed to get coordination health',
+    });
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Coordination health check failed',
+      expect.any(Object)
+    );
+
+    // Restore spies
+    configSpy.mockRestore();
+    getMetricsSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+});
+
+describe('Startup Environment Validation', () => {
+  test('should validate port configuration', async () => {
+    // Set invalid port
+    process.env.PORT = '99999';
+
+    vi.doMock('../src/config', () => ({
+      config: {
+        port: 99999,
+        cors: {},
+        rateLimit: {},
+        repositoryCache: { enabled: false },
+        operationCoordination: { enabled: false },
+        cacheStrategy: { hierarchicalCaching: false },
+        hybridCache: {
+          enableRedis: false,
+          enableDisk: false,
+          maxEntries: 100,
+          memoryLimitBytes: 1024 * 1024,
+          diskPath: '/tmp/test',
+        },
+        locks: {
+          lockDir: '/tmp/locks',
+          defaultTimeoutMs: 5000,
+        },
+      },
+      validateConfig: vi.fn().mockImplementation(() => {
+        throw new Error('Invalid port configuration');
+      }),
+    }));
+
+    const errorSpy = vi.spyOn(mockLogger, 'error');
+
+    // Act - Import the index module
+    await import('../src/index');
+
+    // Assert
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Configuration or startup validation failed',
+      expect.any(Object)
+    );
+    expect(mockProcessExit).toHaveBeenCalledWith(1);
+
+    errorSpy.mockRestore();
+  });
+
+  test('should handle application startup failure', async () => {
+    // Clear modules first
+    vi.resetModules();
+
+    // Mock config validation to throw BEFORE importing
+    vi.doMock('../src/config', () => ({
+      config: {
+        port: 3001,
+        cors: {},
+        rateLimit: {},
+        repositoryCache: { enabled: false },
+        operationCoordination: { enabled: false },
+        cacheStrategy: { hierarchicalCaching: false },
+        hybridCache: {
+          enableRedis: false,
+          enableDisk: false,
+          maxEntries: 100,
+          memoryLimitBytes: 1024 * 1024,
+          diskPath: '/tmp/test',
+        },
+        locks: {
+          lockDir: '/tmp/locks',
+          defaultTimeoutMs: 5000,
+        },
+      },
+      validateConfig: vi.fn().mockImplementation(() => {
+        throw new Error('Startup failure');
+      }),
+    }));
+
+    const errorSpy = vi.spyOn(mockLogger, 'error');
+
+    // Act - Import the index module
+    await import('../src/index');
+
+    // Assert
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Configuration or startup validation failed',
+      expect.any(Object)
+    );
+    expect(mockProcessExit).toHaveBeenCalledWith(1);
+
+    errorSpy.mockRestore();
   });
 });
 

@@ -331,40 +331,289 @@ describe('Configuration', () => {
   });
 
   describe('Configuration Validation', () => {
-    test('should have all required configuration sections', async () => {
-      const { config } = await import('../src/config');
+    test('should validate hybrid cache configuration', async () => {
+      process.env.CACHE_MAX_ENTRIES = '0';
+      process.env.CACHE_MEMORY_LIMIT_GB = '0';
+      process.env.CACHE_LOCK_TIMEOUT_MS = '0';
 
-      expect(config).toHaveProperty('port');
-      expect(config).toHaveProperty('cors');
-      expect(config).toHaveProperty('rateLimit');
-      expect(config).toHaveProperty('redis');
-      expect(config).toHaveProperty('git');
-      expect(config).toHaveProperty('hybridCache');
-      expect(config).toHaveProperty('cacheStrategy');
-      expect(config).toHaveProperty('locks');
-      expect(config).toHaveProperty('operationCoordination');
+      const { validateConfig } = await import('../src/config');
+
+      expect(() => validateConfig()).toThrow();
     });
 
-    test('should have proper nested configuration structure', async () => {
+    test('should validate Redis configuration', async () => {
+      process.env.REDIS_PORT = '70000'; // Invalid port
+
+      const { validateConfig } = await import('../src/config');
+
+      expect(() => validateConfig()).toThrow();
+    });
+
+    test('should validate Git configuration', async () => {
+      process.env.GIT_MAX_CONCURRENT_PROCESSES = '0';
+      process.env.GIT_CLONE_DEPTH = '0';
+
+      const { validateConfig } = await import('../src/config');
+
+      expect(() => validateConfig()).toThrow();
+    });
+
+    test('should warn about high Git concurrent processes', async () => {
+      process.env.GIT_MAX_CONCURRENT_PROCESSES = '25';
+
+      const { validateConfig } = await import('../src/config');
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      validateConfig();
+
+      // The validation should not throw but should warn
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('GIT_MAX_CONCURRENT_PROCESSES is very high')
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('should warn about low Git clone depth', async () => {
+      process.env.GIT_CLONE_DEPTH = '5';
+
+      const { validateConfig } = await import('../src/config');
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      validateConfig();
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('GIT_CLONE_DEPTH is very low')
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('should validate repository cache configuration when enabled', async () => {
+      process.env.REPO_CACHE_ENABLED = 'true';
+      process.env.REPO_CACHE_MAX_REPOSITORIES = '0';
+      process.env.REPO_CACHE_MAX_AGE_HOURS = '0';
+
+      const { validateConfig } = await import('../src/config');
+
+      expect(() => validateConfig()).toThrow();
+    });
+
+    test('should warn about low repository cache disk limit', async () => {
+      process.env.REPO_CACHE_ENABLED = 'true';
+      process.env.REPO_CACHE_DISK_LIMIT_GB = '0.05'; // 50MB
+
+      const { validateConfig } = await import('../src/config');
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      validateConfig();
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('REPO_CACHE_DISK_LIMIT_GB is very low')
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('should warn about high repository cache disk limit', async () => {
+      process.env.REPO_CACHE_ENABLED = 'true';
+      process.env.REPO_CACHE_DISK_LIMIT_GB = '60'; // 60GB
+
+      const { validateConfig } = await import('../src/config');
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      validateConfig();
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('REPO_CACHE_DISK_LIMIT_GB is very high')
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('should validate operation coordination when enabled', async () => {
+      process.env.REPO_OPERATION_COORDINATION_ENABLED = 'true';
+      process.env.REPO_MAX_CONCURRENT_OPS = '0';
+
+      const { validateConfig } = await import('../src/config');
+
+      expect(() => validateConfig()).toThrow();
+    });
+
+    test('should warn about low operation timeout', async () => {
+      process.env.REPO_OPERATION_COORDINATION_ENABLED = 'true';
+      process.env.REPO_OPERATION_TIMEOUT_MS = '10000'; // 10 seconds
+
+      const { validateConfig } = await import('../src/config');
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      validateConfig();
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('REPO_OPERATION_TIMEOUT_MS is very low')
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('should validate cache strategy thresholds', async () => {
+      process.env.CACHE_MEMORY_PRESSURE_THRESHOLD = '120'; // Invalid: > 100
+      process.env.CACHE_EMERGENCY_EVICTION_PERCENT = '120'; // Invalid: > 100
+
+      const { validateConfig } = await import('../src/config');
+
+      expect(() => validateConfig()).toThrow();
+    });
+
+    test('should validate cache strategy thresholds - zero values', async () => {
+      process.env.CACHE_MEMORY_PRESSURE_THRESHOLD = '0';
+      process.env.CACHE_EMERGENCY_EVICTION_PERCENT = '0';
+
+      const { validateConfig } = await import('../src/config');
+
+      expect(() => validateConfig()).toThrow();
+    });
+
+    test('should warn about very low raw commits TTL', async () => {
+      process.env.CACHE_RAW_COMMITS_TTL_SECONDS = '60'; // 1 minute
+
+      const { validateConfig } = await import('../src/config');
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      validateConfig();
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('CACHE_RAW_COMMITS_TTL_SECONDS is very low')
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('should warn about very high raw commits TTL', async () => {
+      process.env.CACHE_RAW_COMMITS_TTL_SECONDS = '100000'; // > 24 hours
+
+      const { validateConfig } = await import('../src/config');
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      validateConfig();
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('CACHE_RAW_COMMITS_TTL_SECONDS is very high')
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('should pass validation with valid configuration', async () => {
+      // Set all valid values
+      process.env.CACHE_MAX_ENTRIES = '1000';
+      process.env.CACHE_MEMORY_LIMIT_GB = '1';
+      process.env.CACHE_LOCK_TIMEOUT_MS = '30000';
+      process.env.REDIS_PORT = '6379';
+      process.env.GIT_MAX_CONCURRENT_PROCESSES = '5';
+      process.env.GIT_CLONE_DEPTH = '50';
+      process.env.REPO_CACHE_ENABLED = 'true';
+      process.env.REPO_CACHE_MAX_REPOSITORIES = '50';
+      process.env.REPO_CACHE_MAX_AGE_HOURS = '24';
+      process.env.REPO_CACHE_DISK_LIMIT_GB = '5';
+      process.env.REPO_OPERATION_COORDINATION_ENABLED = 'true';
+      process.env.REPO_OPERATION_TIMEOUT_MS = '600000';
+      process.env.REPO_MAX_CONCURRENT_OPS = '3';
+      process.env.CACHE_MEMORY_PRESSURE_THRESHOLD = '80';
+      process.env.CACHE_EMERGENCY_EVICTION_PERCENT = '30';
+      process.env.CACHE_RAW_COMMITS_TTL_SECONDS = '3600';
+
+      const { validateConfig } = await import('../src/config');
+
+      expect(() => validateConfig()).not.toThrow();
+    });
+
+    test('should handle repository cache disabled', async () => {
+      process.env.REPO_CACHE_ENABLED = 'false';
+
+      const { validateConfig } = await import('../src/config');
+
+      // Should not validate repository cache settings when disabled
+      expect(() => validateConfig()).not.toThrow();
+    });
+
+    test('should handle operation coordination disabled', async () => {
+      process.env.REPO_OPERATION_COORDINATION_ENABLED = 'false';
+
+      const { validateConfig } = await import('../src/config');
+
+      // Should not validate operation coordination settings when disabled
+      expect(() => validateConfig()).not.toThrow();
+    });
+  });
+
+  describe('Advanced Configuration Features', () => {
+    test('should configure streaming settings', async () => {
+      process.env.STREAMING_ENABLED = 'true';
+      process.env.STREAMING_COMMIT_THRESHOLD = '100000';
+      process.env.STREAMING_BATCH_SIZE = '2000';
+
       const { config } = await import('../src/config');
 
-      // Verify nested structures exist
-      expect(config.cors).toHaveProperty('origin');
-      expect(config.cors).toHaveProperty('credentials');
+      expect(config.streaming.enabled).toBe(true);
+      expect(config.streaming.commitThreshold).toBe(100000);
+      expect(config.streaming.batchSize).toBe(2000);
+    });
 
-      expect(config.rateLimit).toHaveProperty('windowMs');
-      expect(config.rateLimit).toHaveProperty('max');
-      expect(config.rateLimit).toHaveProperty('message');
+    test('should configure debug settings', async () => {
+      process.env.DEBUG_CACHE_LOGGING = 'true';
+      process.env.DEBUG_LOCK_LOGGING = 'true';
+      process.env.LOG_LEVEL = 'debug';
+      process.env.ENABLE_METRICS = 'false';
 
-      expect(config.cacheStrategy).toHaveProperty('hierarchicalCaching');
-      expect(config.cacheStrategy).toHaveProperty('cacheKeys');
-      expect(config.cacheStrategy.cacheKeys).toHaveProperty('rawCommitsTTL');
-      expect(config.cacheStrategy.cacheKeys).toHaveProperty(
-        'filteredCommitsTTL'
-      );
-      expect(config.cacheStrategy.cacheKeys).toHaveProperty(
-        'aggregatedDataTTL'
-      );
+      const { config } = await import('../src/config');
+
+      expect(config.debug.enableCacheLogging).toBe(true);
+      expect(config.debug.enableLockLogging).toBe(true);
+      expect(config.debug.logLevel).toBe('debug');
+      expect(config.debug.enableMetrics).toBe(false);
+    });
+
+    test('should configure cache warming settings', async () => {
+      process.env.CACHE_WARMING_ENABLED = 'true';
+      process.env.CACHE_WARMING_MAX_REPOS = '20';
+      process.env.CACHE_WARMING_SCHEDULE_HOURS = '12';
+
+      const { config } = await import('../src/config');
+
+      expect(config.cacheStrategy.cacheWarming.enabled).toBe(true);
+      expect(config.cacheStrategy.cacheWarming.maxWarmupRepos).toBe(20);
+      expect(config.cacheStrategy.cacheWarming.warmupScheduleHours).toBe(12);
+    });
+
+    test('should configure lock manager settings', async () => {
+      process.env.LOCK_DIR = '/custom/lock/dir';
+      process.env.CACHE_LOCK_TIMEOUT_MS = '180000';
+      process.env.LOCK_CLEANUP_INTERVAL_MS = '600000';
+      process.env.LOCK_STALE_AGE_MS = '1200000';
+      process.env.DEBUG_LOCK_LOGGING = 'true';
+
+      const { config } = await import('../src/config');
+
+      expect(config.locks.lockDir).toBe('/custom/lock/dir');
+      expect(config.locks.defaultTimeoutMs).toBe(180000);
+      expect(config.locks.cleanupIntervalMs).toBe(600000);
+      expect(config.locks.staleLockAgeMs).toBe(1200000);
+      expect(config.locks.enableLockLogging).toBe(true);
+    });
+
+    test('should configure all cache TTL settings', async () => {
+      process.env.CACHE_RAW_COMMITS_TTL_SECONDS = '7200';
+      process.env.CACHE_FILTERED_COMMITS_TTL_SECONDS = '3600';
+      process.env.CACHE_AGGREGATED_DATA_TTL_SECONDS = '1800';
+      process.env.CACHE_REPOSITORY_INFO_TTL_SECONDS = '14400';
+
+      const { config } = await import('../src/config');
+
+      expect(config.cacheStrategy.cacheKeys.rawCommitsTTL).toBe(7200);
+      expect(config.cacheStrategy.cacheKeys.filteredCommitsTTL).toBe(3600);
+      expect(config.cacheStrategy.cacheKeys.aggregatedDataTTL).toBe(1800);
+      expect(config.cacheStrategy.cacheKeys.repositoryInfoTTL).toBe(14400);
     });
   });
 
