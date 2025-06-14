@@ -441,7 +441,11 @@ describe('GitService Streaming Functionality', () => {
       expect(commits).toHaveLength(1);
       expect(commits[0].sha).toBe('abc123');
       expect(global.mockLogger.info).toHaveBeenCalledWith(
-        'Using streaming getCommits for large repository'
+        'Using streaming getCommits for large repository or memory pressure',
+        {
+          forceStreaming: false,
+          pressureLevel: 'normal',
+        }
       );
     });
 

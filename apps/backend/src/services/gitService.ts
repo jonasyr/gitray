@@ -34,6 +34,11 @@ import {
 } from '@gitray/shared-types';
 import { shallowClone } from '../utils/gitUtils';
 import redis from '../services/cache';
+// Memory protection imports
+import {
+  executeWithMemoryProtection,
+  getMemoryStats,
+} from '../utils/memoryPressureManager';
 
 const logger = getLogger();
 
@@ -121,6 +126,7 @@ class GitService {
 
   /**
    * NEW: Determines if streaming mode should be used based on repository size
+   * and current memory pressure
    */
   async shouldUseStreaming(localRepoPath: string): Promise<boolean> {
     if (!config.streaming.enabled) {
@@ -129,6 +135,16 @@ class GitService {
     }
 
     try {
+      // Check memory pressure first - force streaming under pressure
+      const memoryStats = getMemoryStats();
+      if (memoryStats.pressure.level !== 'normal') {
+        logger.info('Forcing streaming due to memory pressure', {
+          pressureLevel: memoryStats.pressure.level,
+          systemMemoryUsage: `${(memoryStats.system.usagePercentage * 100).toFixed(1)}%`,
+        });
+        return true;
+      }
+
       const commitCount = await this.getCommitCount(localRepoPath);
       const useStreaming = commitCount > config.streaming.commitThreshold;
 
@@ -138,6 +154,7 @@ class GitService {
           commitCount,
           threshold: config.streaming.commitThreshold,
           useStreaming,
+          memoryPressure: memoryStats.pressure.level,
         }
       );
 
@@ -155,14 +172,16 @@ class GitService {
   }
 
   /**
-   * NEW: Streaming commit retrieval using async generator
-   * Processes commits in configurable batches with progressive caching
+   * NEW: Streaming commit retrieval using async generator with memory-aware processing
+   * Processes commits in configurable batches with progressive caching and memory protection
    */
   async *getCommitsStream(
     localRepoPath: string,
     options: StreamingOptions
   ): AsyncGenerator<Commit[], StreamingMetrics, unknown> {
-    logger.info(`Starting commit stream for: ${localRepoPath}`, { options });
+    logger.info(`Starting memory-aware commit stream for: ${localRepoPath}`, {
+      options,
+    });
 
     const localGit: SimpleGit = simpleGit(localRepoPath);
     const metrics: StreamingMetrics = {
@@ -186,24 +205,47 @@ class GitService {
       const batchSize = options.batchSize || config.streaming.batchSize;
       const maxCommits = options.maxCommits || metrics.totalCommits;
 
-      logger.info(`Streaming configuration`, {
+      logger.info(`Memory-aware streaming configuration`, {
         totalCommits: metrics.totalCommits,
-        batchSize,
+        initialBatchSize: batchSize,
         maxCommits,
         resumeFromSkip: currentSkip,
       });
 
       while (currentSkip < maxCommits && currentSkip < metrics.totalCommits) {
         const batchStartTime = Date.now();
+
+        // Dynamic batch size adjustment based on memory pressure
+        const memoryStats = getMemoryStats();
+        let adjustedBatchSize = batchSize;
+
+        if (memoryStats.pressure.level === 'warning') {
+          adjustedBatchSize = Math.min(batchSize, 500);
+        } else if (memoryStats.pressure.level === 'critical') {
+          adjustedBatchSize = Math.min(batchSize, 250);
+        } else if (memoryStats.pressure.level === 'emergency') {
+          adjustedBatchSize = Math.min(batchSize, 100);
+        }
+
         const remaining = Math.min(
           maxCommits - currentSkip,
           metrics.totalCommits - currentSkip
         );
-        const currentBatchSize = Math.min(batchSize, remaining);
+        const currentBatchSize = Math.min(adjustedBatchSize, remaining);
 
         logger.debug(
-          `Processing batch: skip=${currentSkip}, size=${currentBatchSize}`
+          `Processing memory-aware batch: skip=${currentSkip}, size=${currentBatchSize}, pressureLevel=${memoryStats.pressure.level}`
         );
+
+        // Emergency memory pressure check
+        if (memoryStats.pressure.level === 'emergency') {
+          logger.error('Emergency memory pressure - stopping stream', {
+            localRepoPath,
+            batchesProcessed: metrics.batchesProcessed,
+            processedCommits: metrics.processedCommits,
+          });
+          throw new Error('Streaming stopped due to emergency memory pressure');
+        }
 
         try {
           // Check cache first for this specific batch
@@ -408,7 +450,8 @@ class GitService {
 
   /**
    * ENHANCED: Original getCommits method with automatic streaming detection
-   * Maintains backward compatibility while adding streaming capabilities
+   * and memory protection. Maintains backward compatibility while adding
+   * streaming capabilities and memory-aware processing.
    */
   async getCommits(
     localRepoPath: string,
@@ -418,22 +461,61 @@ class GitService {
 
     // If specific pagination is requested, use the original implementation
     if (options?.skip !== undefined || options?.limit !== undefined) {
-      return this.getCommitsOriginal(localRepoPath, options);
+      return executeWithMemoryProtection(
+        'git-getCommits-paginated',
+        () => this.getCommitsOriginal(localRepoPath, options),
+        {
+          estimatedMemoryMB: options?.limit ? options.limit * 0.001 : 50,
+          priority: 'normal',
+        }
+      );
     }
 
     try {
+      // Check memory pressure first
+      const memoryStats = getMemoryStats();
+      const forceStreaming =
+        memoryStats.pressure.level === 'warning' ||
+        memoryStats.pressure.level === 'critical' ||
+        memoryStats.pressure.level === 'emergency';
+
       // Check if streaming should be used
-      const useStreaming = await this.shouldUseStreaming(localRepoPath);
+      const useStreaming =
+        forceStreaming || (await this.shouldUseStreaming(localRepoPath));
 
       if (!useStreaming) {
         logger.info('Using original getCommits for small repository');
-        return this.getCommitsOriginal(localRepoPath);
+        return executeWithMemoryProtection(
+          'git-getCommits-small',
+          () => this.getCommitsOriginal(localRepoPath),
+          {
+            estimatedMemoryMB: 50,
+            priority: 'normal',
+          }
+        );
       }
 
-      // Use streaming for large repositories
-      logger.info('Using streaming getCommits for large repository');
+      // Use streaming for large repositories or under memory pressure
+      logger.info(
+        'Using streaming getCommits for large repository or memory pressure',
+        {
+          forceStreaming,
+          pressureLevel: memoryStats.pressure.level,
+        }
+      );
+
+      // Adjust batch size based on memory pressure
+      let batchSize = config.streaming.batchSize;
+      if (memoryStats.pressure.level === 'warning') {
+        batchSize = Math.min(batchSize, 500);
+      } else if (memoryStats.pressure.level === 'critical') {
+        batchSize = Math.min(batchSize, 250);
+      } else if (memoryStats.pressure.level === 'emergency') {
+        batchSize = Math.min(batchSize, 100);
+      }
+
       const streamingOptions: StreamingOptions = {
-        batchSize: config.streaming.batchSize,
+        batchSize,
       };
 
       const allCommits: Commit[] = [];
@@ -445,19 +527,37 @@ class GitService {
       )) {
         allCommits.push(...batch);
 
+        // Check memory pressure during streaming
+        const currentStats = getMemoryStats();
+        if (currentStats.pressure.level === 'emergency') {
+          logger.warn(
+            'Emergency memory pressure during streaming - truncating results',
+            {
+              commitsCollected: allCommits.length,
+              localRepoPath,
+            }
+          );
+          break;
+        }
+
         // Progress logging for large operations
         if (allCommits.length % 5000 === 0) {
           logger.info(
-            `Streaming progress: ${allCommits.length} commits processed`
+            `Memory-aware streaming progress: ${allCommits.length} commits processed`,
+            {
+              memoryUsage: `${currentStats.system.usagePercentage.toFixed(2)}%`,
+              pressureLevel: currentStats.pressure.level,
+            }
           );
         }
       }
 
       const streamTime = Date.now() - streamStartTime;
-      logger.info(`Streaming getCommits completed`, {
+      logger.info(`Memory-protected streaming getCommits completed`, {
         totalCommits: allCommits.length,
         streamingTime: streamTime,
         commitsPerSecond: Math.round(allCommits.length / (streamTime / 1000)),
+        finalMemoryPressure: getMemoryStats().pressure.level,
       });
 
       return allCommits;
@@ -569,81 +669,93 @@ class GitService {
   // ========================================================================
 
   /**
-   * Clones a Git repository into a temporary directory.
+   * Clones a Git repository into a temporary directory with memory protection.
    */
   async cloneRepository(repoUrl: string): Promise<string> {
-    let tempDir: string | undefined = undefined;
-    const startTime = Date.now();
-    const repoType = getRepositoryType(repoUrl);
+    return executeWithMemoryProtection(
+      'git-clone',
+      async () => {
+        let tempDir: string | undefined = undefined;
+        const startTime = Date.now();
+        const repoType = getRepositoryType(repoUrl);
 
-    logger.info(`Attempting to clone repository: ${repoUrl}`, { repoType });
+        logger.info(`Attempting to clone repository: ${repoUrl}`, { repoType });
 
-    try {
-      const tempDirPrefix = path.join(os.tmpdir(), GIT_SERVICE.TEMP_DIR_PREFIX);
-      tempDir = await mkdtemp(tempDirPrefix);
-      logger.info(`Created temporary directory: ${tempDir}`);
-
-      await shallowClone(repoUrl, tempDir);
-      logger.info(`Successfully cloned ${repoUrl} into ${tempDir}.`);
-
-      // Record successful git operation
-      const duration = (Date.now() - startTime) / 1000;
-      updateServiceHealthScore('git', {
-        errorRate: 0,
-        responseTime: duration,
-      });
-
-      return tempDir;
-    } catch (error) {
-      const duration = (Date.now() - startTime) / 1000;
-
-      // Record detailed error metrics
-      recordDetailedError(
-        'git',
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          userImpact: 'blocking',
-          recoveryAction: 'retry',
-          repoType:
-            repoType === 'unknown'
-              ? undefined
-              : (repoType as 'public' | 'private'),
-          severity: 'critical',
-        }
-      );
-
-      // Update service health with error
-      updateServiceHealthScore('git', {
-        errorRate: 1,
-        responseTime: duration,
-      });
-
-      logger.error(`Error cloning repository ${repoUrl}`, {
-        error,
-        repoUrl,
-        repoType,
-        duration,
-      });
-
-      if (tempDir) {
         try {
-          logger.info(
-            `Attempting cleanup of failed clone directory: ${tempDir}`
+          const tempDirPrefix = path.join(
+            os.tmpdir(),
+            GIT_SERVICE.TEMP_DIR_PREFIX
           );
-          await rm(tempDir, { recursive: true, force: true });
-          logger.info(`Cleaned up temporary directory: ${tempDir}`);
-        } catch (cleanupError) {
-          logger.error(`Failed to cleanup temporary directory ${tempDir}`, {
-            cleanupError,
-            tempDir,
+          tempDir = await mkdtemp(tempDirPrefix);
+          logger.info(`Created temporary directory: ${tempDir}`);
+
+          await shallowClone(repoUrl, tempDir);
+          logger.info(`Successfully cloned ${repoUrl} into ${tempDir}.`);
+
+          // Record successful git operation
+          const duration = (Date.now() - startTime) / 1000;
+          updateServiceHealthScore('git', {
+            errorRate: 0,
+            responseTime: duration,
           });
+
+          return tempDir;
+        } catch (error) {
+          const duration = (Date.now() - startTime) / 1000;
+
+          // Record detailed error metrics
+          recordDetailedError(
+            'git',
+            error instanceof Error ? error : new Error(String(error)),
+            {
+              userImpact: 'blocking',
+              recoveryAction: 'retry',
+              repoType:
+                repoType === 'unknown'
+                  ? undefined
+                  : (repoType as 'public' | 'private'),
+              severity: 'critical',
+            }
+          );
+
+          // Update service health with error
+          updateServiceHealthScore('git', {
+            errorRate: 1,
+            responseTime: duration,
+          });
+
+          logger.error(`Error cloning repository ${repoUrl}`, {
+            error,
+            repoUrl,
+            repoType,
+            duration,
+          });
+
+          if (tempDir) {
+            try {
+              logger.info(
+                `Attempting cleanup of failed clone directory: ${tempDir}`
+              );
+              await rm(tempDir, { recursive: true, force: true });
+              logger.info(`Cleaned up temporary directory: ${tempDir}`);
+            } catch (cleanupError) {
+              logger.error(`Failed to cleanup temporary directory ${tempDir}`, {
+                cleanupError,
+                tempDir,
+              });
+            }
+          }
+          throw new RepositoryError(
+            `${ERROR_MESSAGES.REPO_CLONE_FAILED}: ${error instanceof Error ? error.message : String(error)}`,
+            repoUrl
+          );
         }
+      },
+      {
+        estimatedMemoryMB: 100, // Estimate based on average repo size
+        priority: 'normal',
       }
-      throw new RepositoryError(
-        `${ERROR_MESSAGES.REPO_CLONE_FAILED}: ${error instanceof Error ? error.message : String(error)}`,
-        repoUrl
-      );
-    }
+    );
   }
 
   private filterByAuthors(commits: Commit[], authors?: string[]): Commit[] {
@@ -702,40 +814,49 @@ class GitService {
   }
 
   /**
-   * Aggregates commit data by time periods.
+   * Aggregates commit data by time periods with memory protection.
    */
   async aggregateCommitsByTime(
     commits: Commit[],
     filterOptions?: CommitFilterOptions
   ): Promise<CommitHeatmapData> {
-    logger.info('Aggregating commits by day', { filterOptions });
+    return executeWithMemoryProtection(
+      'git-aggregate',
+      async () => {
+        logger.info('Aggregating commits by day', { filterOptions });
 
-    const endDate = filterOptions?.toDate
-      ? parseISO(filterOptions.toDate)
-      : new Date();
-    const startDate = filterOptions?.fromDate
-      ? parseISO(filterOptions.fromDate)
-      : subDays(endDate, 364);
+        const endDate = filterOptions?.toDate
+          ? parseISO(filterOptions.toDate)
+          : new Date();
+        const startDate = filterOptions?.fromDate
+          ? parseISO(filterOptions.fromDate)
+          : subDays(endDate, 364);
 
-    const authors =
-      filterOptions?.authors ??
-      (filterOptions?.author ? [filterOptions.author] : undefined);
+        const authors =
+          filterOptions?.authors ??
+          (filterOptions?.author ? [filterOptions.author] : undefined);
 
-    let filtered = this.filterByAuthors(commits, authors);
-    filtered = this.filterByDateRange(filtered, startDate, endDate);
+        let filtered = this.filterByAuthors(commits, authors);
+        filtered = this.filterByDateRange(filtered, startDate, endDate);
 
-    const buckets = this.createDateBuckets(startDate, endDate);
-    const maxCommitCount = this.tallyCommits(filtered, buckets);
+        const buckets = this.createDateBuckets(startDate, endDate);
+        const maxCommitCount = this.tallyCommits(filtered, buckets);
 
-    const aggregatedData = Array.from(buckets.values());
-    return {
-      timePeriod: 'day',
-      data: aggregatedData,
-      metadata: {
-        maxCommitCount,
-        totalCommits: filtered.length,
+        const aggregatedData = Array.from(buckets.values());
+        return {
+          timePeriod: 'day',
+          data: aggregatedData,
+          metadata: {
+            maxCommitCount,
+            totalCommits: filtered.length,
+          },
+        };
       },
-    };
+      {
+        estimatedMemoryMB: commits.length * 0.001,
+        priority: 'normal',
+      }
+    );
   }
 
   /**
