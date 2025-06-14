@@ -57,10 +57,14 @@ export interface MemoryPressureConfig {
 class MemoryPressureManager {
   private config: MemoryPressureConfig;
   private circuitBreakerState: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
+  private circuitBreakerLock = false; // Prevent race conditions in state transitions
   private lastAlertTime = 0;
   private monitoringInterval: NodeJS.Timeout | null = null;
   private pressureHistory: MemoryPressureStats[] = [];
   private emergencyEvictionCount = 0;
+  private isCheckingMemory = false; // Prevent overlapping memory checks
+  private lastPressureLevel: 'normal' | 'warning' | 'critical' | 'emergency' =
+    'normal'; // For hysteresis
 
   // Metrics for monitoring
   private metrics = {
@@ -107,11 +111,15 @@ class MemoryPressureManager {
     const processMemory = process.memoryUsage();
     const processUsagePercentage = processMemory.rss / totalMemory;
 
-    // Determine pressure level
+    // Hysteresis to prevent oscillation (2% buffer when stepping down)
+    const hysteresis = 0.02;
+
+    // Determine pressure level with hysteresis
     let pressureLevel: 'normal' | 'warning' | 'critical' | 'emergency' =
       'normal';
     let action = 'none';
 
+    // Step up thresholds (no hysteresis)
     if (systemUsagePercentage >= this.config.emergencyThreshold) {
       pressureLevel = 'emergency';
       action = 'emergency_eviction + throttling + circuit_breaker';
@@ -128,6 +136,39 @@ class MemoryPressureManager {
       pressureLevel = 'warning';
       action = 'monitoring + gc';
     }
+
+    // Apply hysteresis when stepping down to prevent oscillation
+    if (
+      this.lastPressureLevel === 'emergency' &&
+      pressureLevel === 'critical'
+    ) {
+      // Only step down from emergency if significantly below threshold
+      if (systemUsagePercentage > this.config.emergencyThreshold - hysteresis) {
+        pressureLevel = 'emergency';
+        action = 'emergency_eviction + throttling + circuit_breaker';
+      }
+    } else if (
+      this.lastPressureLevel === 'critical' &&
+      pressureLevel === 'warning'
+    ) {
+      // Only step down from critical if significantly below threshold
+      if (systemUsagePercentage > this.config.criticalThreshold - hysteresis) {
+        pressureLevel = 'critical';
+        action = 'throttling + circuit_breaker + gc';
+      }
+    } else if (
+      this.lastPressureLevel === 'warning' &&
+      pressureLevel === 'normal'
+    ) {
+      // Only step down from warning if significantly below threshold
+      if (systemUsagePercentage > this.config.warningThreshold - hysteresis) {
+        pressureLevel = 'warning';
+        action = 'monitoring + gc';
+      }
+    }
+
+    // Update last pressure level for next hysteresis calculation
+    this.lastPressureLevel = pressureLevel;
 
     return {
       system: {
@@ -334,7 +375,22 @@ class MemoryPressureManager {
     if (this.monitoringInterval) return;
 
     this.monitoringInterval = setInterval(() => {
-      this.checkMemoryPressure();
+      // Prevent overlapping memory checks if previous check is still running
+      if (!this.isCheckingMemory) {
+        this.isCheckingMemory = true;
+
+        try {
+          this.checkMemoryPressure();
+        } catch (error) {
+          logger.error('Memory pressure check failed', { error });
+        } finally {
+          this.isCheckingMemory = false;
+        }
+      } else {
+        logger.debug(
+          'Skipping memory check - previous check still in progress'
+        );
+      }
     }, this.config.checkIntervalMs);
 
     logger.info('Memory pressure monitoring started', {
@@ -409,7 +465,11 @@ class MemoryPressureManager {
   }
 
   private openCircuitBreaker(): void {
+    // Prevent race conditions during state transitions
+    if (this.circuitBreakerLock) return;
+
     if (this.circuitBreakerState !== 'OPEN') {
+      this.circuitBreakerLock = true;
       this.circuitBreakerState = 'OPEN';
       logger.warn('Memory pressure circuit breaker OPENED');
 
@@ -421,13 +481,18 @@ class MemoryPressureManager {
             'Memory pressure circuit breaker transitioned to HALF_OPEN'
           );
         }
+        this.circuitBreakerLock = false; // Release lock after transition
       }, 30000); // 30 seconds
     }
   }
 
   private closeCircuitBreaker(): void {
+    // Prevent race conditions when closing circuit breaker
+    if (this.circuitBreakerLock) return;
+
     if (this.circuitBreakerState !== 'CLOSED') {
       this.circuitBreakerState = 'CLOSED';
+      this.circuitBreakerLock = false; // Ensure lock is released when closing
       logger.info('Memory pressure circuit breaker CLOSED');
     }
   }
