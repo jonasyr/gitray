@@ -649,6 +649,77 @@ export const repositorySizeDistribution = new Histogram({
   ],
 });
 
+// ========================================================================
+// CRITICAL: MEMORY PRESSURE METRICS
+// ========================================================================
+
+/**
+ * Current memory pressure level
+ */
+export const memoryPressureLevel = new Gauge({
+  name: 'gitray_memory_pressure_level',
+  help: 'Current memory pressure level (0=normal, 1=warning, 2=critical, 3=emergency)',
+});
+
+/**
+ * System memory usage percentage
+ */
+export const systemMemoryUsage = new Gauge({
+  name: 'gitray_system_memory_usage_percent',
+  help: 'Current system memory usage percentage',
+});
+
+/**
+ * Process memory usage in bytes
+ */
+export const processMemoryUsage = new Gauge({
+  name: 'gitray_process_memory_usage_bytes',
+  help: 'Current process memory usage in bytes',
+  labelNames: ['type'] as const, // heap_used, heap_total, rss, external
+});
+
+/**
+ * Memory pressure circuit breaker state
+ */
+export const memoryCircuitBreakerState = new Gauge({
+  name: 'gitray_memory_circuit_breaker_state',
+  help: 'Memory pressure circuit breaker state (0=closed, 1=half-open, 2=open)',
+});
+
+/**
+ * Memory pressure events counter
+ */
+export const memoryPressureEvents = new Counter({
+  name: 'gitray_memory_pressure_events_total',
+  help: 'Total number of memory pressure events',
+  labelNames: ['level'] as const, // warning, critical, emergency
+});
+
+/**
+ * Throttled requests due to memory pressure
+ */
+export const throttledRequests = new Counter({
+  name: 'gitray_throttled_requests_total',
+  help: 'Total number of requests throttled due to memory pressure',
+  labelNames: ['reason'] as const,
+});
+
+/**
+ * Emergency memory evictions
+ */
+export const emergencyEvictions = new Counter({
+  name: 'gitray_emergency_evictions_total',
+  help: 'Total number of emergency cache evictions due to memory pressure',
+});
+
+/**
+ * Garbage collection triggers
+ */
+export const gcTriggered = new Counter({
+  name: 'gitray_gc_triggered_total',
+  help: 'Total number of garbage collection triggers due to memory pressure',
+});
+
 /**
  * Streaming error types and frequency
  */
@@ -1245,6 +1316,99 @@ export const updateSystemResourceMetrics = () => {
   }
 };
 
+// ========================================================================
+// CRITICAL: MEMORY PRESSURE METRICS UPDATES
+// ========================================================================
+
+/**
+ * Update memory pressure metrics from memory pressure manager
+ */
+export function updateMemoryPressureMetrics(): void {
+  try {
+    // Use dynamic import to avoid circular dependencies
+    import('../utils/memoryPressureManager')
+      .then((memoryPressureManager) => {
+        const stats = memoryPressureManager.getMemoryStats();
+        const metrics = memoryPressureManager.getMemoryMetrics();
+
+        // Update pressure level gauge
+        const levelMap: Record<string, number> = {
+          normal: 0,
+          warning: 1,
+          critical: 2,
+          emergency: 3,
+        };
+        memoryPressureLevel.set(levelMap[stats.pressure.level] || 0);
+
+        // Update system memory usage
+        systemMemoryUsage.set(stats.system.usagePercentage * 100);
+
+        // Update process memory usage
+        processMemoryUsage.set({ type: 'heap_used' }, stats.process.heapUsed);
+        processMemoryUsage.set({ type: 'heap_total' }, stats.process.heapTotal);
+        processMemoryUsage.set({ type: 'rss' }, stats.process.rss);
+        processMemoryUsage.set({ type: 'external' }, stats.process.external);
+
+        // Update metrics counters using the metrics variable
+        memoryPressureEvents.inc({ level: 'warning' }, metrics.pressureEvents);
+        throttledRequests.inc(
+          { reason: 'memory_pressure' },
+          metrics.throttledRequests
+        );
+        emergencyEvictions.inc(metrics.emergencyEvictions);
+        gcTriggered.inc(metrics.gcTriggered);
+        processMemoryUsage.set({ type: 'heap_used' }, stats.process.heapUsed);
+        processMemoryUsage.set({ type: 'heap_total' }, stats.process.heapTotal);
+        processMemoryUsage.set({ type: 'rss' }, stats.process.rss);
+        processMemoryUsage.set({ type: 'external' }, stats.process.external);
+
+        // Update circuit breaker state
+        const cbStateMap: Record<string, number> = {
+          normal: 0,
+          warning: 0,
+          critical: 1,
+          emergency: 2,
+        };
+        memoryCircuitBreakerState.set(cbStateMap[stats.pressure.level] || 0);
+      })
+      .catch((error) => {
+        console.warn('Failed to import memory pressure manager', { error });
+      });
+  } catch (error) {
+    console.warn('Failed to update memory pressure metrics', { error });
+  }
+}
+
+/**
+ * Record memory pressure event
+ */
+export function recordMemoryPressureEvent(
+  level: 'warning' | 'critical' | 'emergency'
+): void {
+  memoryPressureEvents.inc({ level });
+}
+
+/**
+ * Record throttled request
+ */
+export function recordThrottledRequest(reason: string): void {
+  throttledRequests.inc({ reason });
+}
+
+/**
+ * Record emergency eviction
+ */
+export function recordEmergencyEviction(): void {
+  emergencyEvictions.inc();
+}
+
+/**
+ * Record GC trigger
+ */
+export function recordGCTrigger(): void {
+  gcTriggered.inc();
+}
+
 /**
  * Comprehensive metrics update function
  */
@@ -1254,5 +1418,6 @@ export const updateAllEnhancedMetrics = async () => {
     updateEnhancedCacheMetrics(),
     updateCoordinationMetrics(),
     updateSystemResourceMetrics(),
+    updateMemoryPressureMetrics(), // CRITICAL: Memory pressure metrics
   ]);
 };

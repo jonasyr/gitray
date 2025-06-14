@@ -6,6 +6,12 @@ import { isServerShuttingDown } from '../utils/gracefulShutdown';
 import { config } from '../config';
 import { recordFeatureUsage, getUserType } from '../services/metrics';
 
+// CRITICAL: Memory pressure monitoring imports
+import {
+  getMemoryStats,
+  getMemoryMetrics,
+} from '../utils/memoryPressureManager';
+
 // Health check endpoints used by Kubernetes and monitoring tools
 import os from 'os';
 
@@ -173,6 +179,72 @@ router.get('/coordination', (req: Request, res: Response) => {
     },
     timestamp: new Date().toISOString(),
   });
+});
+
+// CRITICAL: Memory pressure health endpoint
+// This endpoint is essential for production monitoring and alerting
+router.get('/health/memory', (req: Request, res: Response) => {
+  const userType = getUserType(req);
+
+  try {
+    const memoryStats = getMemoryStats();
+    const memoryMetrics = getMemoryMetrics();
+
+    // Determine if memory state is healthy
+    const isHealthy =
+      memoryStats.pressure.level === 'normal' ||
+      memoryStats.pressure.level === 'warning';
+    const httpStatus = isHealthy ? 200 : 503;
+
+    recordFeatureUsage('memory_health_check', userType, isHealthy, 'api_call');
+
+    res.status(httpStatus).json({
+      status: isHealthy ? 'healthy' : 'unhealthy',
+      timestamp: new Date().toISOString(),
+      memory: {
+        pressure: {
+          level: memoryStats.pressure.level,
+          action: memoryStats.pressure.action,
+        },
+        system: {
+          totalGB:
+            Math.round((memoryStats.system.totalBytes / 1024 ** 3) * 100) / 100,
+          freeGB:
+            Math.round((memoryStats.system.freeBytes / 1024 ** 3) * 100) / 100,
+          usedGB:
+            Math.round((memoryStats.system.usedBytes / 1024 ** 3) * 100) / 100,
+          usagePercentage: `${Math.round(memoryStats.system.usagePercentage * 100)}%`,
+        },
+        process: {
+          heapUsedMB: Math.round(memoryStats.process.heapUsed / 1024 ** 2),
+          heapTotalMB: Math.round(memoryStats.process.heapTotal / 1024 ** 2),
+          rssMB: Math.round(memoryStats.process.rss / 1024 ** 2),
+          externalMB: Math.round(memoryStats.process.external / 1024 ** 2),
+        },
+        thresholds: {
+          warning: `${config.memoryPressure.warningThreshold * 100}%`,
+          critical: `${config.memoryPressure.criticalThreshold * 100}%`,
+          emergency: `${config.memoryPressure.emergencyThreshold * 100}%`,
+        },
+        metrics: {
+          pressureEvents: memoryMetrics.pressureEvents,
+          circuitBreakerTrips: memoryMetrics.circuitBreakerTrips,
+          throttledRequests: memoryMetrics.throttledRequests,
+          emergencyEvictions: memoryMetrics.emergencyEvictions,
+          gcTriggered: memoryMetrics.gcTriggered,
+        },
+      },
+    });
+  } catch (error) {
+    logger.error('Memory health check failed', { error });
+    recordFeatureUsage('memory_health_check', userType, false, 'api_call');
+
+    res.status(503).json({
+      status: 'error',
+      message: 'Failed to get memory health status',
+      timestamp: new Date().toISOString(),
+    });
+  }
 });
 
 // Kubernetes liveness probe

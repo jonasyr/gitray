@@ -24,6 +24,7 @@ import healthRoutes from './routes/healthRoutes';
 import errorHandler from './middlewares/errorHandler';
 import { setupGracefulShutdown } from './utils/gracefulShutdown';
 import { requestIdMiddleware } from './middlewares/requestId';
+import { memoryPressureMiddleware } from './middlewares/memoryPressureMiddleware';
 import {
   metricsMiddleware,
   metricsHandler,
@@ -170,6 +171,10 @@ async function startApplication() {
     // Attach request ID and metrics collection
     app.use(requestIdMiddleware);
     app.use(metricsMiddleware);
+
+    // CRITICAL: Memory pressure protection middleware
+    // This MUST be early in the middleware chain to protect against OOM crashes
+    app.use(memoryPressureMiddleware);
 
     // Parse incoming JSON bodies
     app.use(express.json());

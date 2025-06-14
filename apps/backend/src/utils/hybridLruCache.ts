@@ -3,6 +3,10 @@ import path from 'path';
 import Redis, { RedisOptions } from 'ioredis';
 import { getLogger } from '../services/logger';
 import { withKeyLock } from './lockManager';
+import {
+  executeWithMemoryProtection,
+  getMemoryStats,
+} from './memoryPressureManager';
 
 const logger = getLogger();
 
@@ -178,6 +182,50 @@ export class HybridLRUCache<V> {
   }
 
   /**
+   * CRITICAL: Memory pressure-aware cache addition
+   * Prevents cache operations during memory pressure
+   */
+  private addToMemoryWithPressureCheck(key: string, value: V): void {
+    const memoryStats = getMemoryStats();
+
+    // Skip memory cache under high memory pressure
+    if (
+      memoryStats.pressure.level === 'critical' ||
+      memoryStats.pressure.level === 'emergency'
+    ) {
+      logger.debug('Skipping memory cache addition due to memory pressure', {
+        key,
+        pressureLevel: memoryStats.pressure.level,
+        systemUsage: `${Math.round(memoryStats.system.usagePercentage * 100)}%`,
+      });
+      return;
+    }
+
+    // For warning level, be more aggressive about size limits
+    const size = this.calcSize(value);
+    const adjustedLimit =
+      memoryStats.pressure.level === 'warning'
+        ? this.options.memoryLimitBytes * 0.8 // Reduce limit by 20% under warning
+        : this.options.memoryLimitBytes;
+
+    if (size > adjustedLimit) {
+      logger.debug(
+        'Value too large for memory cache (adjusted for memory pressure)',
+        {
+          key,
+          size,
+          adjustedLimit,
+          pressureLevel: memoryStats.pressure.level,
+        }
+      );
+      return;
+    }
+
+    // Use the original method if memory pressure is acceptable
+    this.addToMemory(key, value);
+  }
+
+  /**
    * FIX: Performant LRU eviction using Map iteration order (O(1) instead of O(n))
    * Map maintains insertion order, and we update order on access in get()
    */
@@ -260,76 +308,86 @@ export class HybridLRUCache<V> {
 
   /**
    * FIX: Proper LRU update on access and improved error handling
+   * ENHANCED: Added memory pressure protection
    */
   async get(key: string): Promise<V | null> {
-    // Try Redis first
-    if (this.redis && this.redisHealthy) {
-      try {
-        const data = await this.redis.get(key);
-        if (data !== null) {
-          const value = this.fromJSON(data);
-          // Update memory cache with accessed value
-          this.addToMemory(key, value);
-          return value;
-        }
-      } catch (err) {
-        this.redisHealthy = false;
-        logger.warn('HybridLRUCache Redis get failed', { err });
-      }
-    }
-
-    // Try memory cache
-    const mem = this.memory.get(key);
-    if (mem) {
-      // FIX: Update timestamp for LRU on access
-      mem.timestamp = Date.now();
-      // Move to end for Map iteration order (backup LRU mechanism)
-      this.memory.delete(key);
-      this.memory.set(key, mem);
-      return mem.value;
-    }
-
-    // Try disk cache
-    const filePath = this.disk.get(key);
-    if (filePath) {
-      try {
-        // Use lock to prevent concurrent modifications
-        return await withKeyLock(
-          `disk:${key}`,
-          async () => {
-            try {
-              const data = await fs.readFile(filePath, 'utf-8');
+    return executeWithMemoryProtection(
+      `cache-get-${key}`,
+      async () => {
+        // Try Redis first
+        if (this.redis && this.redisHealthy) {
+          try {
+            const data = await this.redis.get(key);
+            if (data !== null) {
               const value = this.fromJSON(data);
-
-              // Update LRU order in disk cache
-              this.disk.delete(key);
-              this.disk.set(key, filePath);
-
-              // Promote to memory cache
-              this.addToMemory(key, value);
+              // Update memory cache with accessed value (with memory pressure check)
+              this.addToMemoryWithPressureCheck(key, value);
               return value;
-            } catch (readErr) {
-              // File might have been deleted - remove from index
-              this.disk.delete(key);
-              logger.debug('Removed stale disk cache entry', {
-                key,
-                err: readErr,
-              });
-              return null;
             }
-          },
-          this.lockTimeoutMs
-        );
-      } catch (lockErr) {
-        logger.warn('Failed to acquire lock for disk read', {
-          key,
-          err: lockErr,
-        });
-        return null;
-      }
-    }
+          } catch (err) {
+            this.redisHealthy = false;
+            logger.warn('HybridLRUCache Redis get failed', { err });
+          }
+        }
 
-    return null;
+        // Try memory cache
+        const mem = this.memory.get(key);
+        if (mem) {
+          // FIX: Update timestamp for LRU on access
+          mem.timestamp = Date.now();
+          // Move to end for Map iteration order (backup LRU mechanism)
+          this.memory.delete(key);
+          this.memory.set(key, mem);
+          return mem.value;
+        }
+
+        // Try disk cache
+        const filePath = this.disk.get(key);
+        if (filePath) {
+          try {
+            // Use lock to prevent concurrent modifications
+            return await withKeyLock(
+              `disk:${key}`,
+              async () => {
+                try {
+                  const data = await fs.readFile(filePath, 'utf-8');
+                  const value = this.fromJSON(data);
+
+                  // Update LRU order in disk cache
+                  this.disk.delete(key);
+                  this.disk.set(key, filePath);
+
+                  // Promote to memory cache (with memory pressure check)
+                  this.addToMemoryWithPressureCheck(key, value);
+                  return value;
+                } catch (readErr) {
+                  // File might have been deleted - remove from index
+                  this.disk.delete(key);
+                  logger.debug('Removed stale disk cache entry', {
+                    key,
+                    err: readErr,
+                  });
+                  return null;
+                }
+              },
+              this.lockTimeoutMs
+            );
+          } catch (lockErr) {
+            logger.warn('Failed to acquire lock for disk read', {
+              key,
+              err: lockErr,
+            });
+            return null;
+          }
+        }
+
+        return null;
+      },
+      {
+        priority: 'normal',
+        estimatedMemoryMB: 1, // Estimate 1MB for cache read operation
+      }
+    );
   }
 
   /**

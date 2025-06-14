@@ -18,6 +18,14 @@ import {
   getRepositorySizeCategory,
 } from '../services/metrics';
 
+// Middleware to set request priority based on route
+const setRequestPriority = (priority: 'low' | 'normal' | 'high') => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    req.memoryPriority = priority;
+    next();
+  };
+};
+
 // Router handling repository related endpoints
 const router = express.Router();
 
@@ -49,6 +57,7 @@ const fullDataValidation = heatmapValidation;
 // ---------------------------------------------------------------------------
 router.post(
   '/',
+  setRequestPriority('normal'), // Normal priority for basic commit data
   repoUrlValidation,
   async (req: Request, res: Response, next: NextFunction) => {
     const { repoUrl } = req.body;
@@ -115,6 +124,7 @@ router.post(
 // ---------------------------------------------------------------------------
 router.post(
   '/heatmap',
+  setRequestPriority('low'), // Low priority for heatmap data - memory intensive
   heatmapValidation,
   async (req: Request, res: Response, next: NextFunction) => {
     const { repoUrl, filterOptions } = req.body;
@@ -168,6 +178,7 @@ router.post(
 // ---------------------------------------------------------------------------
 router.post(
   '/full-data',
+  setRequestPriority('low'), // Low priority for full data - very memory intensive
   fullDataValidation,
   async (req: Request, res: Response, next: NextFunction) => {
     const { repoUrl, filterOptions } = req.body;

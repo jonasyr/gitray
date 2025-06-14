@@ -306,6 +306,47 @@ export const config = {
       ), // Every 6 hours
     },
   },
+
+  /**
+   * CRITICAL: Memory Pressure Management Configuration
+   * Completes the "safety triangle" for production stability
+   */
+  memoryPressure: {
+    // System memory thresholds (from environment)
+    warningThreshold:
+      parseEnvNumber(process.env.MEMORY_WARNING_THRESHOLD, 75) / 100, // 75%
+    criticalThreshold:
+      parseEnvNumber(process.env.MEMORY_CRITICAL_THRESHOLD, 85) / 100, // 85%
+    emergencyThreshold:
+      parseEnvNumber(process.env.MEMORY_EMERGENCY_THRESHOLD, 95) / 100, // 95%
+
+    // Process memory thresholds
+    processWarningThreshold:
+      parseEnvNumber(process.env.MEMORY_PROCESS_WARNING_THRESHOLD, 50) / 100, // 50%
+    processCriticalThreshold:
+      parseEnvNumber(process.env.MEMORY_PROCESS_CRITICAL_THRESHOLD, 70) / 100, // 70%
+
+    // Circuit breaker configuration
+    enableCircuitBreaker: parseEnvBoolean(
+      process.env.MEMORY_CIRCUIT_BREAKER,
+      true
+    ),
+    enableRequestThrottling: parseEnvBoolean(
+      process.env.MEMORY_REQUEST_THROTTLING,
+      true
+    ),
+    enableEmergencyEviction: parseEnvBoolean(
+      process.env.MEMORY_EMERGENCY_EVICTION,
+      true
+    ),
+
+    // Monitoring configuration
+    checkIntervalMs: parseEnvNumber(process.env.MEMORY_CHECK_INTERVAL_MS, 5000), // 5 seconds
+    alertCooldownMs: parseEnvNumber(
+      process.env.MEMORY_ALERT_COOLDOWN_MS,
+      60000
+    ), // 1 minute
+  },
 };
 
 /**
@@ -450,6 +491,73 @@ export function validateConfig(): void {
     );
   }
 
+  // Validate memory pressure configuration
+  if (
+    config.memoryPressure.warningThreshold <= 0 ||
+    config.memoryPressure.warningThreshold >= 1
+  ) {
+    errors.push('MEMORY_WARNING_THRESHOLD must be between 0 and 100');
+  }
+
+  if (
+    config.memoryPressure.criticalThreshold <= 0 ||
+    config.memoryPressure.criticalThreshold >= 1
+  ) {
+    errors.push('MEMORY_CRITICAL_THRESHOLD must be between 0 and 100');
+  }
+
+  if (
+    config.memoryPressure.emergencyThreshold <= 0 ||
+    config.memoryPressure.emergencyThreshold >= 1
+  ) {
+    errors.push('MEMORY_EMERGENCY_THRESHOLD must be between 0 and 100');
+  }
+
+  if (
+    config.memoryPressure.warningThreshold >=
+    config.memoryPressure.criticalThreshold
+  ) {
+    errors.push(
+      'MEMORY_WARNING_THRESHOLD must be less than MEMORY_CRITICAL_THRESHOLD'
+    );
+  }
+
+  if (
+    config.memoryPressure.criticalThreshold >=
+    config.memoryPressure.emergencyThreshold
+  ) {
+    errors.push(
+      'MEMORY_CRITICAL_THRESHOLD must be less than MEMORY_EMERGENCY_THRESHOLD'
+    );
+  }
+
+  if (config.memoryPressure.checkIntervalMs < 1000) {
+    warnings.push(
+      'MEMORY_CHECK_INTERVAL_MS is very low (<1s), may impact performance'
+    );
+  }
+
+  // Performance warnings for memory pressure
+  if (config.memoryPressure.warningThreshold > 0.9) {
+    warnings.push(
+      'MEMORY_WARNING_THRESHOLD is very high (>90%), may not provide enough warning time'
+    );
+  }
+
+  // System memory availability check
+  const totalMemoryGB = os.totalmem() / 1024 ** 3;
+  if (totalMemoryGB < 2) {
+    warnings.push(
+      'System has less than 2GB RAM, memory pressure thresholds may need adjustment'
+    );
+  }
+
+  if (config.hybridCache.memoryLimitBytes > os.totalmem() * 0.5) {
+    warnings.push(
+      'Cache memory limit is more than 50% of system memory, may cause memory pressure'
+    );
+  }
+
   // Log validation results
   if (errors.length > 0) {
     console.error('Configuration errors found:');
@@ -518,6 +626,7 @@ export const {
   repositoryCache: repositoryCacheConfig,
   operationCoordination: operationCoordinationConfig,
   cacheStrategy: cacheStrategyConfig,
+  memoryPressure: memoryPressureConfig,
 } = config;
 
 export default config;
