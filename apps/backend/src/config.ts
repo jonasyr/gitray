@@ -56,8 +56,14 @@ export const config = {
 
   // Git defaults used by GitService
   git: {
-    maxConcurrentProcesses: GIT_SERVICE.MAX_CONCURRENT_PROCESSES,
-    cloneDepth: GIT_SERVICE.CLONE_DEPTH,
+    maxConcurrentProcesses: parseEnvNumber(
+      process.env.GIT_MAX_CONCURRENT_PROCESSES,
+      GIT_SERVICE.MAX_CONCURRENT_PROCESSES
+    ),
+    cloneDepth: parseEnvNumber(
+      process.env.GIT_CLONE_DEPTH,
+      GIT_SERVICE.CLONE_DEPTH
+    ),
   },
 
   /**
@@ -327,6 +333,27 @@ export function validateConfig(): void {
     errors.push('REDIS_PORT must be between 1 and 65535');
   }
 
+  // Validate Git configuration
+  if (config.git.maxConcurrentProcesses <= 0) {
+    errors.push('GIT_MAX_CONCURRENT_PROCESSES must be greater than 0');
+  }
+
+  if (config.git.maxConcurrentProcesses > 20) {
+    warnings.push(
+      'GIT_MAX_CONCURRENT_PROCESSES is very high (>20), may overwhelm system resources'
+    );
+  }
+
+  if (config.git.cloneDepth <= 0) {
+    errors.push('GIT_CLONE_DEPTH must be greater than 0');
+  }
+
+  if (config.git.cloneDepth < 10) {
+    warnings.push(
+      'GIT_CLONE_DEPTH is very low (<10), may miss important commit history'
+    );
+  }
+
   // Validate repository cache configuration
   if (config.repositoryCache.enabled) {
     if (config.repositoryCache.maxRepositories <= 0) {
@@ -450,6 +477,10 @@ export function validateConfig(): void {
         host: config.redis.host,
         port: config.redis.port,
         db: config.redis.db,
+      },
+      git: {
+        maxConcurrentProcesses: config.git.maxConcurrentProcesses,
+        cloneDepth: config.git.cloneDepth,
       },
     });
 

@@ -68,11 +68,14 @@ class GitService {
     const gitOptions: Partial<SimpleGitOptions> = {
       baseDir: process.cwd(),
       binary: 'git',
-      maxConcurrentProcesses: GIT_SERVICE.MAX_CONCURRENT_PROCESSES,
+      maxConcurrentProcesses: config.git.maxConcurrentProcesses,
     };
 
     this.git = simpleGit(gitOptions);
-    logger.info('GitService initialized with streaming support.');
+    logger.info('GitService initialized with streaming support.', {
+      maxConcurrentProcesses: config.git.maxConcurrentProcesses,
+      cloneDepth: config.git.cloneDepth,
+    });
   }
 
   /**
