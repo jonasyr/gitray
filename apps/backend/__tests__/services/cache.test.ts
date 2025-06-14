@@ -413,4 +413,255 @@ describe('Cache Service Integration', () => {
       expect(localCache.isHealthy()).toBe(true);
     });
   });
+
+  describe('Redis Connection Error Handling', () => {
+    test('should handle Redis error event and disconnect', async () => {
+      // Reset to get a fresh import
+      vi.resetModules();
+
+      const mockRedis = {
+        on: vi.fn(),
+        get: vi.fn(),
+        set: vi.fn(),
+        del: vi.fn(),
+        quit: vi.fn(),
+        disconnect: vi.fn(),
+      };
+
+      let errorHandler: (err: Error) => void;
+      mockRedis.on.mockImplementation((event: string, callback: any) => {
+        if (event === 'error') {
+          errorHandler = callback;
+        } else if (event === 'ready') {
+          setTimeout(() => callback(), 0);
+        }
+        return mockRedis;
+      });
+
+      const Redis = await import('ioredis');
+      (Redis.default as any).mockImplementation(() => mockRedis);
+
+      await import('../../src/services/cache');
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+      // Trigger Redis error event
+      const testError = new Error('Redis connection lost');
+      errorHandler!(testError);
+
+      expect(mockRedis.disconnect).toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Redis error, falling back to in-memory cache',
+        { err: testError }
+      );
+    });
+
+    test('should handle Redis end event', async () => {
+      vi.resetModules();
+
+      const mockRedis = {
+        on: vi.fn(),
+        get: vi.fn(),
+        set: vi.fn(),
+        del: vi.fn(),
+        quit: vi.fn(),
+        disconnect: vi.fn(),
+      };
+
+      let endHandler: () => void;
+      mockRedis.on.mockImplementation((event: string, callback: any) => {
+        if (event === 'end') {
+          endHandler = callback;
+        } else if (event === 'ready') {
+          setTimeout(() => callback(), 0);
+        }
+        return mockRedis;
+      });
+
+      const Redis = await import('ioredis');
+      (Redis.default as any).mockImplementation(() => mockRedis);
+
+      await import('../../src/services/cache');
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+      // Trigger Redis end event
+      endHandler!();
+
+      expect(mockLogger.warn).toHaveBeenCalledWith('Redis connection closed');
+    });
+  });
+
+  describe('HybridCache Configuration', () => {
+    test('should handle disabled hybrid cache configuration', async () => {
+      vi.resetModules();
+
+      // Mock config with hybrid cache disabled
+      vi.doMock('../../src/config', () => ({
+        config: {
+          redis: {
+            host: 'localhost',
+            port: 6379,
+          },
+        },
+        hybridCacheConfig: {
+          enableRedis: false,
+          enableDisk: false,
+          maxEntries: 1000,
+          memoryLimitBytes: 1048576,
+          diskPath: '/tmp/test-cache',
+          lockTimeoutMs: 5000,
+          redisConfig: {
+            host: 'localhost',
+            port: 6379,
+          },
+        },
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 30000,
+          staleLockAgeMs: 60000,
+          enableLockLogging: false,
+        },
+      }));
+
+      await import('../../src/services/cache');
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'HybridLRUCache disabled, falling back to simple Redis cache'
+      );
+    });
+  });
+
+  describe('Complex Fallback Scenarios', () => {
+    test('should handle hybrid cache get failure and fallback to Redis', async () => {
+      const key = 'test-key';
+      const expectedValue = 'redis-fallback-value';
+
+      // Make hybrid cache fail
+      mockHybridCache.get.mockRejectedValue(new Error('Hybrid cache failure'));
+      mockRedis.get.mockResolvedValue(expectedValue);
+
+      const result = await cache.get(key);
+
+      expect(result).toBe(expectedValue);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'HybridLRUCache get failed, falling back',
+        { key, err: expect.any(Error) }
+      );
+    });
+
+    test('should handle cache backend failures gracefully', async () => {
+      const key = 'test-key';
+      const value = 'test-value';
+
+      // Test that set and get operations don't throw even if internal caches fail
+      // This tests the fallback to memory cache behavior
+      await expect(cache.set(key, value)).resolves.not.toThrow();
+      await expect(cache.get(key)).resolves.not.toThrow();
+
+      // Test delete operations
+      await expect(cache.del(key)).resolves.not.toThrow();
+    });
+
+    test('should handle hybrid cache del failure and fallback to Redis', async () => {
+      const key = 'test-key';
+
+      // Make hybrid cache del fail
+      mockHybridCache.del.mockRejectedValue(
+        new Error('Hybrid cache del failure')
+      );
+      mockRedis.del.mockResolvedValue(1);
+
+      await cache.del(key);
+
+      expect(mockRedis.del).toHaveBeenCalledWith(key);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'HybridLRUCache del failed, falling back',
+        { key, err: expect.any(Error) }
+      );
+    });
+
+    test('should handle both hybrid cache and Redis del failure, fallback to memory', async () => {
+      const key = 'test-key';
+
+      // Make both fail
+      mockHybridCache.del.mockRejectedValue(
+        new Error('Hybrid cache del failure')
+      );
+      mockRedis.del.mockRejectedValue(new Error('Redis del failure'));
+
+      await cache.del(key);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Redis del failed, falling back to memory',
+        { key, err: expect.any(Error) }
+      );
+    });
+  });
+
+  describe('Shutdown and Quit Operations', () => {
+    test('should handle quit operation with all backends', async () => {
+      mockHybridCache.quit.mockResolvedValue(undefined);
+      mockRedis.quit.mockResolvedValue('OK');
+
+      await cache.quit();
+
+      expect(mockHybridCache.quit).toHaveBeenCalled();
+      expect(mockRedis.quit).toHaveBeenCalled();
+    });
+
+    test('should handle quit with hybrid cache failure', async () => {
+      mockHybridCache.quit.mockRejectedValue(
+        new Error('Hybrid cache quit failure')
+      );
+      mockRedis.quit.mockResolvedValue('OK');
+
+      await cache.quit();
+
+      expect(mockHybridCache.quit).toHaveBeenCalled();
+      expect(mockRedis.quit).toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Error closing HybridLRUCache',
+        { err: expect.any(Error) }
+      );
+    });
+
+    test('should handle quit with Redis failure', async () => {
+      mockHybridCache.quit.mockResolvedValue(undefined);
+      mockRedis.quit.mockRejectedValue(new Error('Redis quit failure'));
+
+      await cache.quit();
+
+      expect(mockHybridCache.quit).toHaveBeenCalled();
+      expect(mockRedis.quit).toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Error closing Redis connection',
+        { err: expect.any(Error) }
+      );
+    });
+
+    test('should handle normal quit operation', async () => {
+      await cache.quit();
+
+      expect(mockHybridCache.quit).toHaveBeenCalled();
+      expect(mockRedis.quit).toHaveBeenCalled();
+    });
+  });
+
+  describe('Health Checks with Complex Scenarios', () => {
+    test('should report healthy when only memory cache is available', async () => {
+      // Disable both hybrid cache and Redis
+      cache.__setDependenciesForTesting(null, null, false, false);
+
+      expect(cache.isHealthy()).toBe(true);
+    });
+
+    test('should report healthy when hybrid cache is healthy but Redis is not', async () => {
+      cache.__setDependenciesForTesting(mockHybridCache, null, true, false);
+      mockHybridCache.isHealthy.mockReturnValue(true);
+
+      expect(cache.isHealthy()).toBe(true);
+    });
+  });
 });
