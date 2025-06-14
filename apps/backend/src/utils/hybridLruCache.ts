@@ -483,6 +483,142 @@ export class HybridLRUCache<V> {
       },
     };
   }
+
+  /**
+   * EMERGENCY: Selective cache eviction for memory pressure scenarios
+   * This method implements intelligent eviction strategies across all cache tiers
+   */
+  async emergencyEvict(): Promise<{
+    evictedEntries: number;
+    bytesFreed: number;
+    tiers: {
+      memory: { evicted: number; bytesFreed: number };
+      disk: { evicted: number };
+      redis: { evicted: number };
+    };
+  }> {
+    const result = {
+      evictedEntries: 0,
+      bytesFreed: 0,
+      tiers: {
+        memory: { evicted: 0, bytesFreed: 0 },
+        disk: { evicted: 0 },
+        redis: { evicted: 0 },
+      },
+    };
+
+    logger.warn('HybridLRUCache emergency eviction started', {
+      memoryEntries: this.memory.size,
+      memoryUsageBytes: this.memoryUsage,
+      diskEntries: this.disk.size,
+      redisHealthy: this.redisHealthy,
+    });
+
+    try {
+      // 1. Memory cache eviction (most aggressive - 50% eviction)
+      if (this.memory.size > 0) {
+        const memoryEntries = Array.from(this.memory.entries());
+        // Sort by timestamp (oldest first) for proper LRU eviction
+        memoryEntries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+
+        const evictCount = Math.ceil(this.memory.size * 0.5);
+        const toEvict = memoryEntries.slice(0, evictCount);
+
+        for (const [key, entry] of toEvict) {
+          this.memory.delete(key);
+          this.memoryUsage -= entry.size;
+          result.tiers.memory.evicted++;
+          result.tiers.memory.bytesFreed += entry.size;
+        }
+
+        logger.info('Memory tier emergency eviction completed', {
+          evicted: result.tiers.memory.evicted,
+          bytesFreed: result.tiers.memory.bytesFreed,
+          remaining: this.memory.size,
+        });
+      }
+
+      // 2. Disk cache eviction (30% eviction)
+      if (this.disk.size > 0) {
+        const diskKeys = Array.from(this.disk.keys());
+        const evictCount = Math.ceil(this.disk.size * 0.3);
+        const keysToEvict = diskKeys.slice(0, evictCount);
+
+        for (const key of keysToEvict) {
+          const filePath = this.disk.get(key);
+          if (filePath) {
+            try {
+              await withKeyLock(
+                `disk-evict-${key}`,
+                async () => {
+                  await fs.unlink(filePath);
+                  this.disk.delete(key);
+                  result.tiers.disk.evicted++;
+                },
+                this.lockTimeoutMs
+              );
+            } catch (err) {
+              logger.warn('Failed to evict disk cache entry', {
+                key,
+                filePath,
+                err,
+              });
+              // Continue with other entries
+            }
+          }
+        }
+
+        // Disk index is automatically maintained by the Map operations above
+
+        logger.info('Disk tier emergency eviction completed', {
+          evicted: result.tiers.disk.evicted,
+          remaining: this.disk.size,
+        });
+      }
+
+      // 3. Redis cache eviction (25% eviction)
+      if (this.redis && this.redisHealthy) {
+        try {
+          const keys = await this.redis.keys('*');
+          if (keys.length > 0) {
+            const evictCount = Math.ceil(keys.length * 0.25);
+            const keysToEvict = keys.slice(0, evictCount);
+
+            if (keysToEvict.length > 0) {
+              const deletedCount = await this.redis.del(...keysToEvict);
+              result.tiers.redis.evicted = deletedCount;
+
+              logger.info('Redis tier emergency eviction completed', {
+                evicted: deletedCount,
+                totalKeys: keys.length,
+              });
+            }
+          }
+        } catch (err) {
+          logger.warn('Redis emergency eviction failed', { err });
+          this.redisHealthy = false;
+        }
+      }
+
+      // Calculate totals
+      result.evictedEntries =
+        result.tiers.memory.evicted +
+        result.tiers.disk.evicted +
+        result.tiers.redis.evicted;
+      result.bytesFreed = result.tiers.memory.bytesFreed;
+
+      logger.warn('HybridLRUCache emergency eviction completed', {
+        totalEvicted: result.evictedEntries,
+        totalBytesFreed: result.bytesFreed,
+        tiers: result.tiers,
+      });
+
+      return result;
+    } catch (error) {
+      logger.error('HybridLRUCache emergency eviction failed', { error });
+      throw error;
+    }
+  }
 }
 
 export default HybridLRUCache;
