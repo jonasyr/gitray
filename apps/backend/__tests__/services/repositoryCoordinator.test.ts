@@ -472,4 +472,455 @@ describe('RepositoryCoordinator - Caching & Concurrency Tests', () => {
       expect(metrics.coalescedOperations).toBeGreaterThanOrEqual(0);
     });
   });
+
+  describe('Operation Coordination', () => {
+    test('should coordinate operations and coalesce duplicate requests', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/repo.git';
+      let operationCount = 0;
+      const testOperation = vi.fn().mockImplementation(async () => {
+        operationCount++;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return `result-${operationCount}`;
+      });
+
+      // Act - Start multiple operations of same type concurrently
+      const promises = [
+        repositoryCoordinator.coordinateOperation(
+          repoUrl,
+          'test-op',
+          testOperation
+        ),
+        repositoryCoordinator.coordinateOperation(
+          repoUrl,
+          'test-op',
+          testOperation
+        ),
+        repositoryCoordinator.coordinateOperation(
+          repoUrl,
+          'test-op',
+          testOperation
+        ),
+      ];
+
+      const results = await Promise.all(promises);
+
+      // Assert - Should coalesce and only run once
+      expect(testOperation).toHaveBeenCalledTimes(1);
+      expect(results).toEqual(['result-1', 'result-1', 'result-1']);
+    });
+
+    test('should handle different operation types independently', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/repo.git';
+      const operation1 = vi.fn().mockResolvedValue('op1-result');
+      const operation2 = vi.fn().mockResolvedValue('op2-result');
+
+      // Act
+      const [result1, result2] = await Promise.all([
+        repositoryCoordinator.coordinateOperation(repoUrl, 'type1', operation1),
+        repositoryCoordinator.coordinateOperation(repoUrl, 'type2', operation2),
+      ]);
+
+      // Assert
+      expect(operation1).toHaveBeenCalledTimes(1);
+      expect(operation2).toHaveBeenCalledTimes(1);
+      expect(result1).toBe('op1-result');
+      expect(result2).toBe('op2-result');
+    });
+
+    test('should handle heatmap operation waiting for commits operation', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/repo.git';
+      let commitsResolved = false;
+
+      const commitsOperation = vi.fn().mockImplementation(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        commitsResolved = true;
+        return 'commits-result';
+      });
+
+      const heatmapOperation = vi.fn().mockImplementation(async () => {
+        return `heatmap-result-${commitsResolved}`;
+      });
+
+      // Act - Start commits operation first, then heatmap
+      const commitsPromise = repositoryCoordinator.coordinateOperation(
+        repoUrl,
+        'commits',
+        commitsOperation
+      );
+      // Small delay to ensure commits operation starts first
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const heatmapPromise = repositoryCoordinator.coordinateOperation(
+        repoUrl,
+        'heatmap',
+        heatmapOperation
+      );
+
+      const [commitsResult, heatmapResult] = await Promise.all([
+        commitsPromise,
+        heatmapPromise,
+      ]);
+
+      // Assert
+      expect(commitsResult).toBe('commits-result');
+      expect(heatmapResult).toBe('heatmap-result-true');
+    });
+
+    test('should handle heatmap operation when commits operation fails', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      const commitsOperation = vi.fn().mockImplementation(async () => {
+        throw new Error('Commits failed');
+      });
+      const heatmapOperation = vi.fn().mockResolvedValue('heatmap-result');
+
+      // Add a temporary handler for unhandled rejections during this test
+      const testHandler = (reason: any) => {
+        if (reason?.message === 'Commits failed') {
+          // Expected error, ignore it
+          return;
+        }
+        // Re-throw other errors
+        throw reason;
+      };
+      process.on('unhandledRejection', testHandler);
+
+      try {
+        // Act - Start commits operation first, then heatmap
+        const commitsPromise = repositoryCoordinator.coordinateOperation(
+          repoUrl,
+          'commits',
+          commitsOperation
+        );
+        // Small delay to ensure commits operation starts first
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        const heatmapPromise = repositoryCoordinator.coordinateOperation(
+          repoUrl,
+          'heatmap',
+          heatmapOperation
+        );
+
+        // Assert - Handle both promises properly to avoid unhandled rejections
+        const [commitsResult, heatmapResult] = await Promise.allSettled([
+          commitsPromise,
+          heatmapPromise,
+        ]);
+
+        expect(commitsResult.status).toBe('rejected');
+        if (commitsResult.status === 'rejected') {
+          expect(commitsResult.reason.message).toBe('Commits failed');
+        }
+        expect(heatmapResult.status).toBe('fulfilled');
+        if (heatmapResult.status === 'fulfilled') {
+          expect(heatmapResult.value).toBe('heatmap-result');
+        }
+      } finally {
+        // Restore original handlers
+        process.removeListener('unhandledRejection', testHandler);
+      }
+    });
+
+    test('should disable coalescing when specified', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/repo.git';
+      let operationCount = 0;
+      const testOperation = vi.fn().mockImplementation(async () => {
+        return `result-${++operationCount}`;
+      });
+
+      // Act - Start operations with coalescing disabled
+      const promises = [
+        repositoryCoordinator.coordinateOperation(
+          repoUrl,
+          'test-op',
+          testOperation,
+          { allowCoalescing: false }
+        ),
+        repositoryCoordinator.coordinateOperation(
+          repoUrl,
+          'test-op',
+          testOperation,
+          { allowCoalescing: false }
+        ),
+      ];
+
+      const results = await Promise.all(promises);
+
+      // Assert - Should NOT coalesce and run separately
+      expect(testOperation).toHaveBeenCalledTimes(2);
+      expect(results).toEqual(['result-1', 'result-2']);
+    });
+  });
+
+  describe('Repository Status and Management', () => {
+    test('should provide repository status information', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/repo.git';
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-1');
+      mockGitService.getCommitCount.mockResolvedValue(500);
+
+      // Act
+      await repositoryCoordinator.getSharedRepository(repoUrl);
+      const status = repositoryCoordinator.getRepositoryStatus();
+
+      // Assert
+      expect(status).toHaveLength(1);
+      expect(status[0]).toMatchObject({
+        repoUrl,
+        commitCount: 500,
+        sizeCategory: 'medium',
+        refCount: 1,
+      });
+      expect(status[0].lastAccessed).toBeInstanceOf(Date);
+      expect(status[0].age).toBeGreaterThanOrEqual(0);
+
+      // Cleanup
+      await repositoryCoordinator.releaseRepository(repoUrl);
+    });
+
+    test('should invalidate repository and force cleanup', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/repo.git';
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-1');
+      mockGitService.getCommitCount.mockResolvedValue(100);
+
+      await repositoryCoordinator.getSharedRepository(repoUrl);
+      expect(repositoryCoordinator.getMetrics().cachedRepositories).toBe(1);
+
+      // Act
+      await repositoryCoordinator.invalidateRepository(repoUrl);
+
+      // Assert
+      expect(repositoryCoordinator.getMetrics().cachedRepositories).toBe(0);
+      expect(mockGitService.cleanupRepository).toHaveBeenCalledWith(
+        '/tmp/repo-1'
+      );
+    });
+
+    test('should handle invalidation of non-existent repository', async () => {
+      // Act & Assert - Should not throw
+      await expect(
+        repositoryCoordinator.invalidateRepository(
+          'https://github.com/nonexistent/repo.git'
+        )
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('Error Handling', () => {
+    test('should handle clone failures properly', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/failing-repo.git';
+      const cloneError = new Error('Clone failed');
+      mockGitService.cloneRepository.mockRejectedValue(cloneError);
+
+      // Act & Assert
+      await expect(
+        repositoryCoordinator.getSharedRepository(repoUrl)
+      ).rejects.toThrow('Clone failed');
+      expect(repositoryCoordinator.getMetrics().cacheMisses).toBe(1);
+      expect(repositoryCoordinator.getMetrics().cachedRepositories).toBe(0);
+    });
+
+    test('should handle cleanup failures during clone rollback', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/failing-repo.git';
+      const cloneError = new Error('Clone failed');
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/failing-repo');
+      mockGitService.getCommitCount.mockRejectedValue(cloneError);
+      mockGitService.cleanupRepository.mockRejectedValue(
+        new Error('Cleanup failed')
+      );
+
+      // Act & Assert
+      await expect(
+        repositoryCoordinator.getSharedRepository(repoUrl)
+      ).rejects.toThrow('Clone failed');
+    });
+
+    test('should handle release of non-existent repository', async () => {
+      // Act & Assert - Should not throw
+      await expect(
+        repositoryCoordinator.releaseRepository(
+          'https://github.com/nonexistent/repo.git'
+        )
+      ).resolves.toBeUndefined();
+    });
+
+    test('should handle cleanup failures gracefully', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/repo.git';
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-1');
+      mockGitService.getCommitCount.mockResolvedValue(100);
+      mockGitService.cleanupRepository.mockRejectedValue(
+        new Error('Cleanup failed')
+      );
+
+      await repositoryCoordinator.getSharedRepository(repoUrl);
+
+      // Act
+      await repositoryCoordinator.releaseRepository(repoUrl);
+
+      // Assert - Should still remove from internal state despite cleanup failure
+      expect(repositoryCoordinator.getMetrics().cachedRepositories).toBe(0);
+    });
+  });
+
+  describe('Handle Validation', () => {
+    test('should detect invalid handles due to missing directory', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/repo.git';
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-1');
+      mockGitService.getCommitCount.mockResolvedValue(100);
+
+      // Get initial handle
+      await repositoryCoordinator.getSharedRepository(repoUrl);
+      await repositoryCoordinator.releaseRepository(repoUrl);
+
+      // Simulate directory disappearing
+      const mockAccess = await import('fs/promises');
+      vi.mocked(mockAccess.access).mockRejectedValue(
+        new Error('Directory not found')
+      );
+
+      // Reset for second clone
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-2');
+
+      // Act - Try to get repository again
+      const handle2 = await repositoryCoordinator.getSharedRepository(repoUrl);
+
+      // Assert - Should have cloned again
+      expect(mockGitService.cloneRepository).toHaveBeenCalledTimes(2);
+      expect(handle2.localPath).toBe('/tmp/repo-2');
+
+      // Cleanup
+      await repositoryCoordinator.releaseRepository(repoUrl);
+    });
+
+    test('should detect expired handles', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/repo.git';
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-1');
+      mockGitService.getCommitCount.mockResolvedValue(100);
+
+      // Mock config for short TTL
+      vi.doMock('../../src/config', () => ({
+        config: {
+          repositoryCache: {
+            maxAgeHours: 0.001, // Very short TTL
+          },
+        },
+      }));
+
+      await repositoryCoordinator.getSharedRepository(repoUrl);
+      await repositoryCoordinator.releaseRepository(repoUrl);
+
+      // Wait for handle to expire
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Reset for second clone
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-2');
+
+      // Act
+      await repositoryCoordinator.getSharedRepository(repoUrl);
+
+      // Assert - Should have cloned again due to expiration
+      expect(mockGitService.cloneRepository).toHaveBeenCalledTimes(2);
+
+      // Cleanup
+      await repositoryCoordinator.releaseRepository(repoUrl);
+    });
+  });
+
+  describe('Shutdown', () => {
+    test('should shutdown coordinator and cleanup all resources', async () => {
+      // Arrange
+      const repoUrl1 = 'https://github.com/test/repo1.git';
+      const repoUrl2 = 'https://github.com/test/repo2.git';
+
+      mockGitService.cloneRepository
+        .mockResolvedValueOnce('/tmp/repo-1')
+        .mockResolvedValueOnce('/tmp/repo-2');
+      mockGitService.getCommitCount
+        .mockResolvedValueOnce(100)
+        .mockResolvedValueOnce(200);
+
+      // Create some cached repositories
+      await repositoryCoordinator.getSharedRepository(repoUrl1);
+      await repositoryCoordinator.getSharedRepository(repoUrl2);
+
+      expect(repositoryCoordinator.getMetrics().cachedRepositories).toBe(2);
+
+      // Act
+      await repositoryCoordinator.shutdown();
+
+      // Assert
+      expect(repositoryCoordinator.getMetrics().cachedRepositories).toBe(0);
+      expect(repositoryCoordinator.getMetrics().cacheHits).toBe(0);
+      expect(repositoryCoordinator.getMetrics().cacheMisses).toBe(0);
+      // Note: shutdown uses direct rm() instead of gitService.cleanupRepository
+      expect(mockGitService.cleanupRepository).toHaveBeenCalledTimes(0);
+    });
+
+    test('should handle cleanup failures during shutdown gracefully', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/repo.git';
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-1');
+      mockGitService.getCommitCount.mockResolvedValue(100);
+      mockGitService.cleanupRepository.mockRejectedValue(
+        new Error('Cleanup failed')
+      );
+
+      await repositoryCoordinator.getSharedRepository(repoUrl);
+
+      // Act & Assert - Should not throw despite cleanup failure
+      await expect(repositoryCoordinator.shutdown()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('Helper Functions', () => {
+    test('withSharedRepository should handle operation and cleanup automatically', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/repo.git';
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-1');
+      mockGitService.getCommitCount.mockResolvedValue(100);
+
+      const operation = vi.fn().mockResolvedValue('operation-result');
+
+      // Act
+      const result = await repositoryCoordinator.withRepository(
+        repoUrl,
+        operation
+      );
+
+      // Assert
+      expect(result).toBe('operation-result');
+      expect(operation).toHaveBeenCalledWith('/tmp/repo-1');
+      expect(mockGitService.cleanupRepository).toHaveBeenCalledWith(
+        '/tmp/repo-1'
+      );
+    });
+
+    test('withSharedRepository should cleanup even when operation fails', async () => {
+      // Arrange
+      const repoUrl = 'https://github.com/test/repo.git';
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-1');
+      mockGitService.getCommitCount.mockResolvedValue(100);
+
+      const operation = vi
+        .fn()
+        .mockRejectedValue(new Error('Operation failed'));
+
+      // Act & Assert
+      await expect(
+        repositoryCoordinator.withRepository(repoUrl, operation)
+      ).rejects.toThrow('Operation failed');
+      expect(mockGitService.cleanupRepository).toHaveBeenCalledWith(
+        '/tmp/repo-1'
+      );
+    });
+  });
 });
