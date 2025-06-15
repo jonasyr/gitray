@@ -1379,4 +1379,349 @@ describe('RepositoryCache', () => {
       );
     });
   });
+
+  describe('Enhanced Transaction Rollback Verification', () => {
+    test('should successfully rollback with verification when cache operation fails', async () => {
+      const repoUrl = 'https://github.com/test/rollback.git';
+
+      // Mock successful git operation but failing cache operation
+      mockGitService.getCommits.mockResolvedValue(mockCommits);
+      mockHybridCache.get.mockResolvedValue(null); // Cache miss
+      mockHybridCache.set.mockRejectedValue(
+        new Error('Cache operation failed')
+      );
+
+      // This should trigger a rollback due to the cache operation failing
+      await expect(repositoryCache.getOrParseCommits(repoUrl)).rejects.toThrow(
+        'Cache operation failed'
+      );
+
+      // Verify rollback was attempted
+      const stats = repositoryCache.getCacheStats();
+      expect(stats.transactions.failed).toBeGreaterThan(0);
+    });
+
+    test('should retry failed rollback operations with exponential backoff', async () => {
+      const repoUrl = 'https://github.com/test/rollback-retry.git';
+      const cache = repositoryCache as any;
+
+      // Create a transaction manually to test rollback retry logic
+      const transaction = cache.createTransaction(repoUrl);
+
+      // Mock a rollback operation that fails initially then succeeds
+      let rollbackAttempts = 0;
+      const mockRollbackOperation = {
+        execute: vi.fn().mockImplementation(() => {
+          rollbackAttempts++;
+          if (rollbackAttempts < 2) {
+            throw new Error('Rollback execute failed');
+          }
+          return Promise.resolve();
+        }),
+        verify: vi.fn().mockResolvedValue(true),
+        description: 'Test rollback operation',
+        cacheType: 'raw' as const,
+        key: 'test-key',
+      };
+
+      transaction.rollbackOperations = [mockRollbackOperation];
+
+      // Execute rollback
+      await cache.rollbackTransaction(transaction);
+
+      // Verify retry logic was executed
+      expect(mockRollbackOperation.execute).toHaveBeenCalledTimes(2);
+      expect(mockRollbackOperation.verify).toHaveBeenCalledTimes(1);
+
+      // Should have logged retry attempts
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Rollback operation failed, retrying',
+        expect.objectContaining({
+          transactionId: transaction.id,
+          operation: 'Test rollback operation',
+          attempt: 1,
+          maxAttempts: 3,
+          retryInMs: expect.any(Number),
+        })
+      );
+    });
+
+    test('should handle rollback verification failures', async () => {
+      const repoUrl = 'https://github.com/test/rollback-verify-fail.git';
+      const cache = repositoryCache as any;
+
+      const transaction = cache.createTransaction(repoUrl);
+
+      // Mock a rollback operation that executes but fails verification
+      const mockRollbackOperation = {
+        execute: vi.fn().mockResolvedValue(undefined),
+        verify: vi.fn().mockResolvedValue(false), // Verification fails
+        description: 'Test rollback with verification failure',
+        cacheType: 'filtered' as const,
+        key: 'test-verify-key',
+      };
+
+      transaction.rollbackOperations = [mockRollbackOperation];
+
+      // Should throw TransactionRollbackError
+      await expect(cache.rollbackTransaction(transaction)).rejects.toThrow(
+        expect.objectContaining({
+          name: 'TransactionRollbackError',
+          message: expect.stringContaining('Failed to rollback operations'),
+          transactionId: transaction.id,
+          failedOperations: ['Test rollback with verification failure'],
+        })
+      );
+
+      // Should have attempted all retries
+      expect(mockRollbackOperation.execute).toHaveBeenCalledTimes(3);
+      expect(mockRollbackOperation.verify).toHaveBeenCalledTimes(3);
+    });
+
+    test('should handle multiple rollback operation failures', async () => {
+      const repoUrl = 'https://github.com/test/multiple-rollback-failures.git';
+      const cache = repositoryCache as any;
+
+      const transaction = cache.createTransaction(repoUrl);
+
+      // Mock multiple rollback operations with different failure scenarios
+      const failingExecuteOp = {
+        execute: vi.fn().mockRejectedValue(new Error('Execute failed')),
+        verify: vi.fn().mockResolvedValue(true),
+        description: 'Failing execute operation',
+        cacheType: 'raw' as const,
+        key: 'fail-execute-key',
+      };
+
+      const failingVerifyOp = {
+        execute: vi.fn().mockResolvedValue(undefined),
+        verify: vi.fn().mockResolvedValue(false),
+        description: 'Failing verify operation',
+        cacheType: 'aggregated' as const,
+        key: 'fail-verify-key',
+      };
+
+      const successfulOp = {
+        execute: vi.fn().mockResolvedValue(undefined),
+        verify: vi.fn().mockResolvedValue(true),
+        description: 'Successful operation',
+        cacheType: 'filtered' as const,
+        key: 'success-key',
+      };
+
+      transaction.rollbackOperations = [
+        failingExecuteOp,
+        failingVerifyOp,
+        successfulOp,
+      ];
+
+      // Should throw with both failed operations listed
+      // Note: Operations are processed in reverse order, so failingVerifyOp comes first
+      await expect(cache.rollbackTransaction(transaction)).rejects.toThrow(
+        expect.objectContaining({
+          name: 'TransactionRollbackError',
+          failedOperations: [
+            'Failing verify operation',
+            'Failing execute operation',
+          ],
+        })
+      );
+
+      // Successful operation should have completed
+      expect(successfulOp.execute).toHaveBeenCalledTimes(1);
+      expect(successfulOp.verify).toHaveBeenCalledTimes(1);
+
+      // Failed operations should have been retried maximum times
+      expect(failingExecuteOp.execute).toHaveBeenCalledTimes(3);
+      expect(failingVerifyOp.execute).toHaveBeenCalledTimes(3);
+    });
+
+    test('should log critical alerts for failed rollbacks requiring manual intervention', async () => {
+      const repoUrl = 'https://github.com/test/critical-rollback.git';
+      const cache = repositoryCache as any;
+
+      const transaction = cache.createTransaction(repoUrl);
+
+      const criticalFailureOp = {
+        execute: vi
+          .fn()
+          .mockRejectedValue(new Error('Critical system failure')),
+        verify: vi.fn().mockResolvedValue(true),
+        description: 'Critical cache operation',
+        cacheType: 'raw' as const,
+        key: 'critical-key',
+      };
+
+      transaction.rollbackOperations = [criticalFailureOp];
+
+      await expect(cache.rollbackTransaction(transaction)).rejects.toThrow();
+
+      // Should log critical alert
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'CRITICAL: Transaction rollback incomplete - Manual intervention required',
+        expect.objectContaining({
+          transactionId: transaction.id,
+          failedRollbacks: ['Critical cache operation'],
+          operationsCount: 1,
+          failedCount: 1,
+          requiresManualIntervention: true,
+          severity: 'CRITICAL',
+        })
+      );
+
+      // Should update metrics
+      const stats = repositoryCache.getCacheStats();
+      expect(stats.transactions.failed).toBeGreaterThan(0);
+    });
+
+    test('should handle rollback operations in reverse order', async () => {
+      const repoUrl = 'https://github.com/test/rollback-order.git';
+      const cache = repositoryCache as any;
+
+      const transaction = cache.createTransaction(repoUrl);
+
+      const executionOrder: string[] = [];
+
+      const firstOp = {
+        execute: vi.fn().mockImplementation(() => {
+          executionOrder.push('first');
+          return Promise.resolve();
+        }),
+        verify: vi.fn().mockResolvedValue(true),
+        description: 'First operation',
+        cacheType: 'raw' as const,
+        key: 'first-key',
+      };
+
+      const secondOp = {
+        execute: vi.fn().mockImplementation(() => {
+          executionOrder.push('second');
+          return Promise.resolve();
+        }),
+        verify: vi.fn().mockResolvedValue(true),
+        description: 'Second operation',
+        cacheType: 'filtered' as const,
+        key: 'second-key',
+      };
+
+      const thirdOp = {
+        execute: vi.fn().mockImplementation(() => {
+          executionOrder.push('third');
+          return Promise.resolve();
+        }),
+        verify: vi.fn().mockResolvedValue(true),
+        description: 'Third operation',
+        cacheType: 'aggregated' as const,
+        key: 'third-key',
+      };
+
+      // Add operations in order
+      transaction.rollbackOperations = [firstOp, secondOp, thirdOp];
+
+      await cache.rollbackTransaction(transaction);
+
+      // Should execute in reverse order (LIFO)
+      expect(executionOrder).toEqual(['third', 'second', 'first']);
+    });
+
+    test('should prevent rollback of already completed transactions', async () => {
+      const repoUrl = 'https://github.com/test/completed-transaction.git';
+      const cache = repositoryCache as any;
+
+      const transaction = cache.createTransaction(repoUrl);
+      transaction.completed = true; // Mark as already completed
+
+      const mockRollbackOperation = {
+        execute: vi.fn(),
+        verify: vi.fn(),
+        description: 'Should not execute',
+        cacheType: 'raw' as const,
+        key: 'should-not-execute',
+      };
+
+      transaction.rollbackOperations = [mockRollbackOperation];
+
+      // Should return early without executing rollback operations
+      await cache.rollbackTransaction(transaction);
+
+      expect(mockRollbackOperation.execute).not.toHaveBeenCalled();
+      expect(mockRollbackOperation.verify).not.toHaveBeenCalled();
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Attempted to rollback already completed transaction',
+        expect.objectContaining({
+          transactionId: transaction.id,
+        })
+      );
+    });
+
+    test('should handle exponential backoff correctly', async () => {
+      const repoUrl = 'https://github.com/test/exponential-backoff.git';
+      const cache = repositoryCache as any;
+
+      const transaction = cache.createTransaction(repoUrl);
+
+      const timestamps: number[] = [];
+      let attempts = 0;
+
+      const backoffOp = {
+        execute: vi.fn().mockImplementation(() => {
+          timestamps.push(Date.now());
+          attempts++;
+          if (attempts < 3) {
+            throw new Error(`Attempt ${attempts} failed`);
+          }
+          return Promise.resolve();
+        }),
+        verify: vi.fn().mockResolvedValue(true),
+        description: 'Backoff test operation',
+        cacheType: 'raw' as const,
+        key: 'backoff-key',
+      };
+
+      transaction.rollbackOperations = [backoffOp];
+
+      const startTime = Date.now();
+      await cache.rollbackTransaction(transaction);
+      const endTime = Date.now();
+
+      // Should have made 3 attempts total
+      expect(backoffOp.execute).toHaveBeenCalledTimes(3);
+
+      // Total time should reflect exponential backoff (100ms + 200ms minimum)
+      const totalTime = endTime - startTime;
+      expect(totalTime).toBeGreaterThan(250); // At least 300ms for backoffs
+
+      // Should have logged retry attempts
+      expect(mockLogger.warn).toHaveBeenCalledTimes(2); // For first two failures
+    });
+
+    test('should track rollback metrics correctly', async () => {
+      const repoUrl = 'https://github.com/test/rollback-metrics.git';
+      const cache = repositoryCache as any;
+
+      const transaction = cache.createTransaction(repoUrl);
+
+      const successfulOp = {
+        execute: vi.fn().mockResolvedValue(undefined),
+        verify: vi.fn().mockResolvedValue(true),
+        description: 'Successful rollback',
+        cacheType: 'raw' as const,
+        key: 'success-rollback-key',
+      };
+
+      transaction.rollbackOperations = [successfulOp];
+
+      const initialStats = repositoryCache.getCacheStats();
+      const initialRolledBack = initialStats.transactions.rolledBack;
+
+      await cache.rollbackTransaction(transaction);
+
+      const finalStats = repositoryCache.getCacheStats();
+      expect(finalStats.transactions.rolledBack).toBe(initialRolledBack + 1);
+
+      // Transaction should be marked as completed and removed from active transactions
+      expect(transaction.completed).toBe(true);
+    });
+  });
 });
