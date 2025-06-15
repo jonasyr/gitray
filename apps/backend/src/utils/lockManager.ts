@@ -402,6 +402,53 @@ export async function withKeyLock<T>(
 }
 
 /**
+ * FIX 1: Eliminate Deadlock Potential in Nested Locks
+ *
+ * This function prevents deadlocks by ensuring locks are always acquired
+ * in a consistent order, regardless of the order they are requested.
+ *
+ * @param locks Array of lock keys to acquire
+ * @param fn Function to execute while holding all locks
+ * @param timeout Optional timeout for each lock acquisition
+ * @returns Promise resolving to the result of fn()
+ */
+export async function withOrderedLocks<T>(
+  locks: string[],
+  fn: () => Promise<T>,
+  timeout?: number
+): Promise<T> {
+  if (locks.length === 0) {
+    return fn();
+  }
+
+  if (locks.length === 1) {
+    return withKeyLock(locks[0], fn, timeout);
+  }
+
+  // Remove duplicates and sort locks to ensure consistent ordering and prevent deadlocks
+  const uniqueSortedLocks = [...new Set(locks)].sort();
+
+  if (lockConfig.enableLockLogging) {
+    logger.debug('Acquiring ordered locks', {
+      originalOrder: locks,
+      uniqueSortedOrder: uniqueSortedLocks,
+    });
+  }
+
+  // Handle case where after deduplication we only have one lock
+  if (uniqueSortedLocks.length === 1) {
+    return withKeyLock(uniqueSortedLocks[0], fn, timeout);
+  }
+
+  // Recursively acquire locks in sorted order
+  return withKeyLock(
+    uniqueSortedLocks[0],
+    () => withOrderedLocks(uniqueSortedLocks.slice(1), fn, timeout),
+    timeout
+  );
+}
+
+/**
  * Export additional functions for monitoring and diagnostics
  */
 export const getLockMetrics = (): LockMetrics => lockManager.getMetrics();
@@ -415,6 +462,7 @@ export type { LockMetrics, LockInfo };
 
 export default {
   withKeyLock,
+  withOrderedLocks,
   getLockMetrics,
   getActiveLocks,
   forceReleaseLock,

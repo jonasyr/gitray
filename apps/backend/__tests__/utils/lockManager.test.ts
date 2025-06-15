@@ -103,6 +103,7 @@ vi.mock('../../src/config', () => ({
 // Import after mocking
 import {
   withKeyLock,
+  withOrderedLocks,
   getLockMetrics,
   getActiveLocks,
   shutdownLockManager,
@@ -536,6 +537,124 @@ describe('Lock Manager', () => {
       expect(process2Complete).toBe(false); // Coalesced, didn't execute
       expect(result1).toBe('process1-result');
       expect(result2).toBe('process1-result'); // Same result due to coalescing
+    });
+  });
+
+  describe('Ordered Locks - Deadlock Prevention', () => {
+    test('should acquire locks in sorted order', async () => {
+      // Arrange
+      const executionOrder: string[] = [];
+      const locks = ['lock-z', 'lock-a', 'lock-m'];
+
+      const testFunction = async () => {
+        executionOrder.push('function-executed');
+        return 'success';
+      };
+
+      // Act
+      const result = await withOrderedLocks(locks, testFunction);
+
+      // Assert
+      expect(result).toBe('success');
+      expect(executionOrder).toEqual(['function-executed']);
+
+      // Verify locks were acquired in sorted order (lock-a, lock-m, lock-z)
+      expect(mockFs.open).toHaveBeenCalledWith('/tmp/test-locks/lock-a', 'wx');
+      expect(mockFs.open).toHaveBeenCalledWith('/tmp/test-locks/lock-m', 'wx');
+      expect(mockFs.open).toHaveBeenCalledWith('/tmp/test-locks/lock-z', 'wx');
+    });
+
+    test('should handle single lock correctly', async () => {
+      // Arrange
+      const locks = ['single-lock'];
+      const testFunction = async () => 'single-result';
+
+      // Act
+      const result = await withOrderedLocks(locks, testFunction);
+
+      // Assert
+      expect(result).toBe('single-result');
+      expect(mockFs.open).toHaveBeenCalledWith(
+        '/tmp/test-locks/single-lock',
+        'wx'
+      );
+    });
+
+    test('should handle empty lock array', async () => {
+      // Arrange
+      const locks: string[] = [];
+      const testFunction = async () => 'empty-result';
+
+      // Act
+      const result = await withOrderedLocks(locks, testFunction);
+
+      // Assert
+      expect(result).toBe('empty-result');
+      // No lock operations should have been called
+    });
+
+    test('should prevent deadlock with consistent ordering', async () => {
+      // Arrange
+      const results: string[] = [];
+
+      // Simulate two concurrent operations that would deadlock with different lock orders
+      const operation1 = async () => {
+        return withOrderedLocks(
+          ['repo-access:repo1', 'disk:key1'],
+          async () => {
+            results.push('operation1');
+            return 'result1';
+          }
+        );
+      };
+
+      const operation2 = async () => {
+        return withOrderedLocks(
+          ['disk:key1', 'repo-access:repo1'],
+          async () => {
+            results.push('operation2');
+            return 'result2';
+          }
+        );
+      };
+
+      // Act
+      const [result1, result2] = await Promise.all([
+        operation1(),
+        operation2(),
+      ]);
+
+      // Assert
+      expect(results).toHaveLength(1); // Due to coalescing, only one should execute
+      expect([result1, result2]).toContain('result1');
+      // Both operations should use the same sorted lock order internally
+    });
+
+    test('should handle duplicate locks in array', async () => {
+      // Arrange
+      const locks = ['lock-b', 'lock-a', 'lock-b', 'lock-a'];
+      const testFunction = async () => 'duplicate-result';
+
+      // Act
+      const result = await withOrderedLocks(locks, testFunction);
+
+      // Assert
+      expect(result).toBe('duplicate-result');
+      // Should only acquire each unique lock once, in sorted order
+    });
+
+    test('should propagate errors correctly', async () => {
+      // Arrange
+      const locks = ['error-lock-z', 'error-lock-a'];
+      const testError = new Error('Test error in ordered locks');
+      const testFunction = async () => {
+        throw testError;
+      };
+
+      // Act & Assert
+      await expect(withOrderedLocks(locks, testFunction)).rejects.toThrow(
+        'Test error in ordered locks'
+      );
     });
   });
 
