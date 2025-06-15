@@ -616,8 +616,11 @@ class RepositoryCacheManager {
       const transaction = this.createTransaction(repoUrl);
 
       try {
-        // Get raw commits (this may hit Level 1 cache)
-        const rawCommits = await this.getOrParseCommits(repoUrl);
+        // Prevent deadlock: Use ordered locks to safely call getOrParseCommits from within cache-filtered lock
+        const rawCommits = await withOrderedLocks(
+          [`cache-filtered:${repoUrl}`, `cache-operation:${repoUrl}`],
+          () => this.getOrParseCommitsUnlocked(repoUrl)
+        );
 
         // Apply filters (handles null commits internally)
         filteredCommits = this.applyFilters(rawCommits, options);
@@ -756,10 +759,10 @@ class RepositoryCacheManager {
           toDate: filterOptions?.toDate,
         };
 
-        // Get filtered commits (this may hit Level 1 or Level 2 cache)
-        const commits = await this.getOrParseFilteredCommits(
-          repoUrl,
-          commitOptions
+        // Prevent deadlock: Use ordered locks to safely call getOrParseFilteredCommits from within cache-aggregated lock
+        const commits = await withOrderedLocks(
+          [`cache-aggregated:${repoUrl}`, `cache-filtered:${repoUrl}`],
+          () => this.getOrParseFilteredCommitsUnlocked(repoUrl, commitOptions)
         );
 
         // Ensure commits is never null before passing to aggregateCommitsByTime

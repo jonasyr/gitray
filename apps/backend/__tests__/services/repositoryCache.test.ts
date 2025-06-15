@@ -1198,9 +1198,10 @@ describe('RepositoryCache', () => {
 
       mockHybridCache.get.mockResolvedValue(null);
 
-      // Mock getOrParseFilteredCommits to return null
-      const originalMethod = repositoryCache.getOrParseFilteredCommits;
-      (repositoryCache as any).getOrParseFilteredCommits = vi
+      // Mock getOrParseFilteredCommitsUnlocked to return null (this is what's actually called now due to deadlock prevention)
+      const originalMethod = (repositoryCache as any)
+        .getOrParseFilteredCommitsUnlocked;
+      (repositoryCache as any).getOrParseFilteredCommitsUnlocked = vi
         .fn()
         .mockResolvedValue(null);
 
@@ -1217,7 +1218,8 @@ describe('RepositoryCache', () => {
       );
 
       // Restore original method
-      (repositoryCache as any).getOrParseFilteredCommits = originalMethod;
+      (repositoryCache as any).getOrParseFilteredCommitsUnlocked =
+        originalMethod;
     });
 
     test('should track cache key patterns correctly', async () => {
