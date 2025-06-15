@@ -773,4 +773,419 @@ describe('SerializationWorker', () => {
       await expect(pool.serialize({ test: 'data' })).rejects.toThrow();
     });
   });
+
+  describe('Worker Thread Code Coverage', () => {
+    test('should handle worker initialization parameters', () => {
+      // Test different pool sizes
+      const smallPool = new SerializationPool(1);
+      expect(smallPool.getStats().poolSize).toBe(1);
+      smallPool.destroy();
+
+      const largePool = new SerializationPool(8);
+      expect(largePool.getStats().poolSize).toBe(8);
+      largePool.destroy();
+
+      // Test default sizing logic (based on CPU count)
+      const defaultPool = new SerializationPool();
+      const stats = defaultPool.getStats();
+      expect(stats.poolSize).toBeGreaterThanOrEqual(2);
+      expect(stats.poolSize).toBeLessThanOrEqual(4);
+      defaultPool.destroy();
+    });
+
+    test('should properly initialize with CPU-based default pool size', () => {
+      // Test that default constructor uses CPU-based sizing
+      const pool = new SerializationPool();
+      const stats = pool.getStats();
+
+      // Should use Math.max(2, Math.min(4, cpus().length))
+      expect(stats.poolSize).toBeGreaterThanOrEqual(2);
+      expect(stats.poolSize).toBeLessThanOrEqual(4);
+
+      pool.destroy();
+    });
+
+    test('should handle worker environment detection', () => {
+      // Test that worker usage is properly detected based on environment
+      const pool = new SerializationPool(2);
+      const stats = pool.getStats();
+
+      // In test environment, workers should be disabled
+      expect(stats.useWorkers).toBe(false);
+      expect(stats.activeWorkers).toBe(0);
+
+      pool.destroy();
+    });
+
+    test('should handle serialization errors in sync mode', async () => {
+      const pool = new SerializationPool(1);
+
+      // Test with object that throws in toJSON
+      const problematicData = {
+        toJSON: () => {
+          throw new Error('Custom serialization error');
+        },
+      };
+
+      await expect(pool.serialize(problematicData)).rejects.toThrow(
+        'Custom serialization error'
+      );
+
+      pool.destroy();
+    });
+
+    test('should handle queue management when workers are disabled', async () => {
+      const pool = new SerializationPool(2);
+
+      // Even with multiple "workers", queue should be empty since we use sync processing
+      const stats1 = pool.getStats();
+      expect(stats1.queueLength).toBe(0);
+
+      // Process multiple items
+      const tasks = Array(5)
+        .fill(0)
+        .map((_, i) => pool.serialize({ id: i }));
+      const results = await Promise.all(tasks);
+
+      // All should succeed
+      expect(results.every((r) => r.success)).toBe(true);
+
+      // Queue should remain empty in sync mode
+      const stats2 = pool.getStats();
+      expect(stats2.queueLength).toBe(0);
+
+      pool.destroy();
+    });
+
+    test('should handle undefined serialization attempt', async () => {
+      const pool = new SerializationPool(1);
+
+      // JSON.stringify(undefined) returns undefined, which should cause an error
+      await expect(pool.serialize(undefined)).rejects.toThrow();
+
+      pool.destroy();
+    });
+
+    test('should handle very large numbers and edge number cases', async () => {
+      const pool = new SerializationPool(1);
+
+      const numberTests = {
+        infinity: Infinity,
+        negInfinity: -Infinity,
+        nan: NaN,
+        maxValue: Number.MAX_VALUE,
+        minValue: Number.MIN_VALUE,
+        maxSafeInt: Number.MAX_SAFE_INTEGER,
+        minSafeInt: Number.MIN_SAFE_INTEGER,
+        epsilon: Number.EPSILON,
+      };
+
+      const result = await pool.serialize(numberTests);
+      expect(result.success).toBe(true);
+
+      if (result.success) {
+        const parsed = JSON.parse(result.json);
+        // JSON converts Infinity, -Infinity, and NaN to null
+        expect(parsed.infinity).toBe(null);
+        expect(parsed.negInfinity).toBe(null);
+        expect(parsed.nan).toBe(null);
+        expect(parsed.maxSafeInt).toBe(Number.MAX_SAFE_INTEGER);
+        expect(parsed.minSafeInt).toBe(Number.MIN_SAFE_INTEGER);
+      }
+
+      pool.destroy();
+    });
+
+    test('should handle BigInt serialization attempt', async () => {
+      const pool = new SerializationPool(1);
+
+      // BigInt cannot be serialized to JSON
+      const bigIntData = { bigNumber: BigInt(12345) };
+
+      await expect(pool.serialize(bigIntData)).rejects.toThrow();
+
+      pool.destroy();
+    });
+
+    test('should handle object with getter that throws', async () => {
+      const pool = new SerializationPool(1);
+
+      const problematicObj = {
+        normalProp: 'test',
+        get problematicProp() {
+          throw new Error('Getter error');
+        },
+      };
+
+      // This should fail during JSON.stringify
+      await expect(pool.serialize(problematicObj)).rejects.toThrow();
+
+      pool.destroy();
+    });
+
+    test('should handle array with sparse elements', async () => {
+      const pool = new SerializationPool(1);
+
+      // Create a sparse array
+      const sparseArray = new Array(5);
+      sparseArray[0] = 'first';
+      sparseArray[2] = 'third';
+      sparseArray[4] = 'fifth';
+      // Elements 1 and 3 are undefined
+
+      const result = await pool.serialize(sparseArray);
+      expect(result.success).toBe(true);
+
+      if (result.success) {
+        const parsed = JSON.parse(result.json);
+        expect(parsed).toHaveLength(5);
+        expect(parsed[0]).toBe('first');
+        expect(parsed[1]).toBe(null); // undefined becomes null in JSON
+        expect(parsed[2]).toBe('third');
+        expect(parsed[3]).toBe(null); // undefined becomes null in JSON
+        expect(parsed[4]).toBe('fifth');
+      }
+
+      pool.destroy();
+    });
+
+    test('should handle Map and Set objects', async () => {
+      const pool = new SerializationPool(1);
+
+      const mapSetData = {
+        map: new Map([
+          ['key1', 'value1'],
+          ['key2', 'value2'],
+        ]),
+        set: new Set([1, 2, 3, 'test']),
+        normalData: 'normal',
+      };
+
+      const result = await pool.serialize(mapSetData);
+      expect(result.success).toBe(true);
+
+      if (result.success) {
+        const parsed = JSON.parse(result.json);
+        // Map and Set become empty objects in JSON
+        expect(parsed.map).toEqual({});
+        expect(parsed.set).toEqual({});
+        expect(parsed.normalData).toBe('normal');
+      }
+
+      pool.destroy();
+    });
+
+    test('should handle complex object with mixed non-serializable elements', async () => {
+      const pool = new SerializationPool(1);
+
+      const complexObj = {
+        string: 'test',
+        number: 42,
+        boolean: true,
+        nullValue: null,
+        undefinedValue: undefined,
+        func: function () {
+          return 'test';
+        },
+        arrow: () => 'arrow',
+        symbol: Symbol('test'),
+        date: new Date('2023-01-01'),
+        regex: /test/g,
+        nested: {
+          map: new Map([['a', 1]]),
+          set: new Set([1, 2, 3]),
+        },
+      };
+
+      const result = await pool.serialize(complexObj);
+      expect(result.success).toBe(true);
+
+      if (result.success) {
+        const parsed = JSON.parse(result.json);
+        expect(parsed.string).toBe('test');
+        expect(parsed.number).toBe(42);
+        expect(parsed.boolean).toBe(true);
+        expect(parsed.nullValue).toBe(null);
+        expect(parsed.undefinedValue).toBeUndefined(); // undefined properties are omitted
+        expect(parsed.func).toBeUndefined(); // functions are omitted
+        expect(parsed.arrow).toBeUndefined(); // functions are omitted
+        expect(parsed.symbol).toBeUndefined(); // symbols are omitted
+        expect(parsed.date).toBe('2023-01-01T00:00:00.000Z'); // Date becomes ISO string
+        expect(parsed.regex).toEqual({}); // RegExp becomes empty object
+        expect(parsed.nested.map).toEqual({}); // Map becomes empty object
+        expect(parsed.nested.set).toEqual({}); // Set becomes empty object
+      }
+
+      pool.destroy();
+    });
+
+    test('should handle buffer-like objects', async () => {
+      const pool = new SerializationPool(1);
+
+      const bufferData = {
+        buffer: Buffer.from('test data', 'utf8'),
+        uint8Array: new Uint8Array([1, 2, 3, 4]),
+        normalData: 'test',
+      };
+
+      const result = await pool.serialize(bufferData);
+      expect(result.success).toBe(true);
+
+      if (result.success) {
+        const parsed = JSON.parse(result.json);
+        expect(parsed.normalData).toBe('test');
+        // Buffer and Uint8Array get serialized as objects with numeric keys
+        expect(typeof parsed.buffer).toBe('object');
+        expect(typeof parsed.uint8Array).toBe('object');
+      }
+
+      pool.destroy();
+    });
+
+    test('should handle objects with numeric string keys', async () => {
+      const pool = new SerializationPool(1);
+
+      const numericKeyObj = {
+        '0': 'zero',
+        '1': 'one',
+        '10': 'ten',
+        normal: 'key',
+        123: 'numeric',
+      };
+
+      const result = await pool.serialize(numericKeyObj);
+      expect(result.success).toBe(true);
+
+      if (result.success) {
+        const parsed = JSON.parse(result.json);
+        expect(parsed['0']).toBe('zero');
+        expect(parsed['1']).toBe('one');
+        expect(parsed['10']).toBe('ten');
+        expect(parsed.normal).toBe('key');
+        expect(parsed['123']).toBe('numeric');
+      }
+
+      pool.destroy();
+    });
+  });
+
+  describe('Edge Cases in Synchronous Mode', () => {
+    test('should handle serialization in sync mode correctly', async () => {
+      const pool = new SerializationPool(4);
+      const stats = pool.getStats();
+
+      // Verify we're in sync mode
+      expect(stats.useWorkers).toBe(false);
+      expect(stats.activeWorkers).toBe(0);
+
+      // Test that serialization still works correctly
+      const testData = { message: 'sync mode test', timestamp: Date.now() };
+      const result = await pool.serialize(testData);
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        const parsed = JSON.parse(result.json);
+        expect(parsed.message).toBe('sync mode test');
+        expect(typeof parsed.timestamp).toBe('number');
+      }
+
+      pool.destroy();
+    });
+
+    test('should handle queue length correctly in sync mode', async () => {
+      const pool = new SerializationPool(2);
+
+      // Start multiple async operations
+      const promise1 = pool.serialize({ id: 1 });
+      const promise2 = pool.serialize({ id: 2 });
+
+      // In sync mode, queue should be processed immediately
+      const stats = pool.getStats();
+      expect(stats.queueLength).toBe(0);
+
+      const results = await Promise.all([promise1, promise2]);
+      expect(results.every((r) => r.success)).toBe(true);
+
+      pool.destroy();
+    });
+
+    test('should handle destroy with pending operations in sync mode', async () => {
+      const pool = new SerializationPool(1);
+
+      // Start an operation
+      const promise = pool.serialize({ test: 'data' });
+
+      // Destroy immediately (though in sync mode, operation completes first)
+      await pool.destroy();
+
+      // The operation should complete successfully since it's synchronous
+      const result = await promise;
+      expect(result.success).toBe(true);
+
+      // New operations should fail
+      await expect(pool.serialize({ test: 'new' })).rejects.toThrow(
+        'SerializationPool has been destroyed'
+      );
+    });
+
+    test('should handle multiple destroy calls in sync mode', async () => {
+      const pool = new SerializationPool(1);
+
+      // Use the pool
+      await pool.serialize({ test: 'data' });
+
+      // Call destroy multiple times
+      await pool.destroy();
+      await pool.destroy(); // Should not throw
+      await pool.destroy(); // Should not throw
+
+      // Should still be destroyed
+      const stats = pool.getStats();
+      expect(stats.isDestroyed).toBe(true);
+    });
+
+    test('should handle error in sync serialization path', async () => {
+      const pool = new SerializationPool(1);
+
+      // Create object that will fail JSON.stringify
+      const cyclicalObj: any = { name: 'test' };
+      cyclicalObj.self = cyclicalObj;
+
+      await expect(pool.serialize(cyclicalObj)).rejects.toThrow();
+
+      // Pool should still be usable after error
+      const validResult = await pool.serialize({ valid: 'data' });
+      expect(validResult.success).toBe(true);
+
+      pool.destroy();
+    });
+
+    test('should calculate byte size accurately for unicode in sync mode', async () => {
+      const pool = new SerializationPool(1);
+
+      const unicodeData = {
+        emoji: '👨‍💻🚀',
+        chinese: '测试',
+        arabic: 'اختبار',
+        mixed: 'Test 🌟 测试',
+      };
+
+      const result = await pool.serialize(unicodeData);
+      expect(result.success).toBe(true);
+
+      if (result.success) {
+        // Verify size calculation is accurate
+        const expectedSize = Buffer.byteLength(
+          JSON.stringify(unicodeData),
+          'utf8'
+        );
+        expect(result.size).toBe(expectedSize);
+
+        // Multi-byte characters should result in larger byte size than character count
+        expect(result.size).toBeGreaterThan(result.json.length);
+      }
+
+      pool.destroy();
+    });
+  });
 });
