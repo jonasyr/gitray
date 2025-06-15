@@ -1,4 +1,21 @@
-// apps/backend/src/services/repositoryCache.ts - FIXED VERSION
+/**
+ * Repository Cache Service - Multi-tier Git Data Caching System
+ *
+ * Provides high-performance, transactionally consistent caching for Git repository data
+ * with intelligent memory management and deadlock-free concurrent access.
+ *
+ * @fileoverview This service implements a sophisticated three-tier caching architecture:
+ * - Tier 1: Raw commits (direct Git extraction results)
+ * - Tier 2: Filtered commits (author/date/pagination filtered data)
+ * - Tier 3: Aggregated data (heatmaps, statistics, visualizations)
+ *
+ * Key features:
+ * - Transactional consistency with automatic rollback on failures
+ * - Ordered locking system preventing deadlocks in concurrent operations
+ * - Memory-aware cache allocation preventing OOM on large repositories
+ * - Repository coordination to eliminate duplicate clones
+ * - Comprehensive metrics and health monitoring
+ */
 
 import crypto from 'crypto';
 import { gitService } from './gitService';
@@ -36,35 +53,43 @@ import {
  * 5. ✅ Pattern-based cache key management
  */
 
+/**
+ * Configuration options for commit cache operations.
+ * These filters determine which commits are included in cached results.
+ */
 export interface CommitCacheOptions {
-  /** Skip certain authors in the result */
+  /** Skip commits from this specific author */
   author?: string;
 
-  /** Include only these authors */
+  /** Include commits only from these authors (exclusive filter) */
   authors?: string[];
 
-  /** Start date filter (ISO string) */
+  /** Include commits only after this date (ISO 8601 format) */
   fromDate?: string;
 
-  /** End date filter (ISO string) */
+  /** Include commits only before this date (ISO 8601 format) */
   toDate?: string;
 
-  /** Pagination offset */
+  /** Number of commits to skip for pagination */
   skip?: number;
 
-  /** Maximum number of commits to return */
+  /** Maximum number of commits to return (pagination limit) */
   limit?: number;
 }
 
+/**
+ * Comprehensive cache performance and health statistics.
+ * Used for monitoring cache efficiency and identifying optimization opportunities.
+ */
 export interface CacheStats {
-  /** Number of entries in each cache tier */
+  /** Distribution of cached entries across all three tiers */
   entries: {
     rawCommits: number;
     filteredCommits: number;
     aggregatedData: number;
   };
 
-  /** Memory usage by tier */
+  /** Memory consumption breakdown by cache tier in bytes */
   memoryUsage: {
     rawCommits: number;
     filteredCommits: number;
@@ -72,7 +97,7 @@ export interface CacheStats {
     total: number;
   };
 
-  /** Hit/miss ratios by tier */
+  /** Cache hit efficiency ratios (0.0 to 1.0) for performance analysis */
   hitRatios: {
     rawCommits: number;
     filteredCommits: number;
@@ -80,15 +105,19 @@ export interface CacheStats {
     overall: number;
   };
 
-  /** Cache efficiency metrics */
+  /** Operational efficiency metrics for cost-benefit analysis */
   efficiency: {
+    /** Number of repository clones prevented through cache coordination */
     duplicateClonesPrevented: number;
+    /** Total cache operations performed since startup */
     totalCacheOperations: number;
+    /** Average response time for cache hits in milliseconds */
     averageHitTime: number;
+    /** Average response time for cache misses in milliseconds */
     averageMissTime: number;
   };
 
-  /** Transaction metrics */
+  /** Transactional consistency metrics for reliability monitoring */
   transactions?: {
     started: number;
     committed: number;
@@ -98,10 +127,17 @@ export interface CacheStats {
 }
 
 /**
- * FIX: Transaction context for atomic cache operations
+ * Atomic transaction context for cache operations.
+ * Ensures data consistency across multiple cache tiers by enabling rollback on failures.
+ *
+ * This prevents partial cache states where some tiers are updated while others fail,
+ * which could lead to inconsistent data being served to clients.
  */
 interface CacheTransaction {
+  /** Unique identifier for tracking transaction lifecycle */
   id: string;
+
+  /** Sequential log of all cache operations performed within this transaction */
   operations: Array<{
     cache: 'raw' | 'filtered' | 'aggregated';
     operation: 'set' | 'del';
@@ -109,30 +145,48 @@ interface CacheTransaction {
     originalValue?: any;
     newValue?: any;
   }>;
+
+  /** Flag indicating if transaction has been committed or rolled back */
   completed: boolean;
+
+  /** Stack of functions to execute if rollback is required */
   rollbackOperations: Array<() => Promise<void>>;
 }
 
 /**
- * Multi-tier cache for repository commit data with transactional consistency
+ * Multi-tier repository cache manager with transactional consistency.
+ *
+ * Implements a three-level caching hierarchy optimized for Git repository data:
+ * 1. Raw commits: Direct Git extraction results (50% memory allocation)
+ * 2. Filtered commits: Author/date/pagination filtered datasets (30% memory allocation)
+ * 3. Aggregated data: Processed visualizations and statistics (20% memory allocation)
+ *
+ * Key architectural decisions:
+ * - Memory allocation prioritizes raw commits as they're most reusable
+ * - Ordered locking prevents deadlocks in concurrent cache operations
+ * - Transactional consistency ensures cache coherence across tiers
+ * - Repository coordination eliminates redundant Git clones
  */
 class RepositoryCacheManager {
-  // Level 1: Raw commits cache (highest priority, shared across all operations)
+  /** Primary cache tier: Raw Git commit data shared across all operations */
   private rawCommitsCache: HybridLRUCache<Commit[]>;
 
-  // Level 2: Filtered commits cache (medium priority, filtered/paginated data)
+  /** Secondary cache tier: Filtered commit data for specific query patterns */
   private filteredCommitsCache: HybridLRUCache<Commit[]>;
 
-  // Level 3: Aggregated data cache (lower priority, processed results)
+  /** Tertiary cache tier: Aggregated visualization data with lowest memory priority */
   private aggregatedDataCache: HybridLRUCache<CommitHeatmapData>;
 
-  // FIX: Track active transactions for consistency
+  /** Active transaction tracking for ensuring atomic cache updates */
   private activeTransactions = new Map<string, CacheTransaction>();
 
-  // FIX: Cache key patterns for complete invalidation
+  /** Repository-to-cache-key mapping for efficient bulk invalidation */
   private cacheKeyPatterns = new Map<string, Set<string>>();
 
-  // Metrics tracking
+  /**
+   * Operational metrics tracking for performance monitoring and optimization.
+   * These metrics inform cache tuning decisions and help identify bottlenecks.
+   */
   private metrics = {
     operations: {
       rawHits: 0,
@@ -148,9 +202,10 @@ class RepositoryCacheManager {
       operationCount: 0,
     },
     efficiency: {
+      /** Tracks cost savings from preventing duplicate repository clones */
       duplicateClonesPrevented: 0,
     },
-    // FIX: Add transaction metrics
+    /** Transactional integrity monitoring for reliability assurance */
     transactions: {
       started: 0,
       committed: 0,
@@ -162,10 +217,14 @@ class RepositoryCacheManager {
   constructor() {
     const baseConfig = config.hybridCache;
 
-    // Configure raw commits cache (largest allocation)
+    /*
+     * Initialize raw commits cache with highest memory allocation.
+     * Raw commits are the foundation data that all other cache tiers depend on,
+     * so we prioritize their retention to minimize expensive Git operations.
+     */
     this.rawCommitsCache = new HybridLRUCache<Commit[]>({
-      maxEntries: Math.floor(baseConfig.maxEntries * 0.5), // 50% of total
-      memoryLimitBytes: Math.floor(baseConfig.memoryLimitBytes * 0.6), // 60% of memory
+      maxEntries: Math.floor(baseConfig.maxEntries * 0.5), // 50% of total entries
+      memoryLimitBytes: Math.floor(baseConfig.memoryLimitBytes * 0.6), // 60% of memory budget
       diskPath: `${baseConfig.diskPath}/raw-commits`,
       lockTimeoutMs: baseConfig.lockTimeoutMs,
       redisConfig: baseConfig.enableRedis
@@ -176,10 +235,14 @@ class RepositoryCacheManager {
         : undefined,
     });
 
-    // Configure filtered commits cache (medium allocation)
+    /*
+     * Initialize filtered commits cache with medium allocation.
+     * Filtered results have high reuse potential for common query patterns
+     * but are less fundamental than raw data.
+     */
     this.filteredCommitsCache = new HybridLRUCache<Commit[]>({
-      maxEntries: Math.floor(baseConfig.maxEntries * 0.3), // 30% of total
-      memoryLimitBytes: Math.floor(baseConfig.memoryLimitBytes * 0.25), // 25% of memory
+      maxEntries: Math.floor(baseConfig.maxEntries * 0.3), // 30% of total entries
+      memoryLimitBytes: Math.floor(baseConfig.memoryLimitBytes * 0.25), // 25% of memory budget
       diskPath: `${baseConfig.diskPath}/filtered-commits`,
       lockTimeoutMs: baseConfig.lockTimeoutMs,
       redisConfig: baseConfig.enableRedis
@@ -190,10 +253,14 @@ class RepositoryCacheManager {
         : undefined,
     });
 
-    // Configure aggregated data cache (smallest allocation)
+    /*
+     * Initialize aggregated data cache with smallest allocation.
+     * Aggregations are computationally expensive but have the lowest reuse rate
+     * since they're often specific to particular visualization requests.
+     */
     this.aggregatedDataCache = new HybridLRUCache<CommitHeatmapData>({
-      maxEntries: Math.floor(baseConfig.maxEntries * 0.2), // 20% of total
-      memoryLimitBytes: Math.floor(baseConfig.memoryLimitBytes * 0.15), // 15% of memory
+      maxEntries: Math.floor(baseConfig.maxEntries * 0.2), // 20% of total entries
+      memoryLimitBytes: Math.floor(baseConfig.memoryLimitBytes * 0.15), // 15% of memory budget
       diskPath: `${baseConfig.diskPath}/aggregated-data`,
       lockTimeoutMs: baseConfig.lockTimeoutMs,
       redisConfig: baseConfig.enableRedis
@@ -218,7 +285,13 @@ class RepositoryCacheManager {
   }
 
   /**
-   * FIX: Create a new cache transaction
+   * Creates a new cache transaction for atomic multi-tier operations.
+   *
+   * Transactions ensure that cache updates across multiple tiers either all succeed
+   * or all fail, preventing inconsistent cache states that could serve stale data.
+   *
+   * @param repoUrl - Repository URL for transaction context and logging
+   * @returns New transaction instance ready for cache operations
    */
   private createTransaction(repoUrl: string): CacheTransaction {
     const transaction: CacheTransaction = {
@@ -240,7 +313,12 @@ class RepositoryCacheManager {
   }
 
   /**
-   * FIX: Commit a cache transaction
+   * Commits a cache transaction, finalizing all pending operations.
+   *
+   * Once committed, the transaction cannot be rolled back. This method should only
+   * be called after all cache operations have completed successfully.
+   *
+   * @param transaction - Transaction to commit
    */
   private async commitTransaction(
     transaction: CacheTransaction
@@ -263,7 +341,13 @@ class RepositoryCacheManager {
   }
 
   /**
-   * FIX: Rollback a cache transaction
+   * Rolls back a cache transaction, undoing all operations performed within it.
+   *
+   * This method executes rollback operations in reverse order to restore the cache
+   * to its pre-transaction state. Critical for maintaining data consistency when
+   * operations fail partway through a multi-tier cache update.
+   *
+   * @param transaction - Transaction to roll back
    */
   private async rollbackTransaction(
     transaction: CacheTransaction
@@ -274,9 +358,8 @@ class RepositoryCacheManager {
       });
       return;
     }
-
     try {
-      // Execute rollback operations in reverse order
+      // Execute rollback operations in reverse order to maintain consistency
       for (const rollbackOp of transaction.rollbackOperations.reverse()) {
         try {
           await rollbackOp();
@@ -297,7 +380,7 @@ class RepositoryCacheManager {
         rollbackOperationsCount: transaction.rollbackOperations.length,
       });
     } catch (error) {
-      // Don't increment failed counter here as it's already incremented in the calling catch block
+      // Log rollback failure but don't increment failed counter here as it's handled in caller
       logger.error('Failed to rollback transaction', {
         transactionId: transaction.id,
         error: error instanceof Error ? error.message : String(error),
@@ -307,7 +390,18 @@ class RepositoryCacheManager {
   }
 
   /**
-   * FIX: Transactional cache set operation
+   * Performs a transactional cache set operation with automatic rollback capability.
+   *
+   * This method ensures that cache updates can be undone if subsequent operations
+   * in the same transaction fail. It tracks both the new value being set and the
+   * original value for potential restoration.
+   *
+   * @param cache - Target cache instance to update
+   * @param cacheType - Cache tier identifier for transaction logging
+   * @param key - Cache key to update
+   * @param value - New value to cache
+   * @param ttl - Time-to-live in seconds
+   * @param transaction - Active transaction context
    */
   private async transactionalSet<T>(
     cache: HybridLRUCache<T>,
@@ -317,18 +411,18 @@ class RepositoryCacheManager {
     ttl: number,
     transaction: CacheTransaction
   ): Promise<void> {
-    // Check if key already exists for rollback
+    // Capture existing value for potential rollback before modification
     let originalValue: T | null = null;
     try {
       originalValue = await cache.get(key);
     } catch {
-      // Key doesn't exist, that's fine
+      // Key doesn't exist - this is expected for new cache entries
     }
 
-    // Perform the set operation
+    // Perform the actual cache update
     await cache.set(key, value, 'EX', ttl);
 
-    // Record operation for potential rollback
+    // Record operation in transaction log for audit trail
     transaction.operations.push({
       cache: cacheType,
       operation: 'set',
@@ -337,28 +431,34 @@ class RepositoryCacheManager {
       newValue: value,
     });
 
-    // Add rollback operation
+    // Prepare rollback strategy based on whether key previously existed
     if (originalValue !== null) {
-      // Restore original value
+      // Restore original value if rollback is needed
       transaction.rollbackOperations.push(async () => {
         await cache.set(key, originalValue as T, 'EX', ttl);
       });
     } else {
-      // Delete the key we just set
+      // Delete the newly created key if rollback is needed
       transaction.rollbackOperations.push(async () => {
         await cache.del(key);
       });
     }
 
-    // FIX: Track cache key patterns for invalidation
+    // Track cache key for repository-based bulk invalidation
     this.trackCacheKey(key);
   }
 
   /**
-   * FIX: Track cache keys by repository for pattern-based invalidation
+   * Tracks cache keys by repository for efficient bulk invalidation.
+   *
+   * When a repository is updated, we need to invalidate all associated cache entries
+   * across all tiers. This method maintains the mapping between repository identifiers
+   * and their cache keys to enable fast pattern-based clearing.
+   *
+   * @param key - Cache key to track (must follow expected naming pattern)
    */
   private trackCacheKey(key: string): void {
-    // Extract repository URL hash from key pattern
+    // Extract repository URL hash from standardized key pattern
     const match = key.match(
       /^(?:raw_commits|filtered_commits|aggregated_data):([a-f0-9]+)/
     );
@@ -372,21 +472,49 @@ class RepositoryCacheManager {
   }
 
   /**
-   * FIX: Get or parse raw commits with transactional consistency
+   * Retrieves or parses commits with intelligent cache tier selection.
+   *
+   * This is the primary entry point for commit data retrieval. It implements a smart
+   * caching strategy that chooses the optimal cache tier based on the request type:
+   *
+   * - Simple requests (no filters): Uses raw commits cache for maximum reusability
+   * - Filtered requests: Uses filtered commits cache to avoid repeated processing
+   *
+   * The method employs ordered locking to prevent deadlocks when multiple operations
+   * access the same repository concurrently, and uses transactional consistency to
+   * ensure cache coherence across all tiers.
+   *
+   * @param repoUrl - Git repository URL to analyze
+   * @param options - Optional filters for commit selection
+   * @returns Promise resolving to array of commits matching the criteria
+   *
+   * @throws {Error} When Git operations fail or cache corruption is detected
+   *
+   * @example
+   * ```typescript
+   * // Get all commits (uses raw cache)
+   * const allCommits = await repositoryCache.getOrParseCommits('https://github.com/user/repo.git');
+   *
+   * // Get filtered commits (uses filtered cache)
+   * const recentCommits = await repositoryCache.getOrParseCommits('https://github.com/user/repo.git', {
+   *   fromDate: '2024-01-01',
+   *   limit: 100
+   * });
+   * ```
    */
   async getOrParseCommits(
     repoUrl: string,
     options?: CommitCacheOptions
   ): Promise<Commit[]> {
-    // Use ordered locks to prevent deadlock between cache-operation and repo-access
+    // Use ordered locks to prevent deadlock between cache operations and repository access
     return withOrderedLocks(
       [`cache-operation:${repoUrl}`, `repo-access:${repoUrl}`],
       async () => {
         const startTime = Date.now();
 
-        // For paginated requests or specific filters, try filtered cache first
+        // Route filtered requests to specialized cache tier for better hit rates
         if (this.hasSpecificFilters(options)) {
-          // Need to include cache-filtered in the ordered locks as well
+          // Extend lock scope to include filtered cache operations
           return withOrderedLocks(
             [
               `cache-operation:${repoUrl}`,
@@ -397,14 +525,14 @@ class RepositoryCacheManager {
           );
         }
 
-        // Level 1: Try raw commits cache
+        // Attempt to retrieve from raw commits cache (Tier 1)
         const rawKey = this.generateRawCommitsKey(repoUrl);
         let commits: Commit[] | null = null;
 
         try {
           commits = await this.rawCommitsCache.get(rawKey);
         } catch (error) {
-          // Record detailed error for enhanced metrics
+          // Record cache operation failure for system health monitoring
           recordDetailedError(
             'cache',
             error instanceof Error ? error : new Error(String(error)),
@@ -424,6 +552,7 @@ class RepositoryCacheManager {
         }
 
         if (commits) {
+          // Cache hit: Update metrics and return cached data immediately
           this.metrics.operations.rawHits++;
           this.recordHitTime(startTime);
           cacheHits.inc({ operation: 'raw_commits' });
@@ -435,7 +564,7 @@ class RepositoryCacheManager {
             commits.length
           );
 
-          // Record data freshness
+          // Track data freshness for cache effectiveness analysis
           const cacheAge = Date.now() - startTime;
           recordDataFreshness('commits', cacheAge);
 
@@ -448,7 +577,7 @@ class RepositoryCacheManager {
           return commits;
         }
 
-        // Cache miss - need to fetch from repository with transaction
+        // Cache miss: Fetch from Git repository and cache the result
         this.metrics.operations.rawMisses++;
         this.recordMissTime(startTime);
         cacheMisses.inc({ operation: 'raw_commits' });
@@ -462,7 +591,11 @@ class RepositoryCacheManager {
         const transaction = this.createTransaction(repoUrl);
 
         try {
-          // Use shared repository to prevent duplicate clones (locks already coordinated)
+          /*
+           * Use shared repository coordination to prevent duplicate Git clones.
+           * Multiple concurrent requests for the same repository will share a single
+           * clone operation, significantly reducing I/O overhead and disk usage.
+           */
           commits = await withSharedRepository(
             repoUrl,
             async (handle: RepositoryHandle) => {
@@ -473,7 +606,7 @@ class RepositoryCacheManager {
                 isShared: handle.isShared,
               });
 
-              // Prevent duplicate clone tracking
+              // Track efficiency gains from repository sharing
               if (handle.isShared && handle.refCount > 1) {
                 this.metrics.efficiency.duplicateClonesPrevented++;
                 logger.debug('Duplicate clone prevented', {
@@ -488,7 +621,7 @@ class RepositoryCacheManager {
             }
           );
 
-          // Ensure commits is never null
+          // Defensive programming: Ensure we never cache null values
           if (!commits) {
             commits = [];
             logger.warn(
@@ -499,7 +632,7 @@ class RepositoryCacheManager {
             );
           }
 
-          // FIX: Transactional cache write
+          // Store the fetched data in cache using transactional consistency
           const ttl = config.cacheStrategy.cacheKeys.rawCommitsTTL;
           await this.transactionalSet(
             this.rawCommitsCache,
@@ -510,7 +643,7 @@ class RepositoryCacheManager {
             transaction
           );
 
-          // Commit the transaction
+          // Finalize the transaction - all operations succeeded
           await this.commitTransaction(transaction);
 
           logger.info('Raw commits cached with transaction', {
@@ -521,7 +654,7 @@ class RepositoryCacheManager {
             transactionId: transaction.id,
           });
 
-          // Update service health score on successful cache operation
+          // Update system health metrics with successful operation
           updateServiceHealthScore('cache', {
             cacheHitRate: 1.0,
             errorRate: 0.0,
@@ -529,10 +662,10 @@ class RepositoryCacheManager {
 
           return commits;
         } catch (error) {
-          // Increment failure counter
+          // Increment transaction failure counter for monitoring
           this.metrics.transactions.failed++;
 
-          // Record detailed error for enhanced metrics
+          // Record comprehensive error details for debugging and alerting
           recordDetailedError(
             'cache',
             error instanceof Error ? error : new Error(String(error)),
@@ -543,10 +676,10 @@ class RepositoryCacheManager {
             }
           );
 
-          // Update service health score on error
+          // Update system health metrics to reflect the failure
           updateServiceHealthScore('cache', { errorRate: 1.0 });
 
-          // Rollback transaction on any error
+          // Rollback all cache changes to maintain consistency
           await this.rollbackTransaction(transaction);
 
           logger.error('Failed to cache raw commits, transaction rolled back', {
@@ -562,7 +695,22 @@ class RepositoryCacheManager {
   }
 
   /**
-   * FIX: Get or parse filtered commits with transactional consistency
+   * Retrieves or generates filtered commits using the specialized filtered cache tier.
+   *
+   * This method optimizes performance for queries with specific filters (author, date range,
+   * pagination) by maintaining a separate cache tier for filtered results. This prevents
+   * the need to repeatedly apply the same filters to raw commit data.
+   *
+   * The implementation uses a two-phase approach:
+   * 1. Check filtered cache for exact match of filters
+   * 2. If miss, fetch raw commits and apply filters, then cache the result
+   *
+   * @param repoUrl - Git repository URL
+   * @param options - Commit filtering criteria
+   * @returns Promise resolving to filtered commit array
+   *
+   * @internal This method uses specialized locking to prevent deadlocks when called
+   * from within other cache operations
    */
   async getOrParseFilteredCommits(
     repoUrl: string,
@@ -571,11 +719,12 @@ class RepositoryCacheManager {
     return withKeyLock(`cache-filtered:${repoUrl}`, async () => {
       const startTime = Date.now();
 
-      // Level 2: Try filtered commits cache
+      // Attempt retrieval from filtered commits cache (Tier 2)
       const filteredKey = this.generateFilteredCommitsKey(repoUrl, options);
       let filteredCommits = await this.filteredCommitsCache.get(filteredKey);
 
       if (filteredCommits) {
+        // Cache hit: Return filtered data immediately
         this.metrics.operations.filteredHits++;
         this.recordHitTime(startTime);
         cacheHits.inc({ operation: 'filtered_commits' });
@@ -587,7 +736,7 @@ class RepositoryCacheManager {
           filteredCommits.length
         );
 
-        // Record data freshness
+        // Track data freshness for filtered cache effectiveness
         const cacheAge = Date.now() - startTime;
         recordDataFreshness('commits', cacheAge);
 
@@ -601,7 +750,7 @@ class RepositoryCacheManager {
         return filteredCommits;
       }
 
-      // Cache miss - get raw commits and apply filters with transaction
+      // Cache miss: Generate filtered data from raw commits
       this.metrics.operations.filteredMisses++;
       this.recordMissTime(startTime);
       cacheMisses.inc({ operation: 'filtered_commits' });
@@ -624,16 +773,20 @@ class RepositoryCacheManager {
       const transaction = this.createTransaction(repoUrl);
 
       try {
-        // Prevent deadlock: Use ordered locks to safely call getOrParseCommits from within cache-filtered lock
+        /*
+         * Carefully ordered locking prevents deadlocks when this filtered cache
+         * operation needs to call the main getOrParseCommits method, which also
+         * acquires cache-operation locks.
+         */
         const rawCommits = await withOrderedLocks(
           [`cache-filtered:${repoUrl}`, `cache-operation:${repoUrl}`],
           () => this.getOrParseCommitsUnlocked(repoUrl)
         );
 
-        // Apply filters (handles null commits internally)
+        // Apply client-specified filters to raw commit data
         filteredCommits = this.applyFilters(rawCommits, options);
 
-        // FIX: Transactional cache write for filtered commits
+        // Cache the filtered results for future requests with same criteria
         const ttl = config.cacheStrategy.cacheKeys.filteredCommitsTTL;
         await this.transactionalSet(
           this.filteredCommitsCache,
@@ -644,7 +797,7 @@ class RepositoryCacheManager {
           transaction
         );
 
-        // Commit the transaction
+        // Commit the transaction after successful caching
         await this.commitTransaction(transaction);
 
         logger.debug('Filtered commits cached with transaction', {
@@ -656,7 +809,7 @@ class RepositoryCacheManager {
           transactionId: transaction.id,
         });
 
-        // Update service health score on successful cache operation
+        // Update system health with successful filtered cache operation
         updateServiceHealthScore('cache', {
           cacheHitRate: 1.0,
           errorRate: 0.0,
