@@ -73,6 +73,14 @@ vi.mock('../../src/services/metrics', () => ({
   recordSLAMetrics: vi.fn(),
   recordDataFreshness: vi.fn(),
 
+  // Transaction metrics functions
+  recordCacheTransaction: vi.fn(),
+  recordTransactionRollback: vi.fn(),
+  recordRollbackDuration: vi.fn(),
+  recordRollbackVerification: vi.fn(),
+  recordCriticalRollbackFailure: vi.fn(),
+  recordRollbackRetries: vi.fn(),
+
   // Utility functions
   getUserType: vi.fn().mockReturnValue('anonymous'),
   getRepositoryType: vi.fn().mockReturnValue('public'),
