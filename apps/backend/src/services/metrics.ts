@@ -442,6 +442,65 @@ export const cachePredictionAccuracy = new Histogram({
 });
 
 // ========================================================================
+// NEW: TRANSACTION & ROLLBACK METRICS
+// ========================================================================
+
+/**
+ * Cache transaction operations
+ */
+export const cacheTransactions = new Counter({
+  name: 'gitray_cache_transactions_total',
+  help: 'Total number of cache transactions by outcome',
+  labelNames: ['outcome', 'cache_tier', 'operation_count'] as const,
+});
+
+/**
+ * Transaction rollback operations
+ */
+export const transactionRollbacks = new Counter({
+  name: 'gitray_transaction_rollbacks_total',
+  help: 'Total number of transaction rollback operations',
+  labelNames: [
+    'rollback_outcome',
+    'cache_tier',
+    'operation_type',
+    'retry_count',
+  ] as const,
+});
+
+/**
+ * Transaction rollback duration
+ */
+export const rollbackDuration = new Histogram({
+  name: 'gitray_transaction_rollback_duration_seconds',
+  help: 'Duration of transaction rollback operations',
+  labelNames: ['cache_tier', 'operation_count', 'retry_attempts'] as const,
+  buckets: [0.001, 0.01, 0.1, 0.5, 1, 2, 5, 10, 30], // 1ms to 30s
+});
+
+/**
+ * Rollback verification success rate
+ */
+export const rollbackVerification = new Counter({
+  name: 'gitray_rollback_verification_total',
+  help: 'Success rate of rollback verification operations',
+  labelNames: ['cache_tier', 'verification_result', 'attempt_number'] as const,
+});
+
+/**
+ * Critical rollback failures requiring manual intervention
+ */
+export const criticalRollbackFailures = new Counter({
+  name: 'gitray_critical_rollback_failures_total',
+  help: 'Number of rollback failures requiring manual intervention',
+  labelNames: [
+    'transaction_type',
+    'failed_operations_count',
+    'severity',
+  ] as const,
+});
+
+// ========================================================================
 // NEW: COORDINATION & CONCURRENCY METRICS
 // ========================================================================
 
@@ -1062,6 +1121,139 @@ export function recordStreamingError(
   streamingErrors.inc({
     error_type: errorType,
     recovery_possible: recoverable ? 'yes' : 'no',
+  });
+}
+
+// ========================================================================
+// TRANSACTION & ROLLBACK METRICS FUNCTIONS
+// ========================================================================
+
+/**
+ * Record cache transaction outcome
+ */
+export function recordCacheTransaction(
+  outcome: 'started' | 'committed' | 'rolled_back' | 'failed',
+  cacheTier: 'raw' | 'filtered' | 'aggregated' | 'all',
+  operationCount: number = 1
+): void {
+  const operationCountRange =
+    operationCount === 1
+      ? '1'
+      : operationCount <= 5
+        ? '2-5'
+        : operationCount <= 10
+          ? '6-10'
+          : '10+';
+
+  cacheTransactions.inc({
+    outcome,
+    cache_tier: cacheTier,
+    operation_count: operationCountRange,
+  });
+}
+
+/**
+ * Record transaction rollback operation
+ */
+export function recordTransactionRollback(
+  outcome: 'success' | 'failed' | 'verified' | 'retry',
+  cacheTier: 'raw' | 'filtered' | 'aggregated',
+  operationType: 'set' | 'delete' | 'update',
+  retryCount: number = 0
+): void {
+  const retryRange =
+    retryCount === 0
+      ? '0'
+      : retryCount <= 2
+        ? '1-2'
+        : retryCount <= 5
+          ? '3-5'
+          : '5+';
+
+  transactionRollbacks.inc({
+    rollback_outcome: outcome,
+    cache_tier: cacheTier,
+    operation_type: operationType,
+    retry_count: retryRange,
+  });
+}
+
+/**
+ * Record rollback duration
+ */
+export function recordRollbackDuration(
+  duration: number,
+  cacheTier: 'raw' | 'filtered' | 'aggregated',
+  operationCount: number,
+  retryAttempts: number
+): void {
+  const operationCountRange =
+    operationCount === 1
+      ? '1'
+      : operationCount <= 5
+        ? '2-5'
+        : operationCount <= 10
+          ? '6-10'
+          : '10+';
+
+  const retryRange =
+    retryAttempts === 0
+      ? '0'
+      : retryAttempts <= 2
+        ? '1-2'
+        : retryAttempts <= 5
+          ? '3-5'
+          : '5+';
+
+  rollbackDuration.observe(
+    {
+      cache_tier: cacheTier,
+      operation_count: operationCountRange,
+      retry_attempts: retryRange,
+    },
+    duration / 1000 // Convert to seconds
+  );
+}
+
+/**
+ * Record rollback verification result
+ */
+export function recordRollbackVerification(
+  cacheTier: 'raw' | 'filtered' | 'aggregated',
+  verificationResult: 'success' | 'failed',
+  attemptNumber: number
+): void {
+  const attemptRange =
+    attemptNumber === 1 ? '1' : attemptNumber <= 3 ? '2-3' : '3+';
+
+  rollbackVerification.inc({
+    cache_tier: cacheTier,
+    verification_result: verificationResult,
+    attempt_number: attemptRange,
+  });
+}
+
+/**
+ * Record critical rollback failure requiring manual intervention
+ */
+export function recordCriticalRollbackFailure(
+  transactionType: 'cache_write' | 'cache_delete' | 'cache_update',
+  failedOperationsCount: number,
+  severity: 'high' | 'critical' = 'critical'
+): void {
+  const failureCountRange =
+    failedOperationsCount === 1
+      ? '1'
+      : failedOperationsCount <= 3
+        ? '2-3'
+        : failedOperationsCount <= 5
+          ? '4-5'
+          : '5+';
+
+  criticalRollbackFailures.inc({
+    transaction_type: transactionType,
+    failed_operations_count: failureCountRange,
+    severity,
   });
 }
 
