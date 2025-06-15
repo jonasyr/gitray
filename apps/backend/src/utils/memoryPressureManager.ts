@@ -1,6 +1,16 @@
 // apps/backend/src/utils/memoryPressureManager.ts
 import os from 'os';
 import { getLogger } from '../services/logger';
+import {
+  memoryPressureLevel,
+  systemMemoryUsage,
+  processMemoryUsage,
+  memoryCircuitBreakerState,
+  memoryPressureEvents,
+  throttledRequests,
+  emergencyEvictions,
+  gcTriggered,
+} from '../services/metrics';
 
 const logger = getLogger();
 
@@ -66,6 +76,19 @@ class MemoryPressureManager {
   private lastPressureLevel: 'normal' | 'warning' | 'critical' | 'emergency' =
     'normal'; // For hysteresis
 
+  // Performance optimizations
+  private memoryStatsCache: MemoryPressureStats | null = null;
+  private memoryStatsCacheTime = 0;
+  private readonly MEMORY_CACHE_DURATION_MS = 1000; // 1 second cache
+  private readonly isTestEnvironment =
+    process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
+
+  // Circuit breaker state caching for performance
+  private circuitBreakerStateCache: 'CLOSED' | 'OPEN' | 'HALF_OPEN' | null =
+    null;
+  private circuitBreakerStateCacheTime = 0;
+  private readonly CIRCUIT_BREAKER_CACHE_DURATION_MS = 100; // 100ms cache
+
   // Metrics for monitoring
   private metrics = {
     pressureEvents: 0,
@@ -86,7 +109,7 @@ class MemoryPressureManager {
       enableCircuitBreaker: true,
       enableRequestThrottling: true,
       enableEmergencyEviction: true,
-      checkIntervalMs: 5000, // Check every 5 seconds
+      checkIntervalMs: 10000, // Check every 10 seconds (optimized for production - reduced from 5s)
       alertCooldownMs: 60000, // Alert at most once per minute
       ...config,
     };
@@ -103,6 +126,18 @@ class MemoryPressureManager {
    * Get current memory pressure statistics
    */
   getMemoryStats(): MemoryPressureStats {
+    // Use cached stats if available and fresh (1 second cache)
+    // Skip caching in test environment to allow mocking
+    const now = Date.now();
+    if (
+      !this.isTestEnvironment &&
+      this.memoryStatsCache &&
+      now - this.memoryStatsCacheTime < this.MEMORY_CACHE_DURATION_MS
+    ) {
+      return this.memoryStatsCache;
+    }
+
+    // Calculate fresh memory stats
     const totalMemory = os.totalmem();
     const freeMemory = os.freemem();
     const usedMemory = totalMemory - freeMemory;
@@ -170,7 +205,7 @@ class MemoryPressureManager {
     // Update last pressure level for next hysteresis calculation
     this.lastPressureLevel = pressureLevel;
 
-    return {
+    const stats: MemoryPressureStats = {
       system: {
         totalBytes: totalMemory,
         freeBytes: freeMemory,
@@ -185,6 +220,17 @@ class MemoryPressureManager {
         action,
       },
     };
+
+    // Update Prometheus metrics
+    this.updatePrometheusMetrics(stats);
+
+    // Cache the stats (only in production to allow test mocking)
+    if (!this.isTestEnvironment) {
+      this.memoryStatsCache = stats;
+      this.memoryStatsCacheTime = now;
+    }
+
+    return stats;
   }
 
   /**
@@ -203,9 +249,10 @@ class MemoryPressureManager {
     const skipBreaker = options?.skipCircuitBreaker || false;
     const priority = options?.priority || 'normal';
 
-    // Circuit breaker logic
+    // Circuit breaker logic (with caching for performance)
     if (!skipBreaker && this.config.enableCircuitBreaker) {
-      if (this.circuitBreakerState === 'OPEN') {
+      const circuitBreakerState = this.getCircuitBreakerState();
+      if (circuitBreakerState === 'OPEN') {
         this.metrics.circuitBreakerTrips++;
         throw new MemoryPressureError(
           `Circuit breaker OPEN: Memory pressure too high (${Math.round(stats.system.usagePercentage * 100)}%)`,
@@ -247,7 +294,8 @@ class MemoryPressureManager {
       });
 
       // If half-open, consider closing the circuit breaker on success
-      if (this.circuitBreakerState === 'HALF_OPEN') {
+      const currentCircuitBreakerState = this.getCircuitBreakerState();
+      if (currentCircuitBreakerState === 'HALF_OPEN') {
         this.closeCircuitBreaker();
       }
 
@@ -283,6 +331,7 @@ class MemoryPressureManager {
     if (stats.pressure.level === 'emergency') {
       if (priority === 'low') {
         this.metrics.throttledRequests++;
+        throttledRequests.inc({ reason: 'emergency_low_priority' });
         return {
           shouldThrottle: true,
           reason:
@@ -301,6 +350,7 @@ class MemoryPressureManager {
 
       if (isExpensiveOperation && priority !== 'high') {
         this.metrics.throttledRequests++;
+        throttledRequests.inc({ reason: 'critical_expensive_operation' });
         return {
           shouldThrottle: true,
           reason: 'Critical memory pressure - expensive operations throttled',
@@ -329,6 +379,7 @@ class MemoryPressureManager {
       if (global.gc && typeof global.gc === 'function') {
         global.gc();
         this.metrics.gcTriggered++;
+        gcTriggered.inc();
         logger.debug('Forced garbage collection triggered');
       }
 
@@ -473,10 +524,15 @@ class MemoryPressureManager {
       this.circuitBreakerState = 'OPEN';
       logger.warn('Memory pressure circuit breaker OPENED');
 
+      // Update metrics
+      this.metrics.circuitBreakerTrips++;
+      memoryCircuitBreakerState.set(2); // OPEN = 2
+
       // Auto-transition to half-open after a delay
       setTimeout(() => {
         if (this.circuitBreakerState === 'OPEN') {
           this.circuitBreakerState = 'HALF_OPEN';
+          memoryCircuitBreakerState.set(1); // HALF_OPEN = 1
           logger.info(
             'Memory pressure circuit breaker transitioned to HALF_OPEN'
           );
@@ -493,6 +549,7 @@ class MemoryPressureManager {
     if (this.circuitBreakerState !== 'CLOSED') {
       this.circuitBreakerState = 'CLOSED';
       this.circuitBreakerLock = false; // Ensure lock is released when closing
+      memoryCircuitBreakerState.set(0); // CLOSED = 0
       logger.info('Memory pressure circuit breaker CLOSED');
     }
   }
@@ -527,10 +584,14 @@ class MemoryPressureManager {
       });
 
       // This would need to be implemented in the cache service
-      // For now, we log the intent
+      // For now, we log the intent and update metrics
       logger.warn(
         'Emergency cache eviction requested - implement cache.emergencyEvict()'
       );
+
+      // Update metrics
+      this.metrics.emergencyEvictions++;
+      emergencyEvictions.inc();
     } catch (error) {
       logger.error('Failed to trigger emergency cache eviction', { error });
     }
@@ -552,6 +613,83 @@ class MemoryPressureManager {
     logger.info('MemoryPressureManager shutdown completed', {
       finalMetrics: this.metrics,
     });
+  }
+
+  /**
+   * Update Prometheus metrics with latest memory stats
+   */
+  private updatePrometheusMetrics(stats: MemoryPressureStats): void {
+    try {
+      // Map pressure levels to numeric values for Prometheus
+      const pressureLevelValues = {
+        normal: 0,
+        warning: 1,
+        critical: 2,
+        emergency: 3,
+      };
+
+      // Map circuit breaker states to numeric values
+      const circuitBreakerValues = {
+        CLOSED: 0,
+        HALF_OPEN: 1,
+        OPEN: 2,
+      };
+
+      // Update metrics
+      memoryPressureLevel.set(pressureLevelValues[stats.pressure.level]);
+      systemMemoryUsage.set(stats.system.usagePercentage * 100); // Convert to percentage
+
+      // Process memory metrics with labels
+      processMemoryUsage.set({ type: 'heap_used' }, stats.process.heapUsed);
+      processMemoryUsage.set({ type: 'heap_total' }, stats.process.heapTotal);
+      processMemoryUsage.set({ type: 'rss' }, stats.process.rss);
+      processMemoryUsage.set({ type: 'external' }, stats.process.external);
+
+      // Circuit breaker state
+      memoryCircuitBreakerState.set(
+        circuitBreakerValues[this.circuitBreakerState]
+      );
+
+      // Increment pressure events counter if pressure level changed
+      if (
+        stats.pressure.level !== 'normal' &&
+        stats.pressure.level !== this.lastPressureLevel
+      ) {
+        memoryPressureEvents.inc({ level: stats.pressure.level });
+      }
+    } catch (error) {
+      logger.warn('Failed to update Prometheus metrics', { error });
+    }
+  }
+
+  /**
+   * Get circuit breaker state with caching for performance
+   */
+  private getCircuitBreakerState(): 'CLOSED' | 'OPEN' | 'HALF_OPEN' {
+    const now = Date.now();
+
+    // Use cached state if available and fresh
+    if (
+      this.circuitBreakerStateCache &&
+      now - this.circuitBreakerStateCacheTime <
+        this.CIRCUIT_BREAKER_CACHE_DURATION_MS
+    ) {
+      return this.circuitBreakerStateCache;
+    }
+
+    // Update cache
+    this.circuitBreakerStateCache = this.circuitBreakerState;
+    this.circuitBreakerStateCacheTime = now;
+
+    return this.circuitBreakerState;
+  }
+
+  /**
+   * Clear memory stats cache (useful for testing)
+   */
+  clearMemoryStatsCache(): void {
+    this.memoryStatsCache = null;
+    this.memoryStatsCacheTime = 0;
   }
 }
 
