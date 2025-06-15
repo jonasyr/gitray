@@ -79,12 +79,25 @@ export class HybridLRUCache<V> {
   }
 
   /**
-   * FIX: Added proper initialization with error handling and transactional consistency
+   * FIX: Enhanced initialization with periodic disk validation
    */
   private async initializeDiskCache(): Promise<void> {
     try {
       await fs.mkdir(this.options.diskPath, { recursive: true });
       await this.loadDiskIndex();
+
+      // Schedule periodic disk index validation to handle race condition recovery
+      // Run validation every 30 minutes in production environments
+      if (process.env.NODE_ENV === 'production') {
+        setInterval(
+          () => {
+            this.validateAndRepairDiskIndex().catch((err) => {
+              logger.warn('Periodic disk index validation failed', { err });
+            });
+          },
+          30 * 60 * 1000
+        ); // 30 minutes
+      }
     } catch (err) {
       logger.error('Failed to initialize disk cache', {
         err,
@@ -95,7 +108,8 @@ export class HybridLRUCache<V> {
   }
 
   /**
-   * FIX: Removed race conditions and added proper error handling
+   * FIX: Enhanced race condition protection and atomic file processing
+   * CRITICAL: This method now handles concurrent file operations safely
    */
   private async loadDiskIndex(): Promise<void> {
     try {
@@ -103,42 +117,112 @@ export class HybridLRUCache<V> {
       await withKeyLock(
         'disk-index-load',
         async () => {
-          const files = await fs.readdir(this.options.diskPath);
+          let files: string[] = [];
 
-          // FIX: Process files atomically to avoid race conditions
-          const fileStats: Array<{
-            file: string;
+          // Retry directory reading in case of transient failures
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              files = await fs.readdir(this.options.diskPath);
+              break;
+            } catch (err) {
+              if (attempt === 2) {
+                logger.warn(
+                  'Failed to read disk cache directory after retries',
+                  { err }
+                );
+                return; // Exit gracefully
+              }
+              // Wait briefly before retry
+              await new Promise((resolve) =>
+                setTimeout(resolve, 50 * (attempt + 1))
+              );
+            }
+          }
+
+          // FIX: Process files in batches to reduce race condition window
+          const batchSize = 20;
+          const validEntries: Array<{
+            key: string;
             filePath: string;
             mtime: number;
           }> = [];
 
-          for (const file of files) {
-            try {
-              const filePath = path.join(this.options.diskPath, file);
-              const stat = await fs.stat(filePath);
-              fileStats.push({ file, filePath, mtime: stat.mtimeMs });
-            } catch (err) {
-              // File might have been deleted between readdir and stat - skip it
-              logger.debug('File disappeared during index loading', {
-                file,
-                err,
-              });
+          for (let i = 0; i < files.length; i += batchSize) {
+            const batch = files.slice(i, i + batchSize);
+
+            // Process batch concurrently but with error isolation
+            const batchResults = await Promise.allSettled(
+              batch.map(async (file) => {
+                const filePath = path.join(this.options.diskPath, file);
+
+                try {
+                  // Use fs.lstat instead of fs.stat for better race condition handling
+                  // lstat doesn't follow symlinks and is less prone to TOCTOU issues
+                  const stat = await fs.lstat(filePath);
+
+                  // Skip directories and non-regular files
+                  if (!stat.isFile()) {
+                    logger.debug('Skipping non-file entry in cache directory', {
+                      file,
+                    });
+                    return null;
+                  }
+
+                  // Additional validation: ensure file is still accessible
+                  await fs.access(filePath, fs.constants.R_OK);
+
+                  return {
+                    key: decodeURIComponent(file),
+                    filePath,
+                    mtime: stat.mtimeMs,
+                  };
+                } catch (err) {
+                  // File might have been deleted, moved, or is inaccessible
+                  logger.debug('File not accessible during index loading', {
+                    file,
+                    filePath,
+                    error:
+                      err instanceof Error && 'code' in err
+                        ? (err as any).code
+                        : 'unknown',
+                  });
+                  return null;
+                }
+              })
+            );
+
+            // Collect successful results
+            for (const result of batchResults) {
+              if (result.status === 'fulfilled' && result.value !== null) {
+                validEntries.push(result.value);
+              }
             }
           }
 
-          // Sort by modification time (oldest first) for LRU tracking
-          fileStats
+          // Sort by modification time (oldest first) for proper LRU tracking
+          validEntries
             .sort((a, b) => a.mtime - b.mtime)
-            .forEach((s) => {
-              this.disk.set(decodeURIComponent(s.file), s.filePath);
+            .forEach(({ key, filePath }) => {
+              this.disk.set(key, filePath);
             });
 
+          logger.debug('Disk index loaded successfully', {
+            totalFiles: files.length,
+            validEntries: validEntries.length,
+            skipped: files.length - validEntries.length,
+          });
+
+          // Clean up disk cache if over limit
           await this.enforceDiskLimit();
         },
         this.lockTimeoutMs
       );
     } catch (err) {
-      logger.warn('HybridLRUCache failed to load disk index', { err });
+      logger.warn('HybridLRUCache failed to load disk index', {
+        err,
+        diskPath: this.options.diskPath,
+      });
+      // Continue operation without disk index - cache will still work with memory/Redis
     }
   }
 
@@ -251,28 +335,56 @@ export class HybridLRUCache<V> {
   }
 
   /**
-   * FIX: Added lock integration and proper transactional handling
+   * FIX: Enhanced atomic disk operations with better race condition handling
+   * CRITICAL: This method now ensures transactional consistency during disk writes
    */
   private async addToDisk(key: string, value: V): Promise<void> {
     await withKeyLock(
       `disk:${key}`,
       async () => {
-        try {
-          const filePath = path.join(
-            this.options.diskPath,
-            encodeURIComponent(key)
-          );
-          await fs.writeFile(filePath, this.toJSON(value));
+        const filePath = path.join(
+          this.options.diskPath,
+          encodeURIComponent(key)
+        );
+        const tempFilePath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).substring(2)}`;
 
-          // Update disk index atomically
+        try {
+          // Write to temporary file first (atomic operation)
+          await fs.writeFile(tempFilePath, this.toJSON(value), { mode: 0o600 });
+
+          // Verify the temp file was written correctly
+          const tempStat = await fs.stat(tempFilePath);
+          if (tempStat.size === 0) {
+            throw new Error('Temporary file written with zero size');
+          }
+
+          // Atomic rename (most filesystems guarantee this is atomic)
+          await fs.rename(tempFilePath, filePath);
+
+          // Update disk index atomically after successful write
           if (this.disk.has(key)) {
             this.disk.delete(key);
           }
           this.disk.set(key, filePath);
 
+          logger.debug('Successfully wrote to disk cache', {
+            key,
+            size: tempStat.size,
+            filePath,
+          });
+
+          // Clean up disk cache if needed
           await this.enforceDiskLimit();
         } catch (err) {
           logger.error('Failed to write to disk cache', { key, err });
+
+          // Clean up temp file if it exists
+          try {
+            await fs.unlink(tempFilePath);
+          } catch {
+            // Ignore cleanup errors
+          }
+
           throw err; // Re-throw to handle in calling code
         }
       },
@@ -281,28 +393,62 @@ export class HybridLRUCache<V> {
   }
 
   /**
-   * FIX: Proper LRU eviction for disk cache
+   * FIX: Enhanced disk cleanup with better race condition handling
+   * CRITICAL: This method now handles concurrent file operations safely during cleanup
    */
   private async enforceDiskLimit(): Promise<void> {
     // Don't need external lock here as this is only called from within locked operations
+    const entriesEvicted: string[] = [];
+
     while (this.disk.size > this.options.maxEntries) {
       // Get the first (oldest) entry from disk map
       const firstEntry = this.disk.entries().next().value;
       if (!firstEntry) break;
 
       const [oldKey, oldPath] = firstEntry;
+
+      // Remove from index first to prevent other operations from using it
       this.disk.delete(oldKey);
+      entriesEvicted.push(oldKey);
 
       try {
+        // Check if file exists before trying to delete
+        await fs.access(oldPath, fs.constants.F_OK);
         await fs.unlink(oldPath);
-        logger.debug('Evicted from disk cache', { key: oldKey });
-      } catch (err) {
-        // File might already be gone - that's ok
-        logger.debug('File already removed during disk eviction', {
+
+        logger.debug('Evicted from disk cache', {
           key: oldKey,
-          err,
+          path: oldPath,
+          remainingEntries: this.disk.size,
         });
+      } catch (err) {
+        const errorCode =
+          err instanceof Error && 'code' in err ? (err as any).code : 'unknown';
+
+        if (errorCode === 'ENOENT') {
+          // File was already deleted - this is fine
+          logger.debug('File already removed during disk eviction', {
+            key: oldKey,
+            path: oldPath,
+          });
+        } else {
+          // Some other error - log it but continue
+          logger.warn('Failed to delete file during disk eviction', {
+            key: oldKey,
+            path: oldPath,
+            errorCode,
+            err,
+          });
+        }
       }
+    }
+
+    if (entriesEvicted.length > 0) {
+      logger.debug('Disk cache cleanup completed', {
+        evicted: entriesEvicted.length,
+        remainingEntries: this.disk.size,
+        maxEntries: this.options.maxEntries,
+      });
     }
   }
 
@@ -341,7 +487,7 @@ export class HybridLRUCache<V> {
           return mem.value;
         }
 
-        // Try disk cache
+        // Try disk cache with enhanced race condition protection
         const filePath = this.disk.get(key);
         if (filePath) {
           try {
@@ -350,23 +496,73 @@ export class HybridLRUCache<V> {
               `disk:${key}`,
               async () => {
                 try {
-                  const data = await fs.readFile(filePath, 'utf-8');
-                  const value = this.fromJSON(data);
+                  // First verify the file still exists and is accessible
+                  await fs.access(filePath, fs.constants.R_OK);
 
-                  // Update LRU order in disk cache
+                  // Read file content
+                  const data = await fs.readFile(filePath, 'utf-8');
+
+                  // Validate content is not empty or corrupted
+                  if (!data || data.trim().length === 0) {
+                    logger.warn('Empty or corrupted disk cache file detected', {
+                      key,
+                      filePath,
+                    });
+                    this.disk.delete(key);
+                    // Try to clean up the corrupted file
+                    await fs.unlink(filePath).catch(() => {});
+                    return null;
+                  }
+
+                  let value: V;
+                  try {
+                    value = this.fromJSON(data);
+                  } catch (parseErr) {
+                    logger.warn('Failed to parse disk cache file', {
+                      key,
+                      filePath,
+                      parseErr,
+                    });
+                    this.disk.delete(key);
+                    // Try to clean up the corrupted file
+                    await fs.unlink(filePath).catch(() => {});
+                    return null;
+                  }
+
+                  // Update LRU order in disk cache (move to end)
                   this.disk.delete(key);
                   this.disk.set(key, filePath);
 
                   // Promote to memory cache (with memory pressure check)
                   this.addToMemoryWithPressureCheck(key, value);
+
+                  logger.debug('Successfully retrieved from disk cache', {
+                    key,
+                  });
                   return value;
                 } catch (readErr) {
-                  // File might have been deleted - remove from index
+                  // File might have been deleted, corrupted, or is inaccessible
                   this.disk.delete(key);
-                  logger.debug('Removed stale disk cache entry', {
-                    key,
-                    err: readErr,
-                  });
+
+                  const errorCode =
+                    readErr instanceof Error && 'code' in readErr
+                      ? (readErr as any).code
+                      : 'unknown';
+
+                  if (errorCode === 'ENOENT') {
+                    logger.debug('Disk cache file no longer exists', {
+                      key,
+                      filePath,
+                    });
+                  } else {
+                    logger.warn('Failed to read disk cache file', {
+                      key,
+                      filePath,
+                      errorCode,
+                      err: readErr,
+                    });
+                  }
+
                   return null;
                 }
               },
@@ -476,20 +672,50 @@ export class HybridLRUCache<V> {
       this.memory.delete(key);
     }
 
-    // Disk
+    // Disk deletion with enhanced race condition handling
     const filePath = this.disk.get(key);
     if (filePath) {
       try {
         await withKeyLock(
           `disk:${key}`,
           async () => {
+            // Remove from index first to prevent concurrent access
             this.disk.delete(key);
-            await fs.unlink(filePath);
+
+            try {
+              await fs.unlink(filePath);
+              logger.debug('Successfully deleted disk cache file', {
+                key,
+                filePath,
+              });
+            } catch (unlinkErr) {
+              const errorCode =
+                unlinkErr instanceof Error && 'code' in unlinkErr
+                  ? (unlinkErr as any).code
+                  : 'unknown';
+
+              if (errorCode === 'ENOENT') {
+                // File was already deleted - this is fine for race conditions
+                logger.debug('Disk cache file already deleted', {
+                  key,
+                  filePath,
+                });
+              } else {
+                // Some other error (permission denied, disk full, etc.) - this is a real error
+                logger.warn('Failed to delete disk cache file', {
+                  key,
+                  filePath,
+                  errorCode,
+                  err: unlinkErr,
+                });
+                throw unlinkErr;
+              }
+            }
           },
           this.lockTimeoutMs
         );
       } catch (err) {
-        logger.warn('HybridLRUCache disk del failed', { err });
+        logger.warn('HybridLRUCache disk del failed', { key, filePath, err });
         errors.push(err as Error);
       }
     }
@@ -675,6 +901,104 @@ export class HybridLRUCache<V> {
     } catch (error) {
       logger.error('HybridLRUCache emergency eviction failed', { error });
       throw error;
+    }
+  }
+
+  /**
+   * MAINTENANCE: Validate and repair disk index consistency
+   * This method helps recover from race conditions by checking index vs actual files
+   */
+  private async validateAndRepairDiskIndex(): Promise<void> {
+    try {
+      await withKeyLock(
+        'disk-index-repair',
+        async () => {
+          const actualFiles = new Set<string>();
+          const indexedFiles = new Map<string, string>();
+
+          // Get actual files on disk
+          try {
+            const files = await fs.readdir(this.options.diskPath);
+            for (const file of files) {
+              const filePath = path.join(this.options.diskPath, file);
+              try {
+                const stat = await fs.lstat(filePath);
+                if (stat.isFile()) {
+                  actualFiles.add(file);
+                }
+              } catch {
+                // Skip files we can't stat
+              }
+            }
+          } catch (err) {
+            logger.warn('Failed to read disk cache directory for validation', {
+              err,
+            });
+            return;
+          }
+
+          // Get indexed files
+          for (const [key, filePath] of this.disk.entries()) {
+            const fileName = path.basename(filePath);
+            indexedFiles.set(fileName, key);
+          }
+
+          // Find inconsistencies
+          const orphanedFiles: string[] = [];
+          const missingFiles: string[] = [];
+
+          // Check for files in directory but not in index
+          for (const file of actualFiles) {
+            if (!indexedFiles.has(file)) {
+              orphanedFiles.push(file);
+            }
+          }
+
+          // Check for files in index but not in directory
+          for (const [fileName, key] of indexedFiles.entries()) {
+            if (!actualFiles.has(fileName)) {
+              missingFiles.push(key);
+            }
+          }
+
+          // Repair: Remove missing files from index
+          for (const key of missingFiles) {
+            this.disk.delete(key);
+            logger.debug('Removed missing file from disk index', { key });
+          }
+
+          // Repair: Add orphaned files to index (if they're valid cache files)
+          for (const file of orphanedFiles) {
+            try {
+              const key = decodeURIComponent(file);
+              const filePath = path.join(this.options.diskPath, file);
+
+              // Validate the file contains valid JSON
+              const data = await fs.readFile(filePath, 'utf-8');
+              JSON.parse(data); // Will throw if invalid
+
+              this.disk.set(key, filePath);
+              logger.debug('Added orphaned file to disk index', { key, file });
+            } catch {
+              // Invalid cache file - consider removing it
+              logger.debug('Found invalid cache file, leaving orphaned', {
+                file,
+              });
+            }
+          }
+
+          if (orphanedFiles.length > 0 || missingFiles.length > 0) {
+            logger.info('Disk index validation completed', {
+              orphanedFiles: orphanedFiles.length,
+              missingFiles: missingFiles.length,
+              totalIndexEntries: this.disk.size,
+            });
+          }
+        },
+        this.lockTimeoutMs
+      );
+    } catch (err) {
+      logger.warn('Failed to validate disk index', { err });
     }
   }
 }

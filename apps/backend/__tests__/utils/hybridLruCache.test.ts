@@ -46,6 +46,13 @@ const mockFs = vi.hoisted(() => ({
   readFile: vi.fn(),
   unlink: vi.fn(),
   stat: vi.fn(),
+  lstat: vi.fn(),
+  rename: vi.fn(),
+  access: vi.fn(),
+  constants: {
+    F_OK: 0,
+    R_OK: 4,
+  },
 }));
 
 // Mock the withKeyLock function using vi.hoisted
@@ -124,6 +131,9 @@ describe('HybridLRUCache', () => {
     mockFs.readFile.mockResolvedValue('');
     mockFs.unlink.mockResolvedValue(undefined);
     mockFs.stat.mockResolvedValue(createMockStats());
+    mockFs.lstat.mockResolvedValue(createMockStats());
+    mockFs.rename.mockResolvedValue(undefined);
+    mockFs.access.mockResolvedValue(undefined);
 
     // Initialize mockWithKeyLock
     mockWithKeyLock.mockImplementation(
@@ -539,9 +549,16 @@ describe('HybridLRUCache', () => {
     test('should handle disk delete failure gracefully', async () => {
       // Arrange
       const key = 'disk-del-fail';
-      const value = 'test-value';
 
-      await cache.set(key, value);
+      // Manually add an entry to the disk index to simulate existing disk cache
+      const filePath = `/tmp/test-cache/${encodeURIComponent(key)}`;
+      (cache as any).disk.set(key, filePath);
+
+      // Verify the key is in the disk index
+      const stats = cache.getStats();
+      expect(stats.disk.entries).toBeGreaterThan(0);
+
+      // Now make the unlink operation fail with permission denied
       mockFs.unlink.mockRejectedValueOnce(new Error('Permission denied'));
 
       // Act & Assert - Should throw due to delete failure
