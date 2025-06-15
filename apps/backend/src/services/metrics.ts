@@ -146,6 +146,19 @@ export const cacheMisses = new Counter({
   labelNames: ['operation'] as const,
 });
 
+// Distributed cache invalidation metrics (minimal essential set)
+export const distributedCacheInvalidations = new Counter({
+  name: 'distributed_cache_invalidations_total',
+  help: 'Cross-process cache invalidation operations',
+  labelNames: ['source', 'status'] as const, // 'local'/'remote', 'success'/'failed'
+});
+
+export const distributedCacheInvalidationLatency = new Histogram({
+  name: 'distributed_cache_invalidation_duration_seconds',
+  help: 'Time taken for cross-process cache invalidation',
+  buckets: [0.001, 0.01, 0.1, 0.5, 1.0, 5.0],
+});
+
 export const tempDirectories = new Gauge({
   name: 'temp_directories_count',
   help: 'Number of temporary directories currently in use',

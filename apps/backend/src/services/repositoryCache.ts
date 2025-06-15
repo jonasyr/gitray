@@ -39,6 +39,7 @@ import {
   recordCriticalRollbackFailure,
 } from './metrics';
 import { withKeyLock, withOrderedLocks } from '../utils/lockManager';
+import { getDistributedCacheInvalidation } from './distributedCacheInvalidation';
 
 const logger = getLogger();
 import {
@@ -309,6 +310,29 @@ class RepositoryCacheManager {
         transactionalConsistency: true,
       }
     );
+
+    // Initialize distributed cache invalidation
+    if (baseConfig.enableRedis) {
+      const distributedCache = getDistributedCacheInvalidation(
+        baseConfig.redisConfig
+      );
+
+      // Register handler for repository invalidation messages from other processes
+      distributedCache.registerInvalidationHandler(
+        'repository',
+        async (pattern: string, metadata?: any) => {
+          if (metadata?.repoUrl) {
+            logger.debug('Processing distributed cache invalidation', {
+              repoUrl: metadata.repoUrl,
+              fromRemoteProcess: true,
+            });
+
+            // Call the local invalidation method directly to avoid infinite recursion
+            await this.invalidateRepositoryLocal(metadata.repoUrl);
+          }
+        }
+      );
+    }
   }
 
   /**
@@ -1357,8 +1381,37 @@ class RepositoryCacheManager {
    * expensive cache scanning operations.
    */
   async invalidateRepository(repoUrl: string): Promise<void> {
+    // First, perform local invalidation
+    await this.invalidateRepositoryLocal(repoUrl);
+
+    // Then, broadcast to other process instances if distributed cache is enabled
+    if (config.hybridCache.enableRedis) {
+      try {
+        const distributedCache = getDistributedCacheInvalidation();
+        await distributedCache.invalidateGlobally('repository', {
+          repoUrl,
+          reason: 'repository_update',
+          keysCount: (
+            this.cacheKeyPatterns.get(this.hashUrl(repoUrl)) || new Set()
+          ).size,
+        });
+      } catch (err) {
+        logger.warn('Failed to broadcast distributed cache invalidation', {
+          repoUrl,
+          err: err instanceof Error ? err.message : String(err),
+        });
+        // Continue - local invalidation was successful
+      }
+    }
+  }
+
+  /**
+   * Performs local cache invalidation without broadcasting to other processes.
+   * Used internally by the distributed cache invalidation system.
+   */
+  private async invalidateRepositoryLocal(repoUrl: string): Promise<void> {
     return withKeyLock(`cache-invalidate:${repoUrl}`, async () => {
-      logger.info('Starting complete repository cache invalidation', {
+      logger.info('Starting local repository cache invalidation', {
         repoUrl,
       });
 
@@ -1417,14 +1470,14 @@ class RepositoryCacheManager {
           .filter((r) => r.status === 'rejected')
           .map((r) => (r as PromiseRejectedResult).reason);
 
-        logger.error('Failed to invalidate repository cache', {
+        logger.error('Failed to invalidate repository cache locally', {
           repoUrl,
           error: failedOperations[0]?.message || 'Cache deletion failed',
           failedCount: failed,
           totalOperations: operations.length,
         });
       } else {
-        logger.info('Repository cache invalidated across all tiers', {
+        logger.info('Repository cache invalidated locally across all tiers', {
           repoUrl,
           keysInvalidated: successful,
           totalOperations: operations.length,
@@ -1554,6 +1607,20 @@ class RepositoryCacheManager {
       this.filteredCommitsCache.quit(),
       this.aggregatedDataCache.quit(),
     ];
+
+    // Also shutdown distributed cache invalidation if enabled
+    if (config.hybridCache.enableRedis) {
+      try {
+        const { shutdownDistributedCacheInvalidation } = await import(
+          './distributedCacheInvalidation'
+        );
+        operations.push(shutdownDistributedCacheInvalidation());
+      } catch (err) {
+        logger.warn('Failed to shutdown distributed cache invalidation', {
+          err,
+        });
+      }
+    }
 
     const results = await Promise.allSettled(operations);
     const failed = results.filter((r) => r.status === 'rejected').length;

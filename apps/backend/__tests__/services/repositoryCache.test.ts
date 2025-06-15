@@ -88,6 +88,19 @@ vi.mock('../../src/services/metrics', () => ({
   getCacheTier: vi.fn().mockReturnValue('L1'),
 }));
 
+// Mock distributed cache invalidation
+const mockDistributedCache = vi.hoisted(() => ({
+  registerInvalidationHandler: vi.fn(),
+  invalidateGlobally: vi.fn().mockResolvedValue(undefined),
+  isServiceHealthy: vi.fn().mockReturnValue(true),
+  shutdown: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../src/services/distributedCacheInvalidation', () => ({
+  getDistributedCacheInvalidation: vi.fn(() => mockDistributedCache),
+  shutdownDistributedCacheInvalidation: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../../src/config', () => ({
   config: {
     hybridCache: {
@@ -557,7 +570,7 @@ describe('RepositoryCache', () => {
 
       expect(mockHybridCache.del).toHaveBeenCalledTimes(5); // base keys for all cache tiers
       expect(mockLogger.info).toHaveBeenCalledWith(
-        'Repository cache invalidated across all tiers',
+        'Repository cache invalidated locally across all tiers',
         expect.objectContaining({ repoUrl })
       );
     });
@@ -576,7 +589,7 @@ describe('RepositoryCache', () => {
       await repositoryCache.invalidateRepository(repoUrl);
 
       expect(mockLogger.error).toHaveBeenCalledWith(
-        'Failed to invalidate repository cache',
+        'Failed to invalidate repository cache locally',
         expect.objectContaining({
           repoUrl,
           error: 'Cache deletion failed',
@@ -595,6 +608,31 @@ describe('RepositoryCache', () => {
       await repositoryCache.invalidateRepository(repoUrl);
 
       expect(mockHybridCache.del).toHaveBeenCalled();
+    });
+  });
+
+  describe('Distributed Cache Invalidation', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    test('should not broadcast when Redis is disabled', async () => {
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      await repositoryCache.invalidateRepository(repoUrl);
+
+      // Since Redis is disabled in test config, distributed cache should not be called
+      expect(mockDistributedCache.invalidateGlobally).not.toHaveBeenCalled();
+
+      // But local invalidation should still work
+      expect(mockHybridCache.del).toHaveBeenCalled();
+    });
+
+    test('should not register handlers when Redis is disabled', () => {
+      // Since Redis is disabled in test config, handler should not be registered
+      expect(
+        mockDistributedCache.registerInvalidationHandler
+      ).not.toHaveBeenCalled();
     });
   });
 
@@ -1040,7 +1078,7 @@ describe('RepositoryCache', () => {
       await repositoryCache.invalidateRepository(repoUrl);
 
       expect(mockLogger.error).toHaveBeenCalledWith(
-        'Failed to invalidate repository cache',
+        'Failed to invalidate repository cache locally',
         expect.objectContaining({
           repoUrl,
           error: 'Cache deletion failed',
@@ -1071,7 +1109,7 @@ describe('RepositoryCache', () => {
       expect(mockHybridCache.del.mock.calls.length).toBeGreaterThanOrEqual(3);
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        'Repository cache invalidated across all tiers',
+        'Repository cache invalidated locally across all tiers',
         expect.objectContaining({
           repoUrl,
           keysInvalidated: expect.any(Number),
