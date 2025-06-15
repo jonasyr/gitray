@@ -7,7 +7,7 @@ import {
   shouldThrottleRequest,
   getMemoryStats,
   getMemoryMetrics,
-} from '../../src/utils/memoryPressureManager';
+} from '../../../src/utils/memoryPressureManager';
 
 // Mock dependencies using vi.hoisted
 const mockLogger = vi.hoisted(() => ({
@@ -17,7 +17,7 @@ const mockLogger = vi.hoisted(() => ({
   debug: vi.fn(),
 }));
 
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   getLogger: vi.fn(() => mockLogger),
 }));
 

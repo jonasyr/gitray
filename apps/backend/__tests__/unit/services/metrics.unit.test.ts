@@ -39,11 +39,11 @@ import {
   getUserType,
   getRepositoryType,
   updateAllEnhancedMetrics,
-} from '../../src/services/metrics';
+} from '../../../src/services/metrics';
 
 // Mock the cache service
 const mockGetStats = vi.fn();
-vi.mock('../../src/services/cache', () => ({
+vi.mock('../../../src/services/cache', () => ({
   getCacheStats: mockGetStats,
 }));
 
@@ -710,7 +710,7 @@ describe('Metrics Service', () => {
   describe('Enhanced Metrics Update', () => {
     test('should update all enhanced metrics without errors', async () => {
       // Mock repositoryCoordinator for coordination metrics
-      vi.doMock('../../src/services/repositoryCoordinator', () => ({
+      vi.doMock('../../../src/services/repositoryCoordinator', () => ({
         repositoryCoordinator: {
           getMetrics: () => ({
             cachedRepositories: 10,

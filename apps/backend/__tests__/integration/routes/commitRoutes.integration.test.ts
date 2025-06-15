@@ -2,11 +2,11 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import express, { Application } from 'express';
 import { CommitHeatmapData } from '@gitray/shared-types';
-import commitRoutes from '../../src/routes/commitRoutes';
-import { gitService } from '../../src/services/gitService';
-import redis from '../../src/services/cache';
-import errorHandler from '../../src/middlewares/errorHandler';
-import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
+import commitRoutes from '../../../src/routes/commitRoutes';
+import { gitService } from '../../../src/services/gitService';
+import redis from '../../../src/services/cache';
+import errorHandler from '../../../src/middlewares/errorHandler';
+import { runCleanupQueue } from '../../../src/utils/cleanupScheduler';
 
 // Use the global mockLogger from setup
 const mockRequestLogger = {
@@ -20,14 +20,14 @@ const mockRequestLogger = {
 };
 
 // Mock logger with better handling
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   default: global.mockLogger,
   getLogger: () => global.mockLogger,
   createRequestLogger: vi.fn(() => mockRequestLogger),
 }));
 
 // Mock config
-vi.mock('../../src/config', () => ({
+vi.mock('../../../src/config', () => ({
   config: {
     repositoryCache: { enabled: true },
     operationCoordination: { enabled: true },
@@ -43,7 +43,7 @@ vi.mock('../../src/config', () => ({
 }));
 
 // Mock metrics
-vi.mock('../../src/services/metrics', () => ({
+vi.mock('../../../src/services/metrics', () => ({
   requestsTotal: { inc: vi.fn() },
   requestDuration: { observe: vi.fn() },
   recordStreamingStart: vi.fn(),
@@ -64,7 +64,7 @@ vi.mock('../../src/services/metrics', () => ({
 }));
 
 // Mock the repository cache
-vi.mock('../../src/services/repositoryCache', () => ({
+vi.mock('../../../src/services/repositoryCache', () => ({
   getCachedCommits: vi.fn(),
   getCachedAggregatedData: vi.fn(),
   getRepositoryCacheStats: vi.fn(),
@@ -76,7 +76,7 @@ vi.mock('../../src/services/repositoryCache', () => ({
 }));
 
 // Mock withTempRepository utilities
-vi.mock('../../src/utils/withTempRepository', () => ({
+vi.mock('../../../src/utils/withTempRepository', () => ({
   withTempRepositoryStreaming: vi.fn(),
   getRepositoryInfo: vi.fn(),
   invalidateRepositoryCache: vi.fn(),
@@ -85,7 +85,7 @@ vi.mock('../../src/utils/withTempRepository', () => ({
 }));
 
 // Mock gitService methods used in the route
-vi.mock('../../src/services/gitService', () => ({
+vi.mock('../../../src/services/gitService', () => ({
   gitService: {
     cloneRepository: vi.fn(),
     getCommits: vi.fn(),
@@ -99,22 +99,22 @@ vi.mock('../../src/services/gitService', () => ({
   },
 }));
 
-vi.mock('../../src/services/cache', () => ({
+vi.mock('../../../src/services/cache', () => ({
   __esModule: true,
   default: { get: vi.fn(), set: vi.fn() },
 }));
 
 // Mock cleanup scheduler
-vi.mock('../../src/utils/cleanupScheduler', () => ({
+vi.mock('../../../src/utils/cleanupScheduler', () => ({
   runCleanupQueue: vi.fn(),
 }));
 
 import {
   getCachedAggregatedData,
   getCachedCommits,
-} from '../../src/services/repositoryCache';
-import * as withTempRepository from '../../src/utils/withTempRepository';
-import * as repositoryCacheModule from '../../src/services/repositoryCache';
+} from '../../../src/services/repositoryCache';
+import * as withTempRepository from '../../../src/utils/withTempRepository';
+import * as repositoryCacheModule from '../../../src/services/repositoryCache';
 
 const mockClone = gitService.cloneRepository as ReturnType<typeof vi.fn>;
 const mockGetCommits = gitService.getCommits as ReturnType<typeof vi.fn>;

@@ -11,7 +11,7 @@ import {
 // apps/backend/__tests__/routes/index.test.ts
 import request from 'supertest';
 import express from 'express';
-import router from '../../src/routes';
+import router from '../../../src/routes';
 
 describe('Index Routes', () => {
   let app: express.Application;

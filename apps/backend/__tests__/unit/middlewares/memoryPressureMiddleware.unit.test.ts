@@ -4,14 +4,14 @@ import { Request, Response, NextFunction } from 'express';
 import {
   memoryPressureMiddleware,
   memoryAwareErrorHandler,
-} from '../../src/middlewares/memoryPressureMiddleware';
+} from '../../../src/middlewares/memoryPressureMiddleware';
 import { HTTP_STATUS } from '@gitray/shared-types';
 
 // Mock the memory pressure manager using vi.hoisted
 const mockShouldThrottleRequest = vi.hoisted(() => vi.fn());
 const mockGetMemoryStats = vi.hoisted(() => vi.fn());
 
-vi.mock('../../src/utils/memoryPressureManager', () => ({
+vi.mock('../../../src/utils/memoryPressureManager', () => ({
   shouldThrottleRequest: mockShouldThrottleRequest,
   getMemoryStats: mockGetMemoryStats,
 }));
@@ -24,7 +24,7 @@ const mockLogger = vi.hoisted(() => ({
   debug: vi.fn(),
 }));
 
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   getLogger: vi.fn(() => mockLogger),
 }));
 

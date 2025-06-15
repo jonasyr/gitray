@@ -34,7 +34,7 @@ vi.mock('ioredis', () => ({
   default: vi.fn().mockImplementation(() => mockRedisInstance),
 }));
 
-vi.mock('../../src/config', () => ({
+vi.mock('../../../src/config', () => ({
   config: {
     redis: {
       host: 'localhost',
@@ -69,7 +69,7 @@ const mockLogger = {
   debug: vi.fn(),
 };
 
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   __esModule: true,
   default: mockLogger,
   getLogger: vi.fn(() => mockLogger),
@@ -77,7 +77,7 @@ vi.mock('../../src/services/logger', () => ({
 
 // Mock HybridLRUCache
 const HybridLRUCacheMock = vi.fn();
-vi.mock('../../src/utils/hybridLruCache', () => ({
+vi.mock('../../../src/utils/hybridLruCache', () => ({
   HybridLRUCache: HybridLRUCacheMock,
 }));
 
@@ -96,7 +96,7 @@ vi.mock('prom-client', async () => {
 });
 
 // Mock metrics service with all enhanced metrics functions
-vi.mock('../../src/services/metrics', () => ({
+vi.mock('../../../src/services/metrics', () => ({
   // Basic metrics
   cacheHits: { inc: vi.fn() },
   cacheMisses: { inc: vi.fn() },
@@ -141,7 +141,7 @@ describe('Cache Service Integration', () => {
     }
 
     // Get the mocked logger
-    mockLogger = (await import('../../src/services/logger')).default;
+    mockLogger = (await import('../../../src/services/logger')).default;
     // Clear captured handlers for each test
     for (const key in capturedRedisHandlers) {
       delete capturedRedisHandlers[key];
@@ -192,7 +192,7 @@ describe('Cache Service Integration', () => {
     (Redis.default as any).mockImplementation(() => mockRedis);
 
     // Import cache after mocks are set up
-    const cacheModule = await import('../../src/services/cache');
+    const cacheModule = await import('../../../src/services/cache');
     cache = cacheModule.default;
 
     // Allow async initialization to complete
@@ -400,7 +400,7 @@ describe('Cache Service Integration', () => {
       (ioredis as unknown as MockInstance).mockImplementation(() => {
         throw new Error('Simulated Redis init failure');
       });
-      cache = (await import('../../src/services/cache')).default;
+      cache = (await import('../../../src/services/cache')).default;
     });
 
     test('get should retrieve from memory cache', async () => {
@@ -459,7 +459,7 @@ describe('Cache Service Integration', () => {
       (ioredisFail as unknown as MockInstance).mockImplementationOnce(() => {
         throw new Error('init fail');
       });
-      const localCache = (await import('../../src/services/cache')).default;
+      const localCache = (await import('../../../src/services/cache')).default;
       expect(localCache.isHealthy()).toBe(true);
     });
   });
@@ -491,7 +491,7 @@ describe('Cache Service Integration', () => {
       const Redis = await import('ioredis');
       (Redis.default as any).mockImplementation(() => mockRedis);
 
-      await import('../../src/services/cache');
+      await import('../../../src/services/cache');
 
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
 
@@ -531,7 +531,7 @@ describe('Cache Service Integration', () => {
       const Redis = await import('ioredis');
       (Redis.default as any).mockImplementation(() => mockRedis);
 
-      await import('../../src/services/cache');
+      await import('../../../src/services/cache');
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
 
       // Trigger Redis end event
@@ -546,7 +546,7 @@ describe('Cache Service Integration', () => {
       vi.resetModules();
 
       // Mock config with hybrid cache disabled
-      vi.doMock('../../src/config', () => ({
+      vi.doMock('../../../src/config', () => ({
         config: {
           redis: {
             host: 'localhost',
@@ -574,7 +574,7 @@ describe('Cache Service Integration', () => {
         },
       }));
 
-      await import('../../src/services/cache');
+      await import('../../../src/services/cache');
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
 
       expect(mockLogger.warn).toHaveBeenCalledWith(

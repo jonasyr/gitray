@@ -33,7 +33,7 @@ describe('Configuration', () => {
       process.env.REDIS_PORT = '6380';
       process.env.GIT_MAX_CONCURRENT_PROCESSES = '8';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.port).toBe(8080);
       expect(config.redis.port).toBe(6380);
@@ -45,7 +45,7 @@ describe('Configuration', () => {
       delete process.env.REDIS_PORT;
       delete process.env.GIT_MAX_CONCURRENT_PROCESSES;
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.port).toBe(3001);
       expect(config.redis.port).toBe(6379);
@@ -57,7 +57,7 @@ describe('Configuration', () => {
       process.env.REDIS_PORT = 'not-a-number';
       process.env.GIT_MAX_CONCURRENT_PROCESSES = 'invalid';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       // Should fall back to defaults for invalid values
       expect(config.port).toBe(3001);
@@ -70,7 +70,7 @@ describe('Configuration', () => {
       process.env.CACHE_ENABLE_REDIS = 'true';
       process.env.CACHE_ENABLE_DISK = 'false';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.redis.lazyConnect).toBe(false);
       expect(config.hybridCache.enableRedis).toBe(true);
@@ -82,7 +82,7 @@ describe('Configuration', () => {
       process.env.CACHE_ENABLE_DISK = 'False';
       process.env.REDIS_LAZY_CONNECT = 'True';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.hybridCache.enableRedis).toBe(true);
       expect(config.hybridCache.enableDisk).toBe(false);
@@ -94,7 +94,7 @@ describe('Configuration', () => {
       delete process.env.CACHE_ENABLE_DISK;
       delete process.env.REDIS_LAZY_CONNECT;
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.hybridCache.enableRedis).toBe(true);
       expect(config.hybridCache.enableDisk).toBe(true);
@@ -106,7 +106,7 @@ describe('Configuration', () => {
     test('should configure server port correctly', async () => {
       process.env.PORT = '4000';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.port).toBe(4000);
     });
@@ -114,7 +114,7 @@ describe('Configuration', () => {
     test('should configure CORS origin correctly', async () => {
       process.env.CORS_ORIGIN = 'https://example.com';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.cors.origin).toBe('https://example.com');
       expect(config.cors.credentials).toBe(true);
@@ -123,7 +123,7 @@ describe('Configuration', () => {
     test('should use default CORS origin when not specified', async () => {
       delete process.env.CORS_ORIGIN;
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.cors.origin).toBe('http://localhost:5173');
     });
@@ -131,7 +131,7 @@ describe('Configuration', () => {
 
   describe('Rate Limiting Configuration', () => {
     test('should configure rate limiting from shared constants', async () => {
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.rateLimit).toEqual({
         windowMs: 60000,
@@ -148,7 +148,7 @@ describe('Configuration', () => {
       process.env.REDIS_PASSWORD = 'secret123';
       process.env.REDIS_DB = '2';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.redis.host).toBe('redis.example.com');
       expect(config.redis.port).toBe(6380);
@@ -162,7 +162,7 @@ describe('Configuration', () => {
       delete process.env.REDIS_PASSWORD;
       delete process.env.REDIS_DB;
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.redis.host).toBe('localhost');
       expect(config.redis.port).toBe(6379);
@@ -175,14 +175,14 @@ describe('Configuration', () => {
     test('should configure Git maxConcurrentProcesses and cloneDepth', async () => {
       process.env.GIT_MAX_CONCURRENT_PROCESSES = '8';
       process.env.GIT_CLONE_DEPTH = '42';
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
       expect(config.git.maxConcurrentProcesses).toBe(8);
       expect(config.git.cloneDepth).toBe(42);
     });
     test('should use default Git settings', async () => {
       delete process.env.GIT_MAX_CONCURRENT_PROCESSES;
       delete process.env.GIT_CLONE_DEPTH;
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
       expect(config.git.maxConcurrentProcesses).toBe(5);
       expect(config.git.cloneDepth).toBe(1);
     });
@@ -197,7 +197,7 @@ describe('Configuration', () => {
       process.env.CACHE_ENABLE_REDIS = 'true';
       process.env.CACHE_ENABLE_DISK = 'false';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.hybridCache.maxEntries).toBe(2000);
       expect(config.hybridCache.memoryLimitBytes).toBe(2 * 1024 ** 3);
@@ -215,7 +215,7 @@ describe('Configuration', () => {
       process.env.REDIS_CACHE_DB = '3';
       process.env.CACHE_REDIS_PREFIX = 'gitray-cache:';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.hybridCache.enableRedis).toBe(true);
       expect(config.hybridCache.redisConfig).toMatchObject({
@@ -235,7 +235,7 @@ describe('Configuration', () => {
       delete process.env.CACHE_ENABLE_REDIS;
       delete process.env.CACHE_ENABLE_DISK;
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.hybridCache.maxEntries).toBe(10000);
       expect(config.hybridCache.memoryLimitBytes).toBe(1 * 1024 ** 3);
@@ -253,7 +253,7 @@ describe('Configuration', () => {
       process.env.CACHE_FILTERED_COMMITS_TTL_SECONDS = '3600';
       process.env.CACHE_AGGREGATED_DATA_TTL_SECONDS = '1800';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.cacheStrategy.hierarchicalCaching).toBe(false);
       expect(config.cacheStrategy.cacheKeys.rawCommitsTTL).toBe(7200);
@@ -267,7 +267,7 @@ describe('Configuration', () => {
       delete process.env.CACHE_FILTERED_COMMITS_TTL_SECONDS;
       delete process.env.CACHE_AGGREGATED_DATA_TTL_SECONDS;
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.cacheStrategy.hierarchicalCaching).toBe(true);
       expect(config.cacheStrategy.cacheKeys.rawCommitsTTL).toBe(3600);
@@ -283,7 +283,7 @@ describe('Configuration', () => {
       process.env.LOCK_CLEANUP_INTERVAL_MS = '60000';
       process.env.LOCK_STALE_AGE_MS = '120000';
       process.env.DEBUG_LOCK_LOGGING = 'true';
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
       expect(config.locks.lockDir).toBe('/custom/locks');
       expect(config.locks.defaultTimeoutMs).toBe(10000);
       expect(config.locks.cleanupIntervalMs).toBe(60000);
@@ -296,7 +296,7 @@ describe('Configuration', () => {
       delete process.env.LOCK_CLEANUP_INTERVAL_MS;
       delete process.env.LOCK_STALE_AGE_MS;
       delete process.env.DEBUG_LOCK_LOGGING;
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
       expect(config.locks.lockDir).toContain('/tmp/gitray-locks');
       expect(config.locks.defaultTimeoutMs).toBe(120000);
       expect(config.locks.cleanupIntervalMs).toBe(300000);
@@ -311,7 +311,7 @@ describe('Configuration', () => {
       process.env.REPO_OPERATION_TIMEOUT_MS = '180000';
       process.env.REPO_OPERATION_MAX_QUEUE_SIZE = '15';
       process.env.REPO_OPERATION_COORDINATION_ENABLED = 'true';
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
       expect(config.operationCoordination.maxConcurrentOpsPerRepo).toBe(20);
       expect(config.operationCoordination.operationTimeoutMs).toBe(180000);
       expect(config.operationCoordination.maxQueueSize).toBe(15);
@@ -322,7 +322,7 @@ describe('Configuration', () => {
       delete process.env.REPO_OPERATION_TIMEOUT_MS;
       delete process.env.REPO_OPERATION_MAX_QUEUE_SIZE;
       delete process.env.REPO_OPERATION_COORDINATION_ENABLED;
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
       expect(config.operationCoordination.maxConcurrentOpsPerRepo).toBe(3);
       expect(config.operationCoordination.operationTimeoutMs).toBe(600000);
       expect(config.operationCoordination.maxQueueSize).toBe(10);
@@ -336,7 +336,7 @@ describe('Configuration', () => {
       process.env.CACHE_MEMORY_LIMIT_GB = '0';
       process.env.CACHE_LOCK_TIMEOUT_MS = '0';
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
 
       expect(() => validateConfig()).toThrow();
     });
@@ -344,7 +344,7 @@ describe('Configuration', () => {
     test('should validate Redis configuration', async () => {
       process.env.REDIS_PORT = '70000'; // Invalid port
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
 
       expect(() => validateConfig()).toThrow();
     });
@@ -353,7 +353,7 @@ describe('Configuration', () => {
       process.env.GIT_MAX_CONCURRENT_PROCESSES = '0';
       process.env.GIT_CLONE_DEPTH = '0';
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
 
       expect(() => validateConfig()).toThrow();
     });
@@ -361,7 +361,7 @@ describe('Configuration', () => {
     test('should warn about high Git concurrent processes', async () => {
       process.env.GIT_MAX_CONCURRENT_PROCESSES = '25';
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
       const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       validateConfig();
@@ -377,7 +377,7 @@ describe('Configuration', () => {
     test('should warn about low Git clone depth', async () => {
       process.env.GIT_CLONE_DEPTH = '5';
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
       const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       validateConfig();
@@ -394,7 +394,7 @@ describe('Configuration', () => {
       process.env.REPO_CACHE_MAX_REPOSITORIES = '0';
       process.env.REPO_CACHE_MAX_AGE_HOURS = '0';
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
 
       expect(() => validateConfig()).toThrow();
     });
@@ -403,7 +403,7 @@ describe('Configuration', () => {
       process.env.REPO_CACHE_ENABLED = 'true';
       process.env.REPO_CACHE_DISK_LIMIT_GB = '0.05'; // 50MB
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
       const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       validateConfig();
@@ -419,7 +419,7 @@ describe('Configuration', () => {
       process.env.REPO_CACHE_ENABLED = 'true';
       process.env.REPO_CACHE_DISK_LIMIT_GB = '60'; // 60GB
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
       const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       validateConfig();
@@ -435,7 +435,7 @@ describe('Configuration', () => {
       process.env.REPO_OPERATION_COORDINATION_ENABLED = 'true';
       process.env.REPO_MAX_CONCURRENT_OPS = '0';
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
 
       expect(() => validateConfig()).toThrow();
     });
@@ -444,7 +444,7 @@ describe('Configuration', () => {
       process.env.REPO_OPERATION_COORDINATION_ENABLED = 'true';
       process.env.REPO_OPERATION_TIMEOUT_MS = '10000'; // 10 seconds
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
       const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       validateConfig();
@@ -460,7 +460,7 @@ describe('Configuration', () => {
       process.env.CACHE_MEMORY_PRESSURE_THRESHOLD = '120'; // Invalid: > 100
       process.env.CACHE_EMERGENCY_EVICTION_PERCENT = '120'; // Invalid: > 100
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
 
       expect(() => validateConfig()).toThrow();
     });
@@ -469,7 +469,7 @@ describe('Configuration', () => {
       process.env.CACHE_MEMORY_PRESSURE_THRESHOLD = '0';
       process.env.CACHE_EMERGENCY_EVICTION_PERCENT = '0';
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
 
       expect(() => validateConfig()).toThrow();
     });
@@ -477,7 +477,7 @@ describe('Configuration', () => {
     test('should warn about very low raw commits TTL', async () => {
       process.env.CACHE_RAW_COMMITS_TTL_SECONDS = '60'; // 1 minute
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
       const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       validateConfig();
@@ -492,7 +492,7 @@ describe('Configuration', () => {
     test('should warn about very high raw commits TTL', async () => {
       process.env.CACHE_RAW_COMMITS_TTL_SECONDS = '100000'; // > 24 hours
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
       const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       validateConfig();
@@ -523,7 +523,7 @@ describe('Configuration', () => {
       process.env.CACHE_EMERGENCY_EVICTION_PERCENT = '30';
       process.env.CACHE_RAW_COMMITS_TTL_SECONDS = '3600';
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
 
       expect(() => validateConfig()).not.toThrow();
     });
@@ -531,7 +531,7 @@ describe('Configuration', () => {
     test('should handle repository cache disabled', async () => {
       process.env.REPO_CACHE_ENABLED = 'false';
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
 
       // Should not validate repository cache settings when disabled
       expect(() => validateConfig()).not.toThrow();
@@ -540,7 +540,7 @@ describe('Configuration', () => {
     test('should handle operation coordination disabled', async () => {
       process.env.REPO_OPERATION_COORDINATION_ENABLED = 'false';
 
-      const { validateConfig } = await import('../src/config');
+      const { validateConfig } = await import('../../src/config');
 
       // Should not validate operation coordination settings when disabled
       expect(() => validateConfig()).not.toThrow();
@@ -553,7 +553,7 @@ describe('Configuration', () => {
       process.env.STREAMING_COMMIT_THRESHOLD = '100000';
       process.env.STREAMING_BATCH_SIZE = '2000';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.streaming.enabled).toBe(true);
       expect(config.streaming.commitThreshold).toBe(100000);
@@ -566,7 +566,7 @@ describe('Configuration', () => {
       process.env.LOG_LEVEL = 'debug';
       process.env.ENABLE_METRICS = 'false';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.debug.enableCacheLogging).toBe(true);
       expect(config.debug.enableLockLogging).toBe(true);
@@ -579,7 +579,7 @@ describe('Configuration', () => {
       process.env.CACHE_WARMING_MAX_REPOS = '20';
       process.env.CACHE_WARMING_SCHEDULE_HOURS = '12';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.cacheStrategy.cacheWarming.enabled).toBe(true);
       expect(config.cacheStrategy.cacheWarming.maxWarmupRepos).toBe(20);
@@ -593,7 +593,7 @@ describe('Configuration', () => {
       process.env.LOCK_STALE_AGE_MS = '1200000';
       process.env.DEBUG_LOCK_LOGGING = 'true';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.locks.lockDir).toBe('/custom/lock/dir');
       expect(config.locks.defaultTimeoutMs).toBe(180000);
@@ -608,7 +608,7 @@ describe('Configuration', () => {
       process.env.CACHE_AGGREGATED_DATA_TTL_SECONDS = '1800';
       process.env.CACHE_REPOSITORY_INFO_TTL_SECONDS = '14400';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       expect(config.cacheStrategy.cacheKeys.rawCommitsTTL).toBe(7200);
       expect(config.cacheStrategy.cacheKeys.filteredCommitsTTL).toBe(3600);
@@ -623,7 +623,7 @@ describe('Configuration', () => {
       process.env.TEST_NUMBER = '42';
       process.env.TEST_INVALID_NUMBER = 'not-a-number';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       // The helper functions should be working correctly within the config
       expect(typeof config.port).toBe('number');
@@ -635,7 +635,7 @@ describe('Configuration', () => {
       process.env.TEST_BOOLEAN_FALSE = 'false';
       process.env.TEST_BOOLEAN_INVALID = 'maybe';
 
-      const { config } = await import('../src/config');
+      const { config } = await import('../../src/config');
 
       // The helper functions should be working correctly within the config
       expect(typeof config.hybridCache.enableRedis).toBe('boolean');

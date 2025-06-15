@@ -81,7 +81,7 @@ describe('Logger Service', () => {
     vi.resetModules();
 
     // Import the logger module after mocks are set up
-    const loggerModule = await import('../../src/services/logger');
+    const loggerModule = await import('../../../src/services/logger');
     initializeLogger = loggerModule.initializeLogger;
     getLogger = loggerModule.getLogger;
     createRequestLogger = loggerModule.createRequestLogger;

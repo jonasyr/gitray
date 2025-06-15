@@ -108,17 +108,17 @@ vi.mock('ioredis', () => {
   };
 });
 
-vi.mock('../../src/utils/lockManager', () => ({
+vi.mock('../../../src/utils/lockManager', () => ({
   withKeyLock: mockWithKeyLock,
 }));
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   __esModule: true,
   default: global.mockLogger,
   getLogger: global.getLogger,
 }));
 
 // Import after mocking
-import HybridLRUCache from '../../src/utils/hybridLruCache';
+import HybridLRUCache from '../../../src/utils/hybridLruCache';
 
 describe('HybridLRUCache', () => {
   let cache: HybridLRUCache<string>;

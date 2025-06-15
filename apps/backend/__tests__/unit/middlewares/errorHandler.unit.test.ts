@@ -1,11 +1,11 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 // apps/backend/__tests__/middlewares/errorHandler.test.ts
 import { Request, Response, NextFunction } from 'express';
-import errorHandler from '../../src/middlewares/errorHandler';
+import errorHandler from '../../../src/middlewares/errorHandler';
 import { GitrayError, HTTP_STATUS } from '@gitray/shared-types';
 
 // Mock the logger service using inline factory without variables
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   __esModule: true,
   default: {
     info: vi.fn(),

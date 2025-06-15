@@ -3,14 +3,14 @@ import simpleGit from 'simple-git';
 import { mkdtemp, rm } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
-import { gitService } from '../../src/services/gitService';
+import { gitService } from '../../../src/services/gitService';
 import { GIT_SERVICE } from '@gitray/shared-types';
 
 vi.mock('simple-git');
 
 vi.mock('fs/promises');
 vi.mock('ioredis');
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   __esModule: true,
   default: global.mockLogger,
   getLogger: global.getLogger,

@@ -7,15 +7,15 @@ const mockDotenvConfig = vi.fn();
 const mockProcessExit = vi.fn();
 
 // Mock the logger module using the shared mock from setup/logger.mock.ts
-import { mockLogger, getLogger, initializeLogger } from './setup/logger.mock';
-vi.mock('../src/services/logger', () => ({
+import { mockLogger, getLogger, initializeLogger } from '../setup/logger.mock';
+vi.mock('../../src/services/logger', () => ({
   default: mockLogger,
   getLogger,
   initializeLogger,
 }));
 
 // Mock config module to prevent actual configuration loading
-vi.mock('../src/config', () => ({
+vi.mock('../../src/config', () => ({
   config: {
     get port() {
       // Dynamically read process.env.PORT for each test
@@ -42,7 +42,7 @@ vi.mock('../src/config', () => ({
 }));
 
 // Mock repository coordination modules
-vi.mock('../src/services/repositoryCoordinator', () => ({
+vi.mock('../../src/services/repositoryCoordinator', () => ({
   repositoryCoordinator: {
     getMetrics: () => ({
       cachedRepositories: 0,
@@ -54,7 +54,7 @@ vi.mock('../src/services/repositoryCoordinator', () => ({
   },
 }));
 
-vi.mock('../src/services/repositoryCache', () => ({
+vi.mock('../../src/services/repositoryCache', () => ({
   repositoryCache: {
     shutdown: vi.fn(),
   },
@@ -66,12 +66,12 @@ vi.mock('../src/services/repositoryCache', () => ({
 }));
 
 // Mock graceful shutdown
-vi.mock('../src/utils/gracefulShutdown', () => ({
+vi.mock('../../src/utils/gracefulShutdown', () => ({
   setupGracefulShutdown: vi.fn(),
 }));
 
 // Mock cache services
-vi.mock('../src/services/cache', () => ({
+vi.mock('../../src/services/cache', () => ({
   getCacheStats: () => ({
     activeBackend: 'memory',
     memory: { entries: 0 },
@@ -125,27 +125,27 @@ vi.mock('dotenv', () => ({
   config: mockDotenvConfig,
 }));
 
-vi.mock('../src/routes', () => ({
+vi.mock('../../src/routes', () => ({
   default: 'mockedRoutes',
 }));
 
-vi.mock('../src/routes/repositoryRoutes', () => ({
+vi.mock('../../src/routes/repositoryRoutes', () => ({
   default: 'mockedRepositoryRoutes',
 }));
 
-vi.mock('../src/routes/commitRoutes', () => ({
+vi.mock('../../src/routes/commitRoutes', () => ({
   default: 'mockedCommitRoutes',
 }));
 
-vi.mock('../src/routes/healthRoutes', () => ({
+vi.mock('../../src/routes/healthRoutes', () => ({
   default: 'mockedHealthRoutes',
 }));
 
-vi.mock('../src/middlewares/errorHandler', () => ({
+vi.mock('../../src/middlewares/errorHandler', () => ({
   default: 'mockedErrorHandler',
 }));
 
-vi.mock('../src/middlewares/requestId', () => ({
+vi.mock('../../src/middlewares/requestId', () => ({
   requestIdMiddleware: vi.fn((req: any, res: any, next: any) => next()),
 }));
 
@@ -153,7 +153,7 @@ vi.mock('express-rate-limit', () => ({
   default: vi.fn(() => (req: any, res: any, next: any) => next()),
 }));
 
-vi.mock('../src/services/metrics', () => ({
+vi.mock('../../src/services/metrics', () => ({
   httpRequestsTotal: { inc: vi.fn() },
   httpRequestDuration: { observe: vi.fn() },
   metricsMiddleware: vi.fn((req: any, res: any, next: any) => next()),
@@ -193,7 +193,7 @@ describe('Express App Initialization', () => {
 
   test('should configure the Express app with correct middlewares and routes', async () => {
     // Act - Import the index module to trigger the app initialization
-    await import('../src/index');
+    await import('../../src/index');
 
     // Get the mocked modules
     const express = await import('express');
@@ -234,7 +234,7 @@ describe('Express App Initialization', () => {
     delete process.env.PORT;
 
     // Act - Import the index module to trigger the app initialization
-    await import('../src/index');
+    await import('../../src/index');
 
     // Use the actual app instance created by the mock
     const mockApp = lastMockApp;
@@ -248,7 +248,7 @@ describe('Express App Initialization', () => {
     const infoSpy = vi.spyOn(mockLogger, 'info');
 
     // Act - Import the index module to trigger the app initialization
-    await import('../src/index');
+    await import('../../src/index');
 
     // Use the actual app instance created by the mock
     const mockApp = lastMockApp;
@@ -275,7 +275,7 @@ describe('Express App Initialization', () => {
 
     // Import the module first to get access to the error handler
     vi.resetModules();
-    await import('../src/index');
+    await import('../../src/index');
 
     const mockApp = lastMockApp;
     expect(mockApp.listen).toHaveBeenCalled();
@@ -313,7 +313,7 @@ describe('Express App Initialization', () => {
 
     // Import the module first to get access to the error handler
     vi.resetModules();
-    await import('../src/index');
+    await import('../../src/index');
 
     const mockApp = lastMockApp;
     expect(mockApp.listen).toHaveBeenCalled();
@@ -351,7 +351,7 @@ describe('Express App Initialization', () => {
 
     // Import the module first to get access to the error handler
     vi.resetModules();
-    await import('../src/index');
+    await import('../../src/index');
 
     const mockApp = lastMockApp;
     expect(mockApp.listen).toHaveBeenCalled();
@@ -389,7 +389,7 @@ describe('Express App Initialization', () => {
 
     // Import the module first to get access to the error handler
     vi.resetModules();
-    await import('../src/index');
+    await import('../../src/index');
 
     const mockApp = lastMockApp;
     expect(mockApp.listen).toHaveBeenCalled();
@@ -423,7 +423,7 @@ describe('Express App Initialization', () => {
 
   test('should handle coordination health endpoint when disabled', async () => {
     // Mock config with coordination disabled
-    vi.doMock('../src/config', () => ({
+    vi.doMock('../../src/config', () => ({
       config: {
         port: 3001,
         cors: {},
@@ -447,7 +447,7 @@ describe('Express App Initialization', () => {
     }));
 
     // Act - Import the index module
-    await import('../src/index');
+    await import('../../src/index');
 
     const mockApp = lastMockApp;
 
@@ -477,7 +477,7 @@ describe('Express App Initialization', () => {
 
   test('should handle coordination health endpoint when enabled and healthy', async () => {
     // Act - Import the index module first
-    await import('../src/index');
+    await import('../../src/index');
 
     const mockApp = lastMockApp;
 
@@ -497,7 +497,7 @@ describe('Express App Initialization', () => {
     };
 
     // Temporarily override the config to enable coordination
-    const originalConfig = await import('../src/config');
+    const originalConfig = await import('../../src/config');
     const configSpy = vi
       .spyOn(originalConfig, 'config', 'get')
       .mockReturnValue({
@@ -507,7 +507,7 @@ describe('Express App Initialization', () => {
 
     // Mock the repository coordinator to return healthy metrics
     const { repositoryCoordinator } = await import(
-      '../src/services/repositoryCoordinator'
+      '../../src/services/repositoryCoordinator'
     );
     const getMetricsSpy = vi
       .spyOn(repositoryCoordinator, 'getMetrics')
@@ -523,7 +523,7 @@ describe('Express App Initialization', () => {
 
     // Mock the repository cache stats
     const repositoryCacheModule = await import(
-      '../src/services/repositoryCache'
+      '../../src/services/repositoryCache'
     );
     const getStatsSpy = vi
       .spyOn(repositoryCacheModule, 'getRepositoryCacheStats')
@@ -575,7 +575,7 @@ describe('Express App Initialization', () => {
 
   test('should handle coordination health endpoint errors', async () => {
     // Act - Import the index module first
-    await import('../src/index');
+    await import('../../src/index');
 
     const mockApp = lastMockApp;
 
@@ -595,7 +595,7 @@ describe('Express App Initialization', () => {
     };
 
     // Temporarily override the config to enable coordination
-    const originalConfig = await import('../src/config');
+    const originalConfig = await import('../../src/config');
     const configSpy = vi
       .spyOn(originalConfig, 'config', 'get')
       .mockReturnValue({
@@ -605,7 +605,7 @@ describe('Express App Initialization', () => {
 
     // Mock the repository coordinator to throw an error
     const { repositoryCoordinator } = await import(
-      '../src/services/repositoryCoordinator'
+      '../../src/services/repositoryCoordinator'
     );
     const getMetricsSpy = vi
       .spyOn(repositoryCoordinator, 'getMetrics')
@@ -641,7 +641,7 @@ describe('Startup Environment Validation', () => {
     // Set invalid port
     process.env.PORT = '99999';
 
-    vi.doMock('../src/config', () => ({
+    vi.doMock('../../src/config', () => ({
       config: {
         port: 99999,
         cors: {},
@@ -669,7 +669,7 @@ describe('Startup Environment Validation', () => {
     const errorSpy = vi.spyOn(mockLogger, 'error');
 
     // Act - Import the index module
-    await import('../src/index');
+    await import('../../src/index');
 
     // Assert
     expect(errorSpy).toHaveBeenCalledWith(
@@ -686,7 +686,7 @@ describe('Startup Environment Validation', () => {
     vi.resetModules();
 
     // Mock config validation to throw BEFORE importing
-    vi.doMock('../src/config', () => ({
+    vi.doMock('../../src/config', () => ({
       config: {
         port: 3001,
         cors: {},
@@ -714,7 +714,7 @@ describe('Startup Environment Validation', () => {
     const errorSpy = vi.spyOn(mockLogger, 'error');
 
     // Act - Import the index module
-    await import('../src/index');
+    await import('../../src/index');
 
     // Assert
     expect(errorSpy).toHaveBeenCalledWith(
@@ -731,7 +731,7 @@ describe('Startup Environment Validation', () => {
     delete process.env.PORT;
 
     // Act - Import config to check default port
-    const { config } = await import('../src/config');
+    const { config } = await import('../../src/config');
 
     // Assert - Should use default port 3001
     expect(config.port).toBe(3001);
@@ -741,7 +741,7 @@ describe('Startup Environment Validation', () => {
 describe('Server Error Handling', () => {
   test('should create server successfully', async () => {
     // Act
-    await import('../src/index');
+    await import('../../src/index');
 
     // Assert - Check that express app was created and listen was called
     expect(lastMockApp.listen).toHaveBeenCalled();
@@ -749,7 +749,7 @@ describe('Server Error Handling', () => {
 
   test('should register middleware', async () => {
     // Act
-    await import('../src/index');
+    await import('../../src/index');
 
     // Assert - Check that middleware was registered
     expect(lastMockApp.use).toHaveBeenCalled();
@@ -759,7 +759,7 @@ describe('Server Error Handling', () => {
 describe('Coordination Health Endpoint', () => {
   test('should register health coordination endpoint', async () => {
     // Act
-    await import('../src/index');
+    await import('../../src/index');
 
     // Assert - Check that the coordination health endpoint was registered
     expect(lastMockApp.get).toHaveBeenCalledWith(
@@ -770,7 +770,7 @@ describe('Coordination Health Endpoint', () => {
 
   test('should handle coordination health endpoint when disabled', async () => {
     // Act
-    await import('../src/index');
+    await import('../../src/index');
 
     // Get the coordination handler
     const coordinationHandler = lastMockApp.get.mock.calls.find(

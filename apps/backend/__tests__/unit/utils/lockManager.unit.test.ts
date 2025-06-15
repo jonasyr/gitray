@@ -83,14 +83,14 @@ vi.mock('fs', () => ({
 }));
 
 // Mock logger
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   __esModule: true,
   default: global.mockLogger,
   getLogger: global.getLogger,
 }));
 
 // Mock config
-vi.mock('../../src/config', () => ({
+vi.mock('../../../src/config', () => ({
   lockConfig: {
     lockDir: '/tmp/test-locks',
     defaultTimeoutMs: 5000,
@@ -107,7 +107,7 @@ import {
   getLockMetrics,
   getActiveLocks,
   shutdownLockManager,
-} from '../../src/utils/lockManager';
+} from '../../../src/utils/lockManager';
 
 describe('Lock Manager', () => {
   beforeEach(async () => {

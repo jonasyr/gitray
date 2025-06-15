@@ -3,13 +3,13 @@ import { describe, test, expect, beforeEach, vi } from 'vitest';
 
 import request from 'supertest';
 import express, { Application } from 'express';
-import { withTempRepository } from '../../src/utils/withTempRepository';
-import repositoryRoutes from '../../src/routes/repositoryRoutes';
-import errorHandler from '../../src/middlewares/errorHandler';
-import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
+import { withTempRepository } from '../../../src/utils/withTempRepository';
+import repositoryRoutes from '../../../src/routes/repositoryRoutes';
+import errorHandler from '../../../src/middlewares/errorHandler';
+import { runCleanupQueue } from '../../../src/utils/cleanupScheduler';
 
 // Mock the logger service
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   __esModule: true,
   default: {
     info: vi.fn(),
@@ -41,7 +41,7 @@ vi.mock('../../src/services/logger', () => ({
 }));
 
 // Mock the gitService
-vi.mock('../../src/services/gitService', () => ({
+vi.mock('../../../src/services/gitService', () => ({
   gitService: {
     cloneRepository: vi.fn(),
     getCommits: vi.fn(),
@@ -53,11 +53,11 @@ vi.mock('../../src/services/gitService', () => ({
 }));
 
 // Mock withTempRepository utility to avoid complex dependency chains
-vi.mock('../../src/utils/withTempRepository', () => ({
+vi.mock('../../../src/utils/withTempRepository', () => ({
   withTempRepository: vi.fn(),
 }));
 
-vi.mock('../../src/services/cache', () => ({
+vi.mock('../../../src/services/cache', () => ({
   __esModule: true,
   default: { get: vi.fn(), set: vi.fn() },
 }));

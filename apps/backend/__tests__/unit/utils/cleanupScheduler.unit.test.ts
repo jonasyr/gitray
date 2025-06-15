@@ -6,23 +6,23 @@ import {
   stopCleanupScheduler,
   getQueueStatus,
   clearQueue,
-} from '../../src/utils/cleanupScheduler';
-import { gitService } from '../../src/services/gitService';
+} from '../../../src/utils/cleanupScheduler';
+import { gitService } from '../../../src/services/gitService';
 
 // Mock dependencies
-vi.mock('../../src/services/gitService', () => ({
+vi.mock('../../../src/services/gitService', () => ({
   gitService: {
     cleanupRepository: vi.fn(),
   },
 }));
 
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   __esModule: true,
   default: global.mockLogger,
   getLogger: global.getLogger,
 }));
 
-vi.mock('../../src/services/metrics', () => ({
+vi.mock('../../../src/services/metrics', () => ({
   cleanupQueueSize: {
     set: vi.fn(),
   },

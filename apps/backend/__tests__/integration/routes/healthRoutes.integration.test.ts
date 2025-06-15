@@ -1,10 +1,10 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import express, { Application } from 'express';
-import healthRoutes from '../../src/routes/healthRoutes';
-import redis from '../../src/services/cache';
+import healthRoutes from '../../../src/routes/healthRoutes';
+import redis from '../../../src/services/cache';
 
-vi.mock('../../src/services/cache', () => ({
+vi.mock('../../../src/services/cache', () => ({
   __esModule: true,
   default: {
     isHealthy: vi.fn(),
@@ -13,12 +13,12 @@ vi.mock('../../src/services/cache', () => ({
   },
 }));
 
-vi.mock('../../src/utils/gracefulShutdown', () => ({
+vi.mock('../../../src/utils/gracefulShutdown', () => ({
   isServerShuttingDown: vi.fn(() => false),
 }));
 
 // Mock the coordination modules
-vi.mock('../../src/services/repositoryCoordinator', () => ({
+vi.mock('../../../src/services/repositoryCoordinator', () => ({
   repositoryCoordinator: {
     getMetrics: vi.fn(() => ({
       cachedRepositories: 5,
@@ -32,7 +32,7 @@ vi.mock('../../src/services/repositoryCoordinator', () => ({
   },
 }));
 
-vi.mock('../../src/services/repositoryCache', () => ({
+vi.mock('../../../src/services/repositoryCache', () => ({
   getRepositoryCacheStats: vi.fn(() => ({
     hitRatios: {
       overall: 0.8,
@@ -49,7 +49,7 @@ vi.mock('../../src/services/repositoryCache', () => ({
 }));
 
 // Mock config
-vi.mock('../../src/config', () => ({
+vi.mock('../../../src/config', () => ({
   config: {
     repositoryCache: {
       enabled: true,

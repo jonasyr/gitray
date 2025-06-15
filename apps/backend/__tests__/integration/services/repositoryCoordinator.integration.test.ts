@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
-import { repositoryCoordinator } from '../../src/services/repositoryCoordinator';
-import { gitService } from '../../src/services/gitService';
+import { repositoryCoordinator } from '../../../src/services/repositoryCoordinator';
+import { gitService } from '../../../src/services/gitService';
 
 // Mock dependencies
-vi.mock('../../src/services/gitService', () => ({
+vi.mock('../../../src/services/gitService', () => ({
   gitService: {
     cloneRepository: vi.fn(),
     getCommits: vi.fn(),
@@ -12,17 +12,17 @@ vi.mock('../../src/services/gitService', () => ({
   },
 }));
 
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   __esModule: true,
   default: global.mockLogger,
   getLogger: global.getLogger,
 }));
 
-vi.mock('../../src/utils/lockManager', () => ({
+vi.mock('../../../src/utils/lockManager', () => ({
   withKeyLock: vi.fn((key: string, fn: () => Promise<any>) => fn()),
 }));
 
-vi.mock('../../src/config', () => ({
+vi.mock('../../../src/config', () => ({
   config: {
     coordination: {
       cacheEvictionIntervalMs: 60000,
@@ -32,7 +32,7 @@ vi.mock('../../src/config', () => ({
   },
 }));
 
-vi.mock('../../src/services/metrics', () => ({
+vi.mock('../../../src/services/metrics', () => ({
   recordStreamingStart: vi.fn(),
   getRepositorySizeCategory: vi.fn().mockReturnValue('medium'),
   updateCoordinationMetrics: vi.fn(),
@@ -811,7 +811,7 @@ describe('RepositoryCoordinator - Caching & Concurrency Tests', () => {
       mockGitService.getCommitCount.mockResolvedValue(100);
 
       // Mock config for short TTL
-      vi.doMock('../../src/config', () => ({
+      vi.doMock('../../../src/config', () => ({
         config: {
           repositoryCache: {
             maxAgeHours: 0.001, // Very short TTL

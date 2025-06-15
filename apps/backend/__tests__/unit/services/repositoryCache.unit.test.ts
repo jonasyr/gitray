@@ -36,28 +36,28 @@ const mockGetRepositorySizeCategory = vi.hoisted(() => vi.fn());
 // Mock all dependencies
 const mockHybridLRUCacheConstructor = vi.fn(() => mockHybridCache);
 
-vi.mock('../../src/utils/hybridLruCache', () => ({
+vi.mock('../../../src/utils/hybridLruCache', () => ({
   default: mockHybridLRUCacheConstructor,
 }));
 
-vi.mock('../../src/services/gitService', () => ({
+vi.mock('../../../src/services/gitService', () => ({
   gitService: mockGitService,
 }));
 
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   getLogger: vi.fn(() => mockLogger),
 }));
 
-vi.mock('../../src/services/repositoryCoordinator', () => ({
+vi.mock('../../../src/services/repositoryCoordinator', () => ({
   withSharedRepository: mockWithSharedRepository,
 }));
 
-vi.mock('../../src/utils/lockManager', () => ({
+vi.mock('../../../src/utils/lockManager', () => ({
   withKeyLock: mockWithKeyLock,
   withOrderedLocks: vi.fn((locks, fn) => fn()),
 }));
 
-vi.mock('../../src/services/metrics', () => ({
+vi.mock('../../../src/services/metrics', () => ({
   // Basic metrics
   cacheHits: mockCacheHits,
   cacheMisses: mockCacheMisses,
@@ -96,12 +96,12 @@ const mockDistributedCache = vi.hoisted(() => ({
   shutdown: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../../src/services/distributedCacheInvalidation', () => ({
+vi.mock('../../../src/services/distributedCacheInvalidation', () => ({
   getDistributedCacheInvalidation: vi.fn(() => mockDistributedCache),
   shutdownDistributedCacheInvalidation: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../../src/config', () => ({
+vi.mock('../../../src/config', () => ({
   config: {
     hybridCache: {
       maxEntries: 1000,
@@ -238,7 +238,7 @@ describe('RepositoryCache', () => {
     mockGetRepositorySizeCategory.mockReturnValue('medium');
 
     // Import the repositoryCache instance
-    const module = await import('../../src/services/repositoryCache');
+    const module = await import('../../../src/services/repositoryCache');
     repositoryCache = module.repositoryCache;
   });
 

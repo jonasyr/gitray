@@ -1,18 +1,18 @@
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import simpleGit from 'simple-git';
-import { gitService } from '../../src/services/gitService';
-import redis from '../../src/services/cache';
-import { config } from '../../src/config';
+import { gitService } from '../../../src/services/gitService';
+import redis from '../../../src/services/cache';
+import { config } from '../../../src/config';
 
 vi.mock('simple-git');
 vi.mock('ioredis');
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   __esModule: true,
   default: global.mockLogger,
   getLogger: global.getLogger,
 }));
 
-vi.mock('../../src/services/metrics', () => ({
+vi.mock('../../../src/services/metrics', () => ({
   recordStreamingStart: vi.fn(),
   recordStreamingCompletion: vi.fn(),
   recordStreamingBatch: vi.fn(),
@@ -23,7 +23,7 @@ vi.mock('../../src/services/metrics', () => ({
   getRepositoryType: vi.fn(() => 'public'),
 }));
 
-vi.mock('../../src/services/cache', () => ({
+vi.mock('../../../src/services/cache', () => ({
   __esModule: true,
   default: {
     get: vi.fn(),

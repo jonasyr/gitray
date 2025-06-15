@@ -1,8 +1,8 @@
 import { describe, test, expect, vi } from 'vitest';
 import { Server } from 'http';
 // We need to get the mocked versions of these for assertion
-// import redisCache from '../../src/services/cache';
-// import { runCleanupQueue } from '../../src/utils/cleanupScheduler';
+// import redisCache from '../../../src/services/cache';
+// import { runCleanupQueue } from '../../../src/utils/cleanupScheduler';
 
 vi.mock('http', () => ({
   Server: vi.fn(() => ({
@@ -12,7 +12,7 @@ vi.mock('http', () => ({
   })),
 }));
 
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   __esModule: true,
   default: global.mockLogger,
   getLogger: global.getLogger,
@@ -23,7 +23,7 @@ let mockRunCleanupQueue: any;
 let mockRedisQuit: any;
 let mockShutdownLockManager: any;
 
-vi.mock('../../src/services/cache', () => {
+vi.mock('../../../src/services/cache', () => {
   mockRedisQuit = vi.fn().mockResolvedValue(undefined);
   return {
     // Ensure the mock provides what the SUT expects, typically a default export or named exports
@@ -39,7 +39,7 @@ vi.mock('../../src/services/cache', () => {
     // quit: mockRedisQuit,
   };
 });
-vi.mock('../../src/utils/cleanupScheduler', () => {
+vi.mock('../../../src/utils/cleanupScheduler', () => {
   mockRunCleanupQueue = vi.fn().mockResolvedValue(undefined);
   return {
     // Ensure the mock provides what the SUT expects
@@ -47,7 +47,7 @@ vi.mock('../../src/utils/cleanupScheduler', () => {
     runCleanupQueue: mockRunCleanupQueue,
   };
 });
-vi.mock('../../src/utils/lockManager', () => {
+vi.mock('../../../src/utils/lockManager', () => {
   mockShutdownLockManager = vi.fn().mockResolvedValue(undefined);
   return {
     __esModule: true,
@@ -81,7 +81,7 @@ describe('Graceful Shutdown', () => {
     // The mocks for cache and cleanupScheduler are already set up by vi.mock above.
     // When gracefulShutdown is imported, it will use these hoisted mocks.
     const gracefulShutdownModule = await import(
-      '../../src/utils/gracefulShutdown'
+      '../../../src/utils/gracefulShutdown'
     );
     setupGracefulShutdown = gracefulShutdownModule.setupGracefulShutdown;
     isServerShuttingDown = gracefulShutdownModule.isServerShuttingDown;
