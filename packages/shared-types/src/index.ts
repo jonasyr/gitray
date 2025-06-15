@@ -162,3 +162,18 @@ export class RepositoryError extends GitrayError {
     this.name = 'RepositoryError';
   }
 }
+
+export class TransactionRollbackError extends GitrayError {
+  constructor(
+    message: string,
+    public transactionId?: string,
+    public failedOperations?: string[]
+  ) {
+    super(
+      message,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
+      'TRANSACTION_ROLLBACK_ERROR'
+    );
+    this.name = 'TransactionRollbackError';
+  }
+}

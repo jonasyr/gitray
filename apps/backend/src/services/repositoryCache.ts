@@ -40,6 +40,7 @@ import {
   Commit,
   CommitFilterOptions,
   CommitHeatmapData,
+  TransactionRollbackError,
 } from '@gitray/shared-types';
 
 /**
@@ -127,6 +128,27 @@ export interface CacheStats {
 }
 
 /**
+ * Enhanced rollback operation with verification capabilities.
+ * Provides comprehensive rollback with retry logic and verification.
+ */
+interface RollbackOperation {
+  /** Function to execute the rollback operation */
+  execute: () => Promise<void>;
+
+  /** Function to verify the rollback operation succeeded */
+  verify: () => Promise<boolean>;
+
+  /** Human-readable description of the operation for logging */
+  description: string;
+
+  /** Cache tier this operation affects */
+  cacheType: 'raw' | 'filtered' | 'aggregated';
+
+  /** Cache key being rolled back */
+  key: string;
+}
+
+/**
  * Atomic transaction context for cache operations.
  * Ensures data consistency across multiple cache tiers by enabling rollback on failures.
  *
@@ -149,8 +171,8 @@ interface CacheTransaction {
   /** Flag indicating if transaction has been committed or rolled back */
   completed: boolean;
 
-  /** Stack of functions to execute if rollback is required */
-  rollbackOperations: Array<() => Promise<void>>;
+  /** Enhanced rollback operations with verification and retry capabilities */
+  rollbackOperations: RollbackOperation[];
 }
 
 /**
@@ -341,13 +363,16 @@ class RepositoryCacheManager {
   }
 
   /**
-   * Rolls back a cache transaction, undoing all operations performed within it.
+   * Rolls back a cache transaction with comprehensive verification and retry logic.
    *
-   * This method executes rollback operations in reverse order to restore the cache
-   * to its pre-transaction state. Critical for maintaining data consistency when
-   * operations fail partway through a multi-tier cache update.
+   * This enhanced rollback method implements:
+   * - Retry logic with exponential backoff for transient failures
+   * - Verification of each rollback operation's success
+   * - Comprehensive error tracking and alerting
+   * - Manual intervention alerts for critical failures
    *
    * @param transaction - Transaction to roll back
+   * @throws {TransactionRollbackError} When rollback operations fail after retries
    */
   private async rollbackTransaction(
     transaction: CacheTransaction
@@ -358,34 +383,123 @@ class RepositoryCacheManager {
       });
       return;
     }
+
+    const failedRollbacks: string[] = [];
+    const maxAttempts = 3;
+
     try {
       // Execute rollback operations in reverse order to maintain consistency
       for (const rollbackOp of transaction.rollbackOperations.reverse()) {
-        try {
-          await rollbackOp();
-        } catch (error) {
-          logger.error('Failed to execute rollback operation', {
-            transactionId: transaction.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
+        let attempts = 0;
+        let operationSucceeded = false;
+
+        while (attempts < maxAttempts && !operationSucceeded) {
+          try {
+            // Execute the rollback operation
+            await rollbackOp.execute();
+
+            // Verify the rollback succeeded
+            const verified = await rollbackOp.verify();
+            if (verified) {
+              operationSucceeded = true;
+              logger.debug('Rollback operation succeeded', {
+                transactionId: transaction.id,
+                operation: rollbackOp.description,
+                attempts: attempts + 1,
+              });
+            } else {
+              throw new Error('Rollback verification failed');
+            }
+          } catch (error) {
+            attempts++;
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
+
+            if (attempts >= maxAttempts) {
+              // Max attempts reached - mark as failed
+              failedRollbacks.push(rollbackOp.description);
+              logger.error('Rollback operation failed after retries', {
+                transactionId: transaction.id,
+                operation: rollbackOp.description,
+                cacheType: rollbackOp.cacheType,
+                key: rollbackOp.key,
+                attempts: maxAttempts,
+                error: errorMessage,
+              });
+            } else {
+              // Retry with exponential backoff
+              const backoffMs = Math.pow(2, attempts) * 100;
+              logger.warn('Rollback operation failed, retrying', {
+                transactionId: transaction.id,
+                operation: rollbackOp.description,
+                attempt: attempts,
+                maxAttempts,
+                retryInMs: backoffMs,
+                error: errorMessage,
+              });
+
+              await new Promise((resolve) => setTimeout(resolve, backoffMs));
+            }
+          }
         }
       }
 
+      // Check if any rollback operations failed
+      if (failedRollbacks.length > 0) {
+        // Critical situation - trigger manual intervention alert
+        logger.error(
+          'CRITICAL: Transaction rollback incomplete - Manual intervention required',
+          {
+            transactionId: transaction.id,
+            failedRollbacks,
+            operationsCount: transaction.rollbackOperations.length,
+            failedCount: failedRollbacks.length,
+            requiresManualIntervention: true,
+            severity: 'CRITICAL',
+          }
+        );
+
+        // Update metrics for failed rollback
+        this.metrics.transactions.failed++;
+
+        // Throw specific error with detailed information
+        throw new TransactionRollbackError(
+          `Failed to rollback operations: ${failedRollbacks.join(', ')}`,
+          transaction.id,
+          failedRollbacks
+        );
+      }
+
+      // Successful rollback
       transaction.completed = true;
       this.activeTransactions.delete(transaction.id);
       this.metrics.transactions.rolledBack++;
 
-      logger.debug('Cache transaction rolled back', {
+      logger.info('Cache transaction successfully rolled back', {
         transactionId: transaction.id,
         rollbackOperationsCount: transaction.rollbackOperations.length,
+        successfulOperations:
+          transaction.rollbackOperations.length - failedRollbacks.length,
       });
     } catch (error) {
-      // Log rollback failure but don't increment failed counter here as it's handled in caller
-      logger.error('Failed to rollback transaction', {
+      // Handle any unexpected errors during rollback
+      if (error instanceof TransactionRollbackError) {
+        // Re-throw our specific error type
+        throw error;
+      }
+
+      // Unexpected error during rollback process
+      this.metrics.transactions.failed++;
+      logger.error('Unexpected error during transaction rollback', {
         transactionId: transaction.id,
         error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
       });
-      throw error;
+
+      throw new TransactionRollbackError(
+        `Unexpected error during transaction rollback: ${error instanceof Error ? error.message : String(error)}`,
+        transaction.id
+      );
     }
   }
 
@@ -394,7 +508,7 @@ class RepositoryCacheManager {
    *
    * This method ensures that cache updates can be undone if subsequent operations
    * in the same transaction fail. It tracks both the new value being set and the
-   * original value for potential restoration.
+   * original value for potential restoration, with verification capabilities.
    *
    * @param cache - Target cache instance to update
    * @param cacheType - Cache tier identifier for transaction logging
@@ -431,21 +545,122 @@ class RepositoryCacheManager {
       newValue: value,
     });
 
-    // Prepare rollback strategy based on whether key previously existed
+    // Prepare enhanced rollback operation with verification
     if (originalValue !== null) {
       // Restore original value if rollback is needed
-      transaction.rollbackOperations.push(async () => {
-        await cache.set(key, originalValue as T, 'EX', ttl);
-      });
+      const rollbackOp: RollbackOperation = {
+        execute: async () => {
+          await cache.set(key, originalValue as T, 'EX', ttl);
+        },
+        verify: async () => {
+          try {
+            const currentValue = await cache.get(key);
+            // Deep comparison for verification
+            return (
+              JSON.stringify(currentValue) === JSON.stringify(originalValue)
+            );
+          } catch {
+            return false;
+          }
+        },
+        description: `Restore ${cacheType} cache key '${key}' to original value`,
+        cacheType,
+        key,
+      };
+      transaction.rollbackOperations.push(rollbackOp);
     } else {
       // Delete the newly created key if rollback is needed
-      transaction.rollbackOperations.push(async () => {
-        await cache.del(key);
-      });
+      const rollbackOp: RollbackOperation = {
+        execute: async () => {
+          await cache.del(key);
+        },
+        verify: async () => {
+          try {
+            const value = await cache.get(key);
+            return value === null || value === undefined;
+          } catch {
+            // If get() throws, the key likely doesn't exist, which is what we want
+            return true;
+          }
+        },
+        description: `Delete newly created ${cacheType} cache key '${key}'`,
+        cacheType,
+        key,
+      };
+      transaction.rollbackOperations.push(rollbackOp);
     }
 
     // Track cache key for repository-based bulk invalidation
     this.trackCacheKey(key);
+  }
+
+  /**
+   * Performs a transactional cache delete operation with automatic rollback capability.
+   *
+   * This method ensures that cache deletions can be undone if subsequent operations
+   * in the same transaction fail. It captures the original value before deletion
+   * to enable restoration during rollback.
+   *
+   * @param cache - Target cache instance to update
+   * @param cacheType - Cache tier identifier for transaction logging
+   * @param key - Cache key to delete
+   * @param transaction - Active transaction context
+   */
+  private async transactionalDel<T>(
+    cache: HybridLRUCache<T>,
+    cacheType: 'raw' | 'filtered' | 'aggregated',
+    key: string,
+    transaction: CacheTransaction
+  ): Promise<void> {
+    // Capture existing value for potential rollback before deletion
+    let originalValue: T | null = null;
+    let originalTtl: number | null = null;
+
+    try {
+      originalValue = await cache.get(key);
+      // Note: HybridLRUCache doesn't expose TTL, so we use a default
+      // In a real implementation, you might want to extend the cache interface
+      originalTtl = 3600; // Default 1 hour TTL
+    } catch {
+      // Key doesn't exist - nothing to delete
+      return;
+    }
+
+    // Perform the actual cache deletion
+    await cache.del(key);
+
+    // Record operation in transaction log for audit trail
+    transaction.operations.push({
+      cache: cacheType,
+      operation: 'del',
+      key,
+      originalValue,
+      newValue: null,
+    });
+
+    // Prepare rollback operation to restore the deleted value
+    if (originalValue !== null) {
+      const rollbackOp: RollbackOperation = {
+        execute: async () => {
+          await cache.set(key, originalValue as T, 'EX', originalTtl || 3600);
+        },
+        verify: async () => {
+          try {
+            const currentValue = await cache.get(key);
+            // Deep comparison for verification
+            return (
+              JSON.stringify(currentValue) === JSON.stringify(originalValue)
+            );
+          } catch {
+            return false;
+          }
+        },
+        description: `Restore deleted ${cacheType} cache key '${key}' with original value`,
+        cacheType,
+        key,
+      };
+      transaction.rollbackOperations.push(rollbackOp);
+    }
   }
 
   /**
