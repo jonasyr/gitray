@@ -54,6 +54,7 @@ vi.mock('../../src/services/repositoryCoordinator', () => ({
 
 vi.mock('../../src/utils/lockManager', () => ({
   withKeyLock: mockWithKeyLock,
+  withOrderedLocks: vi.fn((locks, fn) => fn()),
 }));
 
 vi.mock('../../src/services/metrics', () => ({
