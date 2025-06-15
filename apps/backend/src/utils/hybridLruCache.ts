@@ -7,6 +7,7 @@ import {
   executeWithMemoryProtection,
   getMemoryStats,
 } from './memoryPressureManager';
+import { SerializationPool, SerializationResult } from './serializationWorker';
 
 const logger = getLogger();
 
@@ -42,9 +43,11 @@ export class HybridLRUCache<V> {
   private memoryUsage = 0;
   private disk = new Map<string, string>();
   private lockTimeoutMs: number;
+  private serializationPool: SerializationPool;
 
   constructor(private options: HybridLRUCacheOptions) {
     this.lockTimeoutMs = options.lockTimeoutMs || 120000;
+    this.serializationPool = new SerializationPool();
     this.initRedis(options.redisConfig);
     void this.initializeDiskCache();
   }
@@ -226,6 +229,10 @@ export class HybridLRUCache<V> {
     }
   }
 
+  private async toJSONAsync(value: V): Promise<SerializationResult> {
+    return await this.serializationPool.serialize(value);
+  }
+
   private toJSON(value: V): string {
     return JSON.stringify(value);
   }
@@ -234,12 +241,44 @@ export class HybridLRUCache<V> {
     return JSON.parse(data) as V;
   }
 
+  private async calcSizeAsync(value: V): Promise<number> {
+    const result = await this.toJSONAsync(value);
+    return result.size;
+  }
+
   private calcSize(value: V): number {
     return Buffer.byteLength(this.toJSON(value));
   }
 
   /**
-   * FIX: Proper LRU implementation using timestamps
+   * FIX: Proper LRU implementation using timestamps with async size calculation
+   */
+  private async addToMemoryAsync(key: string, value: V): Promise<void> {
+    const size = await this.calcSizeAsync(value);
+    if (size > this.options.memoryLimitBytes) {
+      logger.warn('Value too large for memory cache', {
+        key,
+        size,
+        limit: this.options.memoryLimitBytes,
+      });
+      return;
+    }
+
+    const timestamp = Date.now();
+
+    if (this.memory.has(key)) {
+      const old = this.memory.get(key)!;
+      this.memoryUsage -= old.size;
+      this.memory.delete(key);
+    }
+
+    this.memory.set(key, { value, size, timestamp });
+    this.memoryUsage += size;
+    this.trimMemory();
+  }
+
+  /**
+   * FIX: Proper LRU implementation using timestamps (sync fallback)
    */
   private addToMemory(key: string, value: V): void {
     const size = this.calcSize(value);
@@ -263,6 +302,53 @@ export class HybridLRUCache<V> {
     this.memory.set(key, { value, size, timestamp });
     this.memoryUsage += size;
     this.trimMemory();
+  }
+
+  /**
+   * CRITICAL: Memory pressure-aware cache addition with async size calculation
+   * Prevents cache operations during memory pressure
+   */
+  private async addToMemoryWithPressureCheckAsync(
+    key: string,
+    value: V
+  ): Promise<void> {
+    const memoryStats = getMemoryStats();
+
+    // Skip memory cache under high memory pressure
+    if (
+      memoryStats.pressure.level === 'critical' ||
+      memoryStats.pressure.level === 'emergency'
+    ) {
+      logger.debug('Skipping memory cache addition due to memory pressure', {
+        key,
+        pressureLevel: memoryStats.pressure.level,
+        systemUsage: `${Math.round(memoryStats.system.usagePercentage * 100)}%`,
+      });
+      return;
+    }
+
+    // For warning level, be more aggressive about size limits
+    const size = await this.calcSizeAsync(value);
+    const adjustedLimit =
+      memoryStats.pressure.level === 'warning'
+        ? this.options.memoryLimitBytes * 0.8 // Reduce limit by 20% under warning
+        : this.options.memoryLimitBytes;
+
+    if (size > adjustedLimit) {
+      logger.debug(
+        'Value too large for memory cache (adjusted for memory pressure)',
+        {
+          key,
+          size,
+          adjustedLimit,
+          pressureLevel: memoryStats.pressure.level,
+        }
+      );
+      return;
+    }
+
+    // Use the async method for memory pressure check
+    await this.addToMemoryAsync(key, value);
   }
 
   /**
@@ -348,16 +434,43 @@ export class HybridLRUCache<V> {
         );
         const tempFilePath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).substring(2)}`;
 
+        let tempStat: any;
+
         try {
+          // Use async serialization to avoid blocking the event loop
+          const serialized = await this.toJSONAsync(value);
+
           // Write to temporary file first (atomic operation)
-          await fs.writeFile(tempFilePath, this.toJSON(value), { mode: 0o600 });
+          await fs.writeFile(tempFilePath, serialized.json, { mode: 0o600 });
 
           // Verify the temp file was written correctly
-          const tempStat = await fs.stat(tempFilePath);
+          tempStat = await fs.stat(tempFilePath);
           if (tempStat.size === 0) {
             throw new Error('Temporary file written with zero size');
           }
+        } catch (err) {
+          // If async serialization fails, try sync as fallback
+          if (
+            err instanceof Error &&
+            err.message.includes('SerializationPool')
+          ) {
+            logger.debug(
+              'Async serialization failed for disk write, falling back to sync',
+              { key }
+            );
+            const syncJson = this.toJSON(value);
+            await fs.writeFile(tempFilePath, syncJson, { mode: 0o600 });
 
+            tempStat = await fs.stat(tempFilePath);
+            if (tempStat.size === 0) {
+              throw new Error('Temporary file written with zero size');
+            }
+          } else {
+            throw err; // Re-throw non-serialization errors
+          }
+        }
+
+        try {
           // Atomic rename (most filesystems guarantee this is atomic)
           await fs.rename(tempFilePath, filePath);
 
@@ -601,29 +714,54 @@ export class HybridLRUCache<V> {
     // Try Redis operation
     if (this.redis && this.redisHealthy) {
       try {
+        const serialized = await this.toJSONAsync(value);
         if (mode && duration !== undefined) {
-          await (this.redis as any).set(
-            key,
-            this.toJSON(value),
-            mode,
-            duration
-          );
+          await (this.redis as any).set(key, serialized.json, mode, duration);
         } else {
-          await this.redis!.set(key, this.toJSON(value));
+          await this.redis!.set(key, serialized.json);
         }
       } catch (err) {
-        this.redisHealthy = false;
-        logger.warn('HybridLRUCache Redis set failed', { err });
-        errors.push(err as Error);
+        // Check if it's a serialization error
+        if (err instanceof Error && err.message.includes('SerializationPool')) {
+          // If async serialization fails, try sync as fallback
+          logger.debug('Async serialization failed, falling back to sync', {
+            key,
+            error: err.message,
+          });
+          try {
+            const syncJson = this.toJSON(value);
+            if (mode && duration !== undefined) {
+              await (this.redis as any).set(key, syncJson, mode, duration);
+            } else {
+              await this.redis!.set(key, syncJson);
+            }
+          } catch (syncErr) {
+            this.redisHealthy = false;
+            logger.warn('HybridLRUCache Redis set failed', { err: syncErr });
+            errors.push(syncErr as Error);
+          }
+        } else {
+          // Redis operation failed
+          this.redisHealthy = false;
+          logger.warn('HybridLRUCache Redis set failed', { err });
+          errors.push(err as Error);
+        }
       }
     }
 
-    // Try memory operation (this should always succeed)
+    // Try memory operation (prefer async for better performance)
     try {
-      this.addToMemory(key, value);
+      await this.addToMemoryWithPressureCheckAsync(key, value);
       memorySuccess = true;
     } catch (err) {
-      errors.push(err as Error);
+      // Fallback to sync version if async fails
+      try {
+        this.addToMemoryWithPressureCheck(key, value);
+        memorySuccess = true;
+      } catch (syncErr) {
+        errors.push(err as Error);
+        errors.push(syncErr as Error);
+      }
     }
 
     // Try disk operation
@@ -750,6 +888,12 @@ export class HybridLRUCache<V> {
     memory: { entries: number; usageBytes: number; limitBytes: number };
     disk: { entries: number; limitEntries: number };
     redis: { healthy: boolean; connected: boolean };
+    serialization: {
+      poolSize: number;
+      activeWorkers: number;
+      queueLength: number;
+      isDestroyed: boolean;
+    };
   } {
     return {
       memory: {
@@ -765,6 +909,7 @@ export class HybridLRUCache<V> {
         healthy: this.redisHealthy,
         connected: !!this.redis,
       },
+      serialization: this.serializationPool.getStats(),
     };
   }
 
@@ -999,6 +1144,36 @@ export class HybridLRUCache<V> {
       );
     } catch (err) {
       logger.warn('Failed to validate disk index', { err });
+    }
+  }
+
+  /**
+   * Cleanup method to properly shutdown the cache
+   * Should be called when the cache is no longer needed
+   */
+  async destroy(): Promise<void> {
+    try {
+      // Shutdown the serialization pool
+      await this.serializationPool.destroy();
+
+      // Close Redis connection if it exists
+      if (this.redis) {
+        this.redis.disconnect();
+        this.redis = null;
+        this.redisHealthy = false;
+      }
+
+      // Clear memory cache
+      this.memory.clear();
+      this.memoryUsage = 0;
+
+      // Clear disk index (files remain on disk)
+      this.disk.clear();
+
+      logger.info('HybridLRUCache destroyed successfully');
+    } catch (err) {
+      logger.error('Error during HybridLRUCache destruction', { err });
+      throw err;
     }
   }
 }

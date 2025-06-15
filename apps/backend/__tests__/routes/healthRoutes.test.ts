@@ -95,6 +95,12 @@ describe('Health Routes', () => {
           healthy: true,
           connected: true,
         },
+        serialization: {
+          poolSize: 4,
+          activeWorkers: 4,
+          queueLength: 0,
+          isDestroyed: false,
+        },
       },
     });
 
