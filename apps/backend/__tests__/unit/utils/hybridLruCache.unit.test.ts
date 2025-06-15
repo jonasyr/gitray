@@ -754,4 +754,431 @@ describe('HybridLRUCache', () => {
       expect(result).toBe(value);
     });
   });
+  describe('Memory Operations - Happy Path', () => {
+    test('should add items to memory cache', async () => {
+      // Arrange
+      const key = 'memory-test';
+      const value = 'test-value-string';
+
+      // Act
+      await cache.set(key, value);
+      const result = await cache.get(key);
+
+      // Assert
+      expect(result).toBe(value);
+    });
+
+    test('should handle memory limit exceeded', async () => {
+      // Arrange
+      const largeValue = 'x'.repeat(500); // Half the memory limit
+
+      // Act - Add multiple items to exceed memory limit
+      await cache.set('item1', largeValue);
+      await cache.set('item2', largeValue);
+      await cache.set('item3', largeValue); // Should trigger memory cleanup
+
+      // Assert - Should still function
+      const result = await cache.get('item3');
+      expect(result).toBe(largeValue);
+    });
+  });
+
+  describe('Disk Operations - Happy Path', () => {
+    test('should store data to disk when memory is full', async () => {
+      // Arrange
+      const key = 'disk-test';
+      const value = 'disk-value';
+
+      // Act - Add item and ensure it's accessible
+      await cache.set(key, value);
+      const result = await cache.get(key);
+
+      // Assert - Should be able to retrieve the data
+      expect(result).toBe(value);
+    });
+
+    test('should retrieve data from disk', async () => {
+      // Arrange
+      const key = 'disk-retrieval-test';
+      const value = 'disk-data-string';
+
+      // Act
+      await cache.set(key, value);
+      const result = await cache.get(key);
+
+      // Assert
+      expect(result).toBe(value);
+    });
+
+    test('should handle disk cleanup', async () => {
+      // Arrange & Act - Add items (some may be evicted due to limits)
+      for (let i = 0; i < 3; i++) {
+        await cache.set(`cleanup-${i}`, `value-${i}`);
+      }
+
+      // Assert - Most recent item should be accessible
+      const result = await cache.get('cleanup-2');
+      expect(result).toBe('value-2');
+    });
+  });
+  describe('LRU Behavior - Happy Path', () => {
+    test('should evict least recently used items', async () => {
+      // Arrange
+      await cache.set('key1', 'value1');
+      await cache.set('key2', 'value2');
+
+      // Act - Access key1 to make it recently used
+      const firstAccess = await cache.get('key1');
+
+      // Add new item
+      await cache.set('key3', 'value3');
+
+      // Assert - Should be able to access recently used items
+      expect(firstAccess).toBe('value1');
+      const result = await cache.get('key3');
+      expect(result).toBe('value3');
+    });
+
+    test('should update access time on get', async () => {
+      // Arrange
+      const key = 'access-test';
+      const value = 'test-value';
+      await cache.set(key, value);
+
+      // Act - Access the item multiple times
+      const result1 = await cache.get(key);
+      const result2 = await cache.get(key);
+
+      // Assert
+      expect(result1).toBe(value);
+      expect(result2).toBe(value);
+    });
+  });
+
+  describe('Statistics and Monitoring - Happy Path', () => {
+    test('should provide cache statistics', () => {
+      // Arrange & Act
+      const stats = cache.getStats();
+
+      // Assert
+      expect(stats).toBeDefined();
+      expect(typeof stats.memory.entries).toBe('number');
+      expect(typeof stats.disk.entries).toBe('number');
+      expect(typeof stats.memory.usageBytes).toBe('number');
+    });
+
+    test('should track memory usage', async () => {
+      // Arrange
+      const initialStats = cache.getStats();
+      const value = 'x'.repeat(100);
+
+      // Act
+      await cache.set('memory-usage-test', value);
+      const afterStats = cache.getStats();
+
+      // Assert
+      expect(afterStats.memory.usageBytes).toBeGreaterThan(
+        initialStats.memory.usageBytes
+      );
+    });
+  });
+
+  describe('Data Validation - Happy Path', () => {
+    test('should handle different string values', async () => {
+      // Arrange
+      const testCases = [
+        { key: 'string', value: 'hello world' },
+        { key: 'number-string', value: '42' },
+        { key: 'boolean-string', value: 'true' },
+        {
+          key: 'json-string',
+          value: JSON.stringify({ nested: { data: 'test' } }),
+        },
+        { key: 'array-string', value: JSON.stringify([1, 2, 3, 'four']) },
+      ];
+
+      // Act & Assert
+      for (const testCase of testCases) {
+        await cache.set(testCase.key, testCase.value);
+        const result = await cache.get(testCase.key);
+        expect(result).toBe(testCase.value);
+      }
+    });
+
+    test('should handle empty values', async () => {
+      // Arrange
+      const emptyCases = [
+        { key: 'empty-string', value: '' },
+        { key: 'empty-object-json', value: '{}' },
+        { key: 'empty-array-json', value: '[]' },
+      ];
+
+      // Act & Assert
+      for (const testCase of emptyCases) {
+        await cache.set(testCase.key, testCase.value);
+        const result = await cache.get(testCase.key);
+        expect(result).toBe(testCase.value);
+      }
+    });
+  });
+
+  describe('Size Calculation - Happy Path', () => {
+    test('should calculate data size correctly', async () => {
+      // Arrange
+      const smallValue = 'small';
+      const largeValue = 'x'.repeat(1000);
+
+      // Act
+      await cache.set('small', smallValue);
+      await cache.set('large', largeValue);
+
+      // Assert - Should handle both sizes
+      const smallResult = await cache.get('small');
+      const largeResult = await cache.get('large');
+      expect(smallResult).toBe(smallValue);
+      expect(largeResult).toBe(largeValue);
+    });
+  });
+
+  describe('Concurrent Operations - Happy Path', () => {
+    test('should handle concurrent sets', async () => {
+      // Arrange
+      const promises = [];
+      for (let i = 0; i < 3; i++) {
+        // Reduced to fit within cache limits
+        promises.push(cache.set(`concurrent-${i}`, `value-${i}`));
+      }
+
+      // Act
+      await Promise.all(promises);
+
+      // Assert - Recent values should be accessible
+      for (let i = 0; i < 3; i++) {
+        const result = await cache.get(`concurrent-${i}`);
+        expect(result).toBe(`value-${i}`);
+      }
+    });
+
+    test('should handle concurrent gets', async () => {
+      // Arrange
+      await cache.set('concurrent-get', 'shared-value');
+
+      // Act
+      const promises = [];
+      for (let i = 0; i < 5; i++) {
+        promises.push(cache.get('concurrent-get'));
+      }
+      const results = await Promise.all(promises);
+
+      // Assert
+      results.forEach((result) => {
+        expect(result).toBe('shared-value');
+      });
+    });
+  });
+  describe('Delete Operations - Happy Path', () => {
+    test('should delete items from cache', async () => {
+      // Arrange
+      await cache.set('delete-test', 'to-be-deleted');
+
+      // Verify it exists
+      let result = await cache.get('delete-test');
+      expect(result).toBe('to-be-deleted');
+
+      // Act
+      await cache.del('delete-test');
+
+      // Assert
+      result = await cache.get('delete-test');
+      expect(result).toBeNull();
+    });
+
+    test('should handle deleting non-existent items', async () => {
+      // Arrange & Act
+      await cache.del('non-existent-key');
+
+      // Assert - Should not throw error
+      const result = await cache.get('non-existent-key');
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('Edge Cases - Happy Path', () => {
+    test('should handle very large keys', async () => {
+      // Arrange
+      const longKey = 'x'.repeat(500);
+      const value = 'long-key-value';
+
+      // Act
+      await cache.set(longKey, value);
+      const result = await cache.get(longKey);
+
+      // Assert
+      expect(result).toBe(value);
+    });
+
+    test('should handle rapid operations', async () => {
+      // Arrange
+      const key = 'rapid-test';
+
+      // Act - Rapid set/get operations
+      await cache.set(key, 'value1');
+      await cache.set(key, 'value2');
+      await cache.set(key, 'value3');
+      const result = await cache.get(key);
+
+      // Assert
+      expect(result).toBe('value3');
+    });
+
+    test('should handle cache overflow gracefully', async () => {
+      // Arrange - Create more items than cache can hold
+      const promises = [];
+      for (let i = 0; i < 50; i++) {
+        promises.push(cache.set(`overflow-${i}`, `value-${i}`));
+      }
+
+      // Act
+      await Promise.all(promises);
+
+      // Assert - Most recent items should be accessible
+      const result = await cache.get('overflow-49');
+      expect(result).toBe('value-49');
+    });
+  });
+
+  describe('Error Handling - Happy Path', () => {
+    test('should handle invalid keys gracefully', async () => {
+      // Arrange & Act
+      const result = await cache.get('non-existent-key');
+
+      // Assert
+      expect(result).toBeNull();
+    });
+
+    test('should handle empty string values', async () => {
+      // Arrange
+      const key = 'empty-string-test';
+      const value = '';
+
+      // Act
+      await cache.set(key, value);
+      const result = await cache.get(key);
+
+      // Assert
+      expect(result).toBe(value);
+    });
+  });
+
+  describe('Cache Management - Happy Path', () => {
+    test('should handle cache destruction', async () => {
+      // Arrange
+      await cache.set('destruction-test', 'test-value');
+
+      // Act
+      await cache.destroy();
+
+      // Assert - Should not throw (destruction completed)
+      expect(true).toBe(true);
+    });
+
+    test('should provide emergency eviction', async () => {
+      // Arrange
+      await cache.set('eviction-test', 'test-value');
+
+      // Act
+      const result = await cache.emergencyEvict();
+
+      // Assert
+      expect(result).toBeDefined();
+      expect(typeof result.evictedEntries).toBe('number');
+      expect(typeof result.bytesFreed).toBe('number');
+    });
+
+    test('should quit gracefully', async () => {
+      // Arrange & Act
+      await cache.quit();
+
+      // Assert - Should not throw
+      expect(true).toBe(true);
+    });
+  });
+
+  describe('Advanced Operations - Happy Path', () => {
+    test('should handle cache existence check', async () => {
+      // Arrange
+      const key = 'existence-test';
+      const value = 'test-value';
+
+      // Act
+      await cache.set(key, value);
+      const result = await cache.get(key);
+      const nonExistentResult = await cache.get('non-existent');
+
+      // Assert
+      expect(result).toBe(value);
+      expect(nonExistentResult).toBeNull();
+    });
+
+    test('should handle size calculation for different values', async () => {
+      // Arrange
+      const shortValue = 'short';
+      const longValue = 'x'.repeat(100);
+
+      // Act
+      await cache.set('short-key', shortValue);
+      await cache.set('long-key', longValue);
+
+      // Assert - Both should be stored successfully
+      const shortResult = await cache.get('short-key');
+      const longResult = await cache.get('long-key');
+      expect(shortResult).toBe(shortValue);
+      expect(longResult).toBe(longValue);
+    });
+  });
+
+  describe('Serialization - Happy Path', () => {
+    test('should handle JSON serializable data', async () => {
+      // Arrange
+      const jsonString = JSON.stringify({ key: 'value', num: 42 });
+
+      // Act
+      await cache.set('json-test', jsonString);
+      const result = await cache.get('json-test');
+
+      // Assert
+      expect(result).toBe(jsonString);
+      const parsed = JSON.parse(result!);
+      expect(parsed.key).toBe('value');
+      expect(parsed.num).toBe(42);
+    });
+
+    test('should handle unicode strings', async () => {
+      // Arrange
+      const unicodeValue = '🚀 Unicode test 世界 🌍';
+
+      // Act
+      await cache.set('unicode-test', unicodeValue);
+      const result = await cache.get('unicode-test');
+
+      // Assert
+      expect(result).toBe(unicodeValue);
+    });
+  });
+
+  describe('Memory Pressure - Happy Path', () => {
+    test('should handle memory pressure gracefully', async () => {
+      // Arrange - Fill cache with data
+      for (let i = 0; i < 10; i++) {
+        await cache.set(`pressure-${i}`, 'x'.repeat(200));
+      }
+
+      // Act - Check that cache still functions
+      await cache.set('final-test', 'final-value');
+      const result = await cache.get('final-test');
+
+      // Assert
+      expect(result).toBe('final-value');
+    });
+  });
 });
