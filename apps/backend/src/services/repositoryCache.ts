@@ -378,179 +378,187 @@ class RepositoryCacheManager {
     repoUrl: string,
     options?: CommitCacheOptions
   ): Promise<Commit[]> {
-    return withKeyLock(`cache-operation:${repoUrl}`, async () => {
-      const startTime = Date.now();
+    // Use ordered locks to prevent deadlock between cache-operation and repo-access
+    return withOrderedLocks(
+      [`cache-operation:${repoUrl}`, `repo-access:${repoUrl}`],
+      async () => {
+        const startTime = Date.now();
 
-      // For paginated requests or specific filters, try filtered cache first
-      if (this.hasSpecificFilters(options)) {
-        // Use ordered locks to prevent deadlock with nested cache operations
-        return withOrderedLocks(
-          [`cache-operation:${repoUrl}`, `cache-filtered:${repoUrl}`],
-          () => this.getOrParseFilteredCommitsUnlocked(repoUrl, options)
-        );
-      }
-
-      // Level 1: Try raw commits cache
-      const rawKey = this.generateRawCommitsKey(repoUrl);
-      let commits: Commit[] | null = null;
-
-      try {
-        commits = await this.rawCommitsCache.get(rawKey);
-      } catch (error) {
-        // Record detailed error for enhanced metrics
-        recordDetailedError(
-          'cache',
-          error instanceof Error ? error : new Error(String(error)),
-          {
-            userImpact: 'degraded',
-            recoveryAction: 'fallback',
-            severity: 'warning',
-          }
-        );
-
-        logger.error('Cache operation failed', {
-          operation: 'get',
-          key: rawKey,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        commits = null;
-      }
-
-      if (commits) {
-        this.metrics.operations.rawHits++;
-        this.recordHitTime(startTime);
-        cacheHits.inc({ operation: 'raw_commits' });
-        recordEnhancedCacheOperation(
-          'raw_commits',
-          true,
-          undefined,
-          repoUrl,
-          commits.length
-        );
-
-        // Record data freshness
-        const cacheAge = Date.now() - startTime;
-        recordDataFreshness('commits', cacheAge);
-
-        logger.debug('Raw commits cache hit', {
-          repoUrl,
-          commitsCount: commits.length,
-          cacheKey: rawKey,
-        });
-
-        return commits;
-      }
-
-      // Cache miss - need to fetch from repository with transaction
-      this.metrics.operations.rawMisses++;
-      this.recordMissTime(startTime);
-      cacheMisses.inc({ operation: 'raw_commits' });
-      recordEnhancedCacheOperation('raw_commits', false, undefined, repoUrl);
-
-      logger.info('Raw commits cache miss, fetching from repository', {
-        repoUrl,
-        cacheKey: rawKey,
-      });
-
-      const transaction = this.createTransaction(repoUrl);
-
-      try {
-        // Use shared repository to prevent duplicate clones
-        commits = await withSharedRepository(
-          repoUrl,
-          async (handle: RepositoryHandle) => {
-            logger.info('Fetching raw commits via shared repository', {
-              repoUrl,
-              commitCount: handle.commitCount,
-              sizeCategory: handle.sizeCategory,
-              isShared: handle.isShared,
-            });
-
-            // Prevent duplicate clone tracking
-            if (handle.isShared && handle.refCount > 1) {
-              this.metrics.efficiency.duplicateClonesPrevented++;
-              logger.debug('Duplicate clone prevented', {
-                repoUrl,
-                refCount: handle.refCount,
-                totalPrevented:
-                  this.metrics.efficiency.duplicateClonesPrevented,
-              });
-            }
-
-            return gitService.getCommits(handle.localPath);
-          }
-        );
-
-        // Ensure commits is never null
-        if (!commits) {
-          commits = [];
-          logger.warn(
-            'gitService.getCommits returned null, using empty array',
-            {
-              repoUrl,
-            }
+        // For paginated requests or specific filters, try filtered cache first
+        if (this.hasSpecificFilters(options)) {
+          // Need to include cache-filtered in the ordered locks as well
+          return withOrderedLocks(
+            [
+              `cache-operation:${repoUrl}`,
+              `cache-filtered:${repoUrl}`,
+              `repo-access:${repoUrl}`,
+            ],
+            () => this.getOrParseFilteredCommitsUnlocked(repoUrl, options)
           );
         }
 
-        // FIX: Transactional cache write
-        const ttl = config.cacheStrategy.cacheKeys.rawCommitsTTL;
-        await this.transactionalSet(
-          this.rawCommitsCache,
-          'raw',
-          rawKey,
-          commits,
-          ttl,
-          transaction
-        );
+        // Level 1: Try raw commits cache
+        const rawKey = this.generateRawCommitsKey(repoUrl);
+        let commits: Commit[] | null = null;
 
-        // Commit the transaction
-        await this.commitTransaction(transaction);
+        try {
+          commits = await this.rawCommitsCache.get(rawKey);
+        } catch (error) {
+          // Record detailed error for enhanced metrics
+          recordDetailedError(
+            'cache',
+            error instanceof Error ? error : new Error(String(error)),
+            {
+              userImpact: 'degraded',
+              recoveryAction: 'fallback',
+              severity: 'warning',
+            }
+          );
 
-        logger.info('Raw commits cached with transaction', {
+          logger.error('Cache operation failed', {
+            operation: 'get',
+            key: rawKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          commits = null;
+        }
+
+        if (commits) {
+          this.metrics.operations.rawHits++;
+          this.recordHitTime(startTime);
+          cacheHits.inc({ operation: 'raw_commits' });
+          recordEnhancedCacheOperation(
+            'raw_commits',
+            true,
+            undefined,
+            repoUrl,
+            commits.length
+          );
+
+          // Record data freshness
+          const cacheAge = Date.now() - startTime;
+          recordDataFreshness('commits', cacheAge);
+
+          logger.debug('Raw commits cache hit', {
+            repoUrl,
+            commitsCount: commits.length,
+            cacheKey: rawKey,
+          });
+
+          return commits;
+        }
+
+        // Cache miss - need to fetch from repository with transaction
+        this.metrics.operations.rawMisses++;
+        this.recordMissTime(startTime);
+        cacheMisses.inc({ operation: 'raw_commits' });
+        recordEnhancedCacheOperation('raw_commits', false, undefined, repoUrl);
+
+        logger.info('Raw commits cache miss, fetching from repository', {
           repoUrl,
-          commitsCount: commits.length,
-          ttl,
-          sizeCategory: getRepositorySizeCategory(commits.length),
-          transactionId: transaction.id,
+          cacheKey: rawKey,
         });
 
-        // Update service health score on successful cache operation
-        updateServiceHealthScore('cache', {
-          cacheHitRate: 1.0,
-          errorRate: 0.0,
-        });
+        const transaction = this.createTransaction(repoUrl);
 
-        return commits;
-      } catch (error) {
-        // Increment failure counter
-        this.metrics.transactions.failed++;
+        try {
+          // Use shared repository to prevent duplicate clones (locks already coordinated)
+          commits = await withSharedRepository(
+            repoUrl,
+            async (handle: RepositoryHandle) => {
+              logger.info('Fetching raw commits via shared repository', {
+                repoUrl,
+                commitCount: handle.commitCount,
+                sizeCategory: handle.sizeCategory,
+                isShared: handle.isShared,
+              });
 
-        // Record detailed error for enhanced metrics
-        recordDetailedError(
-          'cache',
-          error instanceof Error ? error : new Error(String(error)),
-          {
-            userImpact: 'degraded',
-            recoveryAction: 'retry',
-            severity: 'warning',
+              // Prevent duplicate clone tracking
+              if (handle.isShared && handle.refCount > 1) {
+                this.metrics.efficiency.duplicateClonesPrevented++;
+                logger.debug('Duplicate clone prevented', {
+                  repoUrl,
+                  refCount: handle.refCount,
+                  totalPrevented:
+                    this.metrics.efficiency.duplicateClonesPrevented,
+                });
+              }
+
+              return gitService.getCommits(handle.localPath);
+            }
+          );
+
+          // Ensure commits is never null
+          if (!commits) {
+            commits = [];
+            logger.warn(
+              'gitService.getCommits returned null, using empty array',
+              {
+                repoUrl,
+              }
+            );
           }
-        );
 
-        // Update service health score on error
-        updateServiceHealthScore('cache', { errorRate: 1.0 });
+          // FIX: Transactional cache write
+          const ttl = config.cacheStrategy.cacheKeys.rawCommitsTTL;
+          await this.transactionalSet(
+            this.rawCommitsCache,
+            'raw',
+            rawKey,
+            commits,
+            ttl,
+            transaction
+          );
 
-        // Rollback transaction on any error
-        await this.rollbackTransaction(transaction);
+          // Commit the transaction
+          await this.commitTransaction(transaction);
 
-        logger.error('Failed to cache raw commits, transaction rolled back', {
-          repoUrl,
-          transactionId: transaction.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
+          logger.info('Raw commits cached with transaction', {
+            repoUrl,
+            commitsCount: commits.length,
+            ttl,
+            sizeCategory: getRepositorySizeCategory(commits.length),
+            transactionId: transaction.id,
+          });
 
-        throw error;
+          // Update service health score on successful cache operation
+          updateServiceHealthScore('cache', {
+            cacheHitRate: 1.0,
+            errorRate: 0.0,
+          });
+
+          return commits;
+        } catch (error) {
+          // Increment failure counter
+          this.metrics.transactions.failed++;
+
+          // Record detailed error for enhanced metrics
+          recordDetailedError(
+            'cache',
+            error instanceof Error ? error : new Error(String(error)),
+            {
+              userImpact: 'degraded',
+              recoveryAction: 'retry',
+              severity: 'warning',
+            }
+          );
+
+          // Update service health score on error
+          updateServiceHealthScore('cache', { errorRate: 1.0 });
+
+          // Rollback transaction on any error
+          await this.rollbackTransaction(transaction);
+
+          logger.error('Failed to cache raw commits, transaction rolled back', {
+            repoUrl,
+            transactionId: transaction.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+
+          throw error;
+        }
       }
-    });
+    );
   }
 
   /**
