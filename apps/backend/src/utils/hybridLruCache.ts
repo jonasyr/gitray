@@ -8,6 +8,29 @@ import {
   getMemoryStats,
 } from './memoryPressureManager';
 import { SerializationPool, SerializationResult } from './serializationWorker';
+import {
+  // Cache-specific metrics
+  cacheHybridMemoryUsage,
+  cacheHybridMemoryEntries,
+  cacheHybridDiskEntries,
+  cacheHitsEnhanced,
+  cacheMissesEnhanced,
+  // Performance metrics
+  diskOperations,
+  memoryUtilization,
+  // Error handling metrics
+  recordDetailedError,
+  updateServiceHealthScore,
+  // Memory pressure metrics
+  recordMemoryPressureEvent,
+  recordEmergencyEviction,
+  // Cache transaction metrics
+  recordCacheTransaction,
+  recordTransactionRollback,
+  // Data freshness and cache effectiveness
+  recordDataFreshness,
+  evictionImpact,
+} from '../services/metrics';
 
 const logger = getLogger();
 
@@ -443,6 +466,14 @@ export class HybridLRUCache<V> {
           // Write to temporary file first (atomic operation)
           await fs.writeFile(tempFilePath, serialized.json, { mode: 0o600 });
 
+          // Record disk write operation
+          diskOperations.inc({
+            operation: 'write',
+            device: 'disk',
+            latency_bucket: 'normal',
+            io_pattern: 'sequential',
+          });
+
           // Verify the temp file was written correctly
           tempStat = await fs.stat(tempFilePath);
           if (tempStat.size === 0) {
@@ -529,6 +560,16 @@ export class HybridLRUCache<V> {
         await fs.access(oldPath, fs.constants.F_OK);
         await fs.unlink(oldPath);
 
+        // Record eviction impact (how long until this data might be requested again)
+        evictionImpact.observe(
+          {
+            cache_tier: 'disk',
+            data_type: 'cached_data',
+            eviction_reason: 'capacity_limit',
+          },
+          Date.now() / 1000 // Current timestamp - this would ideally track time until re-access
+        );
+
         logger.debug('Evicted from disk cache', {
           key: oldKey,
           path: oldPath,
@@ -581,6 +622,19 @@ export class HybridLRUCache<V> {
               const value = this.fromJSON(data);
               // Update memory cache with accessed value (with memory pressure check)
               this.addToMemoryWithPressureCheck(key, value);
+
+              // Record cache hit metrics
+              cacheHitsEnhanced.inc({
+                operation: 'get',
+                tier: 'redis',
+                repo_type: 'unknown',
+                user_type: 'unknown',
+                repo_size: 'unknown',
+              });
+
+              // Record data freshness (Redis data is typically fresh)
+              recordDataFreshness('cached_data', 0, 'redis', 'unknown');
+
               return value;
             }
           } catch (err) {
@@ -597,6 +651,25 @@ export class HybridLRUCache<V> {
           // Move to end for Map iteration order (backup LRU mechanism)
           this.memory.delete(key);
           this.memory.set(key, mem);
+
+          // Record cache hit metrics
+          cacheHitsEnhanced.inc({
+            operation: 'get',
+            tier: 'memory',
+            repo_type: 'unknown',
+            user_type: 'unknown',
+            repo_size: 'unknown',
+          });
+
+          // Record data freshness (calculate age from timestamp)
+          const ageSeconds = (Date.now() - mem.timestamp) / 1000;
+          recordDataFreshness(
+            'cached_data',
+            ageSeconds,
+            'hybrid_memory',
+            'unknown'
+          );
+
           return mem.value;
         }
 
@@ -652,6 +725,16 @@ export class HybridLRUCache<V> {
                   logger.debug('Successfully retrieved from disk cache', {
                     key,
                   });
+
+                  // Record cache hit metrics
+                  cacheHitsEnhanced.inc({
+                    operation: 'get',
+                    tier: 'disk',
+                    repo_type: 'unknown',
+                    user_type: 'unknown',
+                    repo_size: 'unknown',
+                  });
+
                   return value;
                 } catch (readErr) {
                   // File might have been deleted, corrupted, or is inaccessible
@@ -690,6 +773,15 @@ export class HybridLRUCache<V> {
           }
         }
 
+        // Record cache miss - no value found in any tier
+        cacheMissesEnhanced.inc({
+          operation: 'get',
+          tier: 'all',
+          repo_type: 'unknown',
+          user_type: 'unknown',
+          repo_size: 'unknown',
+        });
+
         return null;
       },
       {
@@ -708,6 +800,9 @@ export class HybridLRUCache<V> {
     mode?: 'EX' | 'PX',
     duration?: number
   ): Promise<void> {
+    // Record cache transaction start
+    recordCacheTransaction('started', 'all', 1);
+
     const errors: Error[] = [];
     let memorySuccess = false;
 
@@ -745,6 +840,13 @@ export class HybridLRUCache<V> {
           this.redisHealthy = false;
           logger.warn('HybridLRUCache Redis set failed', { err });
           errors.push(err as Error);
+
+          // Record detailed error
+          recordDetailedError('cache', err as Error, {
+            userImpact: 'degraded',
+            recoveryAction: 'fallback',
+            severity: 'warning',
+          });
         }
       }
     }
@@ -773,6 +875,10 @@ export class HybridLRUCache<V> {
 
     // Only throw if all operations failed (including memory)
     if (!memorySuccess && errors.length > 0) {
+      // Record failed transaction and rollback
+      recordCacheTransaction('failed', 'all', 1);
+      recordTransactionRollback('failed', 'raw', 'set', 0);
+
       throw new Error(
         `All cache operations failed: ${errors.map((e) => e.message).join(', ')}`
       );
@@ -784,6 +890,19 @@ export class HybridLRUCache<V> {
         key,
         failedTiers: errors.length,
         errors: errors.map((e) => e.message),
+      });
+
+      // Record partial failure
+      recordCacheTransaction('committed', 'raw', 1);
+    } else {
+      // Record successful transaction
+      recordCacheTransaction('committed', 'all', 1);
+
+      // Update service health score for successful cache operation
+      updateServiceHealthScore('cache', {
+        errorRate: 0,
+        responseTime: 0.1, // Assume fast local cache operation
+        cacheHitRate: 1.0, // Successful set operation
       });
     }
   }
@@ -895,7 +1014,7 @@ export class HybridLRUCache<V> {
       isDestroyed: boolean;
     };
   } {
-    return {
+    const stats = {
       memory: {
         entries: this.memory.size,
         usageBytes: this.memoryUsage,
@@ -911,6 +1030,27 @@ export class HybridLRUCache<V> {
       },
       serialization: this.serializationPool.getStats(),
     };
+
+    // Update Prometheus metrics
+    try {
+      cacheHybridMemoryUsage.set(stats.memory.usageBytes);
+      cacheHybridMemoryEntries.set(stats.memory.entries);
+      cacheHybridDiskEntries.set(stats.disk.entries);
+
+      // Update memory utilization metrics
+      memoryUtilization.set(
+        {
+          component: 'cache',
+          allocation_type: 'hybrid_memory',
+          process_id: process.pid.toString(),
+        },
+        stats.memory.usageBytes
+      );
+    } catch (err) {
+      logger.warn('Failed to update cache metrics', { err });
+    }
+
+    return stats;
   }
 
   /**
@@ -1035,6 +1175,10 @@ export class HybridLRUCache<V> {
         result.tiers.disk.evicted +
         result.tiers.redis.evicted;
       result.bytesFreed = result.tiers.memory.bytesFreed;
+
+      // Record emergency eviction metrics
+      recordEmergencyEviction();
+      recordMemoryPressureEvent('emergency');
 
       logger.warn('HybridLRUCache emergency eviction completed', {
         totalEvicted: result.evictedEntries,
