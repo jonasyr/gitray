@@ -852,7 +852,18 @@ class RepositoryCacheManager {
   }
 
   /**
-   * FIX: Get or generate aggregated data with transactional consistency
+   * Retrieves or generates aggregated visualization data using the tertiary cache tier.
+   *
+   * This method handles the most computationally expensive operations by processing
+   * commit data into visualization-ready formats (heatmaps, statistics, charts).
+   *
+   * The aggregated cache has the smallest memory allocation (15%) since these results
+   * are highly specific and have lower reuse rates compared to raw or filtered data.
+   * However, caching prevents expensive recomputation of complex aggregations.
+   *
+   * @param repoUrl - Git repository URL
+   * @param filterOptions - Optional filters for data aggregation scope
+   * @returns Promise resolving to processed visualization data
    */
   async getOrGenerateAggregatedData(
     repoUrl: string,
@@ -861,7 +872,7 @@ class RepositoryCacheManager {
     return withKeyLock(`cache-aggregated:${repoUrl}`, async () => {
       const startTime = Date.now();
 
-      // Level 3: Try aggregated data cache
+      // Attempt retrieval from aggregated data cache (Tier 3)
       const aggregatedKey = this.generateAggregatedDataKey(
         repoUrl,
         filterOptions
@@ -869,6 +880,7 @@ class RepositoryCacheManager {
       let aggregatedData = await this.aggregatedDataCache.get(aggregatedKey);
 
       if (aggregatedData) {
+        // Cache hit: Return pre-computed visualization data
         this.metrics.operations.aggregatedHits++;
         this.recordHitTime(startTime);
         cacheHits.inc({ operation: 'aggregated_data' });
@@ -879,7 +891,7 @@ class RepositoryCacheManager {
           repoUrl
         );
 
-        // Record data freshness
+        // Track data freshness for aggregated cache monitoring
         const cacheAge = Date.now() - startTime;
         recordDataFreshness('aggregated_data', cacheAge);
 
@@ -892,7 +904,7 @@ class RepositoryCacheManager {
         return aggregatedData;
       }
 
-      // Cache miss - get commits and generate aggregation with transaction
+      // Cache miss: Generate aggregated data from filtered commits
       this.metrics.operations.aggregatedMisses++;
       this.recordMissTime(startTime);
       cacheMisses.inc({ operation: 'aggregated_data' });
@@ -912,7 +924,7 @@ class RepositoryCacheManager {
       const transaction = this.createTransaction(repoUrl);
 
       try {
-        // Convert filter options to commit cache options
+        // Convert filter options to commit cache options for consistency
         const commitOptions: CommitCacheOptions = {
           author: filterOptions?.author,
           authors: filterOptions?.authors,
@@ -920,32 +932,35 @@ class RepositoryCacheManager {
           toDate: filterOptions?.toDate,
         };
 
-        // Prevent deadlock: Use ordered locks to safely call getOrParseFilteredCommits from within cache-aggregated lock
+        /*
+         * Use ordered locking to prevent deadlocks when accessing filtered cache
+         * from within the aggregated cache operation context.
+         */
         const commits = await withOrderedLocks(
           [`cache-aggregated:${repoUrl}`, `cache-filtered:${repoUrl}`],
           () => this.getOrParseFilteredCommitsUnlocked(repoUrl, commitOptions)
         );
 
-        // Ensure commits is never null before passing to aggregateCommitsByTime
+        // Defensive programming: Handle null commits gracefully
         if (!commits) {
           logger.warn(
             'getOrParseFilteredCommits returned null, using empty array',
             { repoUrl }
           );
-          // Generate aggregated data for empty commits
+          // Generate empty aggregated data structure
           aggregatedData = await gitService.aggregateCommitsByTime(
             [],
             filterOptions
           );
         } else {
-          // Generate aggregated data
+          // Generate visualization data from filtered commits
           aggregatedData = await gitService.aggregateCommitsByTime(
             commits,
             filterOptions
           );
         }
 
-        // FIX: Transactional cache write for aggregated data
+        // Cache the computationally expensive aggregated results
         const ttl = config.cacheStrategy.cacheKeys.aggregatedDataTTL;
         await this.transactionalSet(
           this.aggregatedDataCache,
@@ -956,7 +971,7 @@ class RepositoryCacheManager {
           transaction
         );
 
-        // Commit the transaction
+        // Finalize the transaction
         await this.commitTransaction(transaction);
 
         logger.debug('Aggregated data cached with transaction', {
@@ -968,7 +983,7 @@ class RepositoryCacheManager {
           transactionId: transaction.id,
         });
 
-        // Update service health score on successful cache operation
+        // Update system health metrics
         updateServiceHealthScore('cache', {
           cacheHitRate: 1.0,
           errorRate: 0.0,
@@ -976,10 +991,10 @@ class RepositoryCacheManager {
 
         return aggregatedData;
       } catch (error) {
-        // Increment failure counter
+        // Track aggregation failure for system monitoring
         this.metrics.transactions.failed++;
 
-        // Record detailed error for enhanced metrics
+        // Record comprehensive error details for debugging complex aggregations
         recordDetailedError(
           'cache',
           error instanceof Error ? error : new Error(String(error)),
@@ -990,10 +1005,10 @@ class RepositoryCacheManager {
           }
         );
 
-        // Update service health score on error
+        // Update system health metrics
         updateServiceHealthScore('cache', { errorRate: 1.0 });
 
-        // Rollback transaction on any error
+        // Rollback transaction to maintain cache consistency
         await this.rollbackTransaction(transaction);
 
         logger.error(
@@ -1011,7 +1026,21 @@ class RepositoryCacheManager {
   }
 
   /**
-   * FIX: Complete cache invalidation across all tiers with pattern matching
+   * Performs comprehensive cache invalidation across all tiers for a repository.
+   *
+   * When repository data changes (new commits, branch updates), all cached data
+   * becomes stale and must be purged. This method uses pattern-based invalidation
+   * to efficiently remove all related cache entries without scanning entire caches.
+   *
+   * The method invalidates:
+   * - Raw commits cache entries
+   * - All filtered variations (author, date, pagination filters)
+   * - All aggregated visualizations derived from the repository
+   *
+   * @param repoUrl - Repository URL to invalidate
+   *
+   * Performance note: Uses tracked key patterns for O(1) invalidation rather than
+   * expensive cache scanning operations.
    */
   async invalidateRepository(repoUrl: string): Promise<void> {
     return withKeyLock(`cache-invalidate:${repoUrl}`, async () => {
@@ -1024,7 +1053,7 @@ class RepositoryCacheManager {
 
       const operations: Promise<void>[] = [];
 
-      // FIX: Invalidate all known keys for this repository
+      // Invalidate all tracked keys for this repository across all cache tiers
       for (const key of keysToInvalidate) {
         if (key.startsWith('raw_commits:')) {
           operations.push(this.rawCommitsCache.del(key));
@@ -1035,13 +1064,16 @@ class RepositoryCacheManager {
         }
       }
 
-      // FIX: Also invalidate base patterns in case we missed some
+      /*
+       * Also invalidate common base patterns in case key tracking missed some entries.
+       * This provides a safety net for edge cases where keys weren't properly tracked.
+       */
       const baseKeys = [
         this.generateRawCommitsKey(repoUrl),
-        // Generate some common filtered patterns
+        // Common filtered cache patterns
         this.generateFilteredCommitsKey(repoUrl, {}),
         this.generateFilteredCommitsKey(repoUrl, { skip: 0, limit: 100 }),
-        // Generate some common aggregated patterns
+        // Common aggregated cache patterns
         this.generateAggregatedDataKey(repoUrl, {}),
         this.generateAggregatedDataKey(repoUrl, undefined),
       ];
@@ -1056,14 +1088,14 @@ class RepositoryCacheManager {
         }
       }
 
-      // Execute all invalidation operations
+      // Execute all invalidation operations concurrently for performance
       const results = await Promise.allSettled(operations);
 
-      // Count successful invalidations
+      // Analyze results and provide comprehensive reporting
       const successful = results.filter((r) => r.status === 'fulfilled').length;
       const failed = results.filter((r) => r.status === 'rejected').length;
 
-      // Clear the key pattern tracking for this repository
+      // Clean up key pattern tracking for this repository
       this.cacheKeyPatterns.delete(repoHash);
 
       if (failed > 0) {
@@ -1088,7 +1120,18 @@ class RepositoryCacheManager {
   }
 
   /**
-   * Get cache statistics including transaction metrics
+   * Retrieves comprehensive cache statistics for monitoring and optimization.
+   *
+   * Provides detailed insights into cache performance across all three tiers,
+   * including hit/miss ratios, memory usage, and transaction success rates.
+   * This data is essential for:
+   *
+   * - Performance tuning and capacity planning
+   * - Identifying cache effectiveness by tier
+   * - Monitoring transaction consistency and system health
+   * - Detecting memory pressure and optimization opportunities
+   *
+   * @returns Comprehensive cache statistics and metrics
    */
   getCacheStats(): CacheStats {
     const rawStats = this.rawCommitsCache.getStats();
@@ -1161,10 +1204,17 @@ class RepositoryCacheManager {
   }
 
   /**
-   * Shutdown all cache tiers and clean up transactions
+   * Gracefully shuts down all cache tiers and cleans up active transactions.
+   *
+   * This method ensures system integrity during shutdown by:
+   * - Rolling back any active transactions to prevent partial cache states
+   * - Properly closing all cache tier connections (memory, disk, Redis)
+   * - Logging any issues for post-shutdown analysis
+   *
+   * Should be called during application shutdown to prevent resource leaks.
    */
   async shutdown(): Promise<void> {
-    // FIX: Cleanup any pending transactions
+    // Clean up any pending transactions to prevent data inconsistency
     if (this.activeTransactions.size > 0) {
       logger.warn('Shutting down with active transactions', {
         activeTransactions: this.activeTransactions.size,
@@ -1208,7 +1258,10 @@ class RepositoryCacheManager {
     logger.info('RepositoryCacheManager shutdown completed');
   }
 
-  // Private helper methods (unchanged except for key tracking)
+  /**
+   * Private helper methods for cache key generation and data processing.
+   * These methods handle the internal mechanics of cache operations.
+   */
 
   private generateRawCommitsKey(repoUrl: string): string {
     const key = `raw_commits:${this.hashUrl(repoUrl)}`;
@@ -1236,15 +1289,18 @@ class RepositoryCacheManager {
     return key;
   }
 
+  /** Generates stable 16-character hash for repository URLs */
   private hashUrl(url: string): string {
     return crypto.createHash('md5').update(url).digest('hex').slice(0, 16);
   }
 
+  /** Generates stable 8-character hash for filter option objects */
   private hashObject(obj: any): string {
     const str = JSON.stringify(obj, Object.keys(obj).sort());
     return crypto.createHash('md5').update(str).digest('hex').slice(0, 8);
   }
 
+  /** Determines if request has specific filters requiring filtered cache tier */
   private hasSpecificFilters(options?: CommitCacheOptions): boolean {
     if (!options) return false;
 
@@ -1258,11 +1314,23 @@ class RepositoryCacheManager {
     );
   }
 
+  /**
+   * Applies client-specified filters to commit arrays with robust error handling.
+   *
+   * Supports multiple filter types:
+   * - Author filtering (name or email matching)
+   * - Date range filtering (from/to dates)
+   * - Pagination (skip/limit)
+   *
+   * @param commits - Source commit array (handles null gracefully)
+   * @param options - Filter criteria to apply
+   * @returns Filtered commit array
+   */
   private applyFilters(
     commits: Commit[] | null,
     options?: CommitCacheOptions
   ): Commit[] {
-    // Handle null commits
+    // Defensive programming: Handle null input gracefully
     if (!commits) {
       logger.warn('applyFilters received null commits, returning empty array');
       return [];
@@ -1270,7 +1338,7 @@ class RepositoryCacheManager {
 
     let filtered = commits;
 
-    // Apply author filters
+    // Apply author-based filtering (supports both name and email matching)
     if (options?.author) {
       filtered = filtered.filter(
         (c) =>
@@ -1288,7 +1356,7 @@ class RepositoryCacheManager {
       );
     }
 
-    // Apply date filters
+    // Apply date range filtering with robust date parsing
     if (options?.fromDate) {
       try {
         const fromDate = new Date(options.fromDate);
@@ -1315,7 +1383,7 @@ class RepositoryCacheManager {
       }
     }
 
-    // Apply pagination
+    // Apply pagination controls
     if (options?.skip !== undefined) {
       filtered = filtered.slice(options.skip);
     }
@@ -1327,17 +1395,20 @@ class RepositoryCacheManager {
     return filtered;
   }
 
+  /** Calculates cache hit ratio for performance monitoring */
   private calculateHitRatio(hits: number, misses: number): number {
     const total = hits + misses;
     return total > 0 ? hits / total : 0;
   }
 
+  /** Records timing metrics for cache hit operations */
   private recordHitTime(startTime: number): void {
     const duration = Date.now() - startTime;
     this.metrics.performance.totalHitTime += duration;
     this.metrics.performance.operationCount++;
   }
 
+  /** Records timing metrics for cache miss operations */
   private recordMissTime(startTime: number): void {
     const duration = Date.now() - startTime;
     this.metrics.performance.totalMissTime += duration;
@@ -1345,7 +1416,15 @@ class RepositoryCacheManager {
   }
 
   /**
-   * Internal version without the outer lock - used within ordered locks
+   * Internal raw commits retrieval without external locking.
+   *
+   * This method is used within ordered lock contexts to prevent deadlocks.
+   * It implements the same caching logic as the public method but assumes
+   * appropriate locks are already held by the caller.
+   *
+   * @param repoUrl - Repository URL to fetch commits for
+   * @returns Promise resolving to commit array
+   * @internal
    */
   async getOrParseCommitsUnlocked(repoUrl: string): Promise<Commit[]> {
     const startTime = Date.now();
@@ -1510,7 +1589,16 @@ class RepositoryCacheManager {
   }
 
   /**
-   * Internal version without locking - used when already within an ordered lock
+   * Internal filtered commits retrieval without external locking.
+   *
+   * Used within ordered lock contexts where the filtered cache lock is already
+   * held. This prevents lock recursion and deadlock scenarios when filtered
+   * operations need to access raw commit data.
+   *
+   * @param repoUrl - Repository URL
+   * @param options - Filtering options
+   * @returns Promise resolving to filtered commit array
+   * @internal
    */
   async getOrParseFilteredCommitsUnlocked(
     repoUrl: string,
@@ -1637,10 +1725,28 @@ class RepositoryCacheManager {
   }
 }
 
-// Singleton instance
+/**
+ * Singleton instance of the repository cache manager.
+ * Provides centralized caching for all Git repository operations in the application.
+ */
 export const repositoryCache = new RepositoryCacheManager();
 
-// Export helper functions for easy integration
+/**
+ * High-level helper functions for easy cache integration.
+ * These functions provide a simplified interface to the cache while maintaining
+ * all the sophisticated caching, transaction, and error handling logic internally.
+ */
+
+/**
+ * Retrieves commits for a repository with optional filtering.
+ *
+ * This is the primary function for accessing cached commit data. It automatically
+ * handles cache tier selection, transaction consistency, and error recovery.
+ *
+ * @param repoUrl - Git repository URL
+ * @param options - Optional commit filtering criteria
+ * @returns Promise resolving to array of commits
+ */
 export async function getCachedCommits(
   repoUrl: string,
   options?: CommitCacheOptions
@@ -1648,6 +1754,16 @@ export async function getCachedCommits(
   return repositoryCache.getOrParseCommits(repoUrl, options);
 }
 
+/**
+ * Retrieves aggregated visualization data for a repository.
+ *
+ * Returns processed data suitable for charts, heatmaps, and other visualizations.
+ * Results are cached to avoid expensive recomputation of aggregations.
+ *
+ * @param repoUrl - Git repository URL
+ * @param filterOptions - Optional filters for aggregation scope
+ * @returns Promise resolving to visualization-ready data
+ */
 export async function getCachedAggregatedData(
   repoUrl: string,
   filterOptions?: CommitFilterOptions
@@ -1655,12 +1771,28 @@ export async function getCachedAggregatedData(
   return repositoryCache.getOrGenerateAggregatedData(repoUrl, filterOptions);
 }
 
+/**
+ * Invalidates all cached data for a repository.
+ *
+ * Should be called when repository data changes (new commits, rebases, etc.)
+ * to ensure clients receive fresh data on subsequent requests.
+ *
+ * @param repoUrl - Repository URL to invalidate
+ */
 export async function invalidateCachedRepository(
   repoUrl: string
 ): Promise<void> {
   return repositoryCache.invalidateRepository(repoUrl);
 }
 
+/**
+ * Retrieves comprehensive cache performance statistics.
+ *
+ * Provides insights into cache effectiveness, memory usage, and system health
+ * for monitoring and optimization purposes.
+ *
+ * @returns Current cache statistics across all tiers
+ */
 export function getRepositoryCacheStats(): CacheStats {
   return repositoryCache.getCacheStats();
 }
