@@ -16,6 +16,37 @@ vi.mock('../../../src/services/logger', () => ({
   getLogger: global.getLogger,
 }));
 
+vi.mock('../../../src/utils/memoryPressureManager', () => ({
+  getMemoryStats: vi.fn(() => ({
+    system: {
+      free: 1024 * 1024 * 1024, // 1GB
+      total: 4 * 1024 * 1024 * 1024, // 4GB
+      usagePercentage: 0.25,
+    },
+    process: {
+      heapUsed: 100 * 1024 * 1024, // 100MB
+      heapTotal: 200 * 1024 * 1024, // 200MB
+      rss: 150 * 1024 * 1024, // 150MB
+    },
+    pressure: {
+      level: 'normal',
+      factor: 0.0,
+    },
+    gc: {
+      forced: 0,
+      full: 0,
+    },
+  })),
+  shouldThrottleRequest: vi.fn(() => false),
+  executeWithMemoryProtection: vi.fn(async (operationId, fn) => {
+    if (typeof fn === 'function') {
+      return await fn();
+    }
+    throw new Error('executeWithMemoryProtection requires a function');
+  }),
+  getMemoryMetrics: vi.fn(() => ({})),
+}));
+
 describe('GitService', () => {
   const mockGit = {
     clone: vi.fn(),
@@ -28,6 +59,17 @@ describe('GitService', () => {
     (simpleGit as any).mockReturnValue(mockGit);
     (mkdtemp as any).mockResolvedValue('/tmp/git-visualizer-test');
     (rm as any).mockResolvedValue(undefined);
+
+    // Default intelligent git.raw mock (can be overridden in individual tests)
+    mockGit.raw.mockImplementation((args: string[]) => {
+      if (args.includes('--count')) {
+        // For commit count queries, return a number
+        return Promise.resolve('2\n');
+      } else {
+        // For other queries, return empty by default (will be overridden in tests)
+        return Promise.resolve('');
+      }
+    });
   });
 
   describe('cloneRepository', () => {
@@ -61,7 +103,16 @@ describe('GitService', () => {
       const mockRaw =
         `abc123|2023-01-01T12:00:00Z|Test User|test@example.com|Initial commit\n` +
         `def456|2023-01-02T14:00:00Z|Another User|another@example.com|Add feature X`;
-      mockGit.raw.mockResolvedValue(mockRaw);
+
+      // Override the mock for this specific test
+      mockGit.raw.mockImplementation((args: string[]) => {
+        if (args.includes('--count')) {
+          return Promise.resolve('2\n'); // Return count for the commits
+        } else if (args.includes('log')) {
+          return Promise.resolve(mockRaw); // Return commit data for log command
+        }
+        return Promise.resolve('');
+      });
 
       // Act
       const commits = await gitService.getCommits(localRepoPath);
@@ -185,12 +236,22 @@ describe('GitService Extended Tests', () => {
         'def456|2023-01-02T14:00:00Z||another@example.com|No author',
         'ghi789|2023-01-03T15:00:00Z|Another User|another@example.com|',
       ].join('\n');
-      mockGit.raw.mockResolvedValue(mockRaw);
+
+      // Override the mock for this specific test
+      mockGit.raw.mockImplementation((args: string[]) => {
+        if (args.includes('--count')) {
+          return Promise.resolve('3\n'); // Return count for the commits
+        } else if (args.includes('log')) {
+          return Promise.resolve(mockRaw); // Return commit data for log command
+        }
+        return Promise.resolve('');
+      });
+
       const warnSpy = vi.spyOn(global.mockLogger, 'warn');
       const commits = await gitService.getCommits(localRepoPath);
       expect(commits).toHaveLength(1);
       expect(commits[0].sha).toBe('abc123');
-      expect(warnSpy).toHaveBeenCalledTimes(3); // Updated: streaming adds 1 more warning
+      expect(warnSpy).toHaveBeenCalledTimes(2); // Should be 2 warnings for missing data
       warnSpy.mockRestore();
     });
 
@@ -198,7 +259,17 @@ describe('GitService Extended Tests', () => {
       const localRepoPath = '/tmp/git-visualizer-test';
       const mockRaw =
         'abc123|2023-01-01T12:00:00Z|Test User|test@example.com|feat: use A | B';
-      mockGit.raw.mockResolvedValue(mockRaw);
+
+      // Override the mock for this specific test
+      mockGit.raw.mockImplementation((args: string[]) => {
+        if (args.includes('--count')) {
+          return Promise.resolve('1\n'); // Return count for the commits
+        } else if (args.includes('log')) {
+          return Promise.resolve(mockRaw); // Return commit data for log command
+        }
+        return Promise.resolve('');
+      });
+
       const commits = await gitService.getCommits(localRepoPath);
       expect(commits).toHaveLength(1);
       expect(commits[0]).toEqual({
