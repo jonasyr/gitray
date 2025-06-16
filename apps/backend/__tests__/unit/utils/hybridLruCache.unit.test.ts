@@ -122,9 +122,12 @@ import HybridLRUCache from '../../../src/utils/hybridLruCache';
 
 describe('HybridLRUCache', () => {
   let cache: HybridLRUCache<string>;
-  const testDiskPath = '/tmp/test-cache';
+  let testDiskPath: string;
 
   beforeEach(async () => {
+    // Create a unique cache directory for each test run to avoid conflicts
+    testDiskPath = `/tmp/test-cache-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
     vi.clearAllMocks();
 
     // Reset all mock implementations
@@ -171,7 +174,7 @@ describe('HybridLRUCache', () => {
     // Create cache instance
     cache = new HybridLRUCache<string>({
       maxEntries: 5,
-      memoryLimitBytes: 1024,
+      memoryLimitBytes: 8192, // Increased to 8KB to handle large test strings
       diskPath: testDiskPath,
       lockTimeoutMs: 1000,
       redisConfig: {
@@ -186,7 +189,7 @@ describe('HybridLRUCache', () => {
 
   afterEach(async () => {
     if (cache) {
-      await cache.quit();
+      await cache.destroy();
     }
   });
 
@@ -365,7 +368,7 @@ describe('HybridLRUCache', () => {
       // Act - Create new cache instance
       const newCache = new HybridLRUCache<string>({
         maxEntries: 10,
-        memoryLimitBytes: 1024,
+        memoryLimitBytes: 8192, // Increased to 8KB
         diskPath: testDiskPath,
       });
 
