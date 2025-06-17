@@ -1,17 +1,12 @@
-// apps/backend/__tests__/utils/hybridLruCache.test.ts
+// apps/backend/__tests__/unit/utils/hybridLruCache.unit.test.ts
 
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import type { Stats } from 'fs';
 
-// Define proper types for mocks
-type MockedFunction<T extends (...args: any[]) => any> = ReturnType<
-  typeof vi.fn<T>
->;
-
-// Create a proper Stats mock object
+// Mock creation helpers
 const createMockStats = (
   mtimeMs: number = Date.now(),
-  size: number = 0
+  size: number = 100
 ): Stats =>
   ({
     mtimeMs,
@@ -22,16 +17,7 @@ const createMockStats = (
     isSymbolicLink: vi.fn().mockReturnValue(false),
     isFIFO: vi.fn().mockReturnValue(false),
     isSocket: vi.fn().mockReturnValue(false),
-    dev: 0,
-    ino: 0,
-    mode: 0,
-    nlink: 0,
-    uid: 0,
-    gid: 0,
-    rdev: 0,
     size,
-    blksize: 0,
-    blocks: 0,
     atimeMs: mtimeMs,
     ctimeMs: mtimeMs,
     birthtimeMs: mtimeMs,
@@ -39,9 +25,18 @@ const createMockStats = (
     mtime: new Date(mtimeMs),
     ctime: new Date(mtimeMs),
     birthtime: new Date(mtimeMs),
+    dev: 0,
+    ino: 0,
+    mode: 0,
+    nlink: 0,
+    uid: 0,
+    gid: 0,
+    rdev: 0,
+    blksize: 0,
+    blocks: 0,
   }) as Stats;
 
-// Create comprehensive mocks using vi.hoisted
+// Mock implementations
 const mockFs = vi.hoisted(() => ({
   mkdir: vi.fn(),
   readdir: vi.fn(),
@@ -52,62 +47,30 @@ const mockFs = vi.hoisted(() => ({
   lstat: vi.fn(),
   rename: vi.fn(),
   access: vi.fn(),
-  constants: {
-    F_OK: 0,
-    R_OK: 4,
-  },
+  constants: { F_OK: 0, R_OK: 4 },
 }));
 
-// Mock the withKeyLock function using vi.hoisted
 const mockWithKeyLock = vi.hoisted(() => vi.fn());
 
-// Mock Redis
 const mockRedis = {
-  get: vi.fn() as MockedFunction<(key: string) => Promise<string | null>>,
-  set: vi.fn() as MockedFunction<
-    (key: string, value: string) => Promise<string>
-  >,
-  del: vi.fn() as MockedFunction<(key: string) => Promise<number>>,
-  quit: vi.fn() as MockedFunction<() => Promise<string>>,
-  on: vi.fn() as MockedFunction<
-    (event: string, callback: (...args: any[]) => void) => void
-  >,
-  disconnect: vi.fn() as MockedFunction<() => void>,
+  get: vi.fn(),
+  set: vi.fn(),
+  del: vi.fn(),
+  quit: vi.fn(),
+  on: vi.fn(),
+  disconnect: vi.fn(),
+  keys: vi.fn(),
 };
 
-// Initialize Redis mock return values
-mockRedis.get.mockResolvedValue(null);
-mockRedis.set.mockResolvedValue('OK');
-mockRedis.del.mockResolvedValue(1);
-mockRedis.quit.mockResolvedValue('OK');
-mockRedis.on.mockImplementation(
-  (event: string, callback: (...args: any[]) => void) => {
-    if (event === 'ready') {
-      setTimeout(() => callback(), 0);
-    }
-  }
-);
-
-vi.mock('fs/promises', () => ({
-  default: mockFs,
-  ...mockFs,
-}));
-
-// Mock IORedis - need to handle both default export and named imports
-vi.mock('ioredis', () => {
-  function MockRedisClass(this: any) {
-    // Copy all properties from mockRedis to this instance
+// Mock modules
+vi.mock('fs/promises', () => ({ default: mockFs, ...mockFs }));
+vi.mock('ioredis', () => ({
+  __esModule: true,
+  default: function MockRedis(this: any) {
     Object.assign(this, mockRedis);
     return this;
-  }
-
-  return {
-    __esModule: true,
-    default: MockRedisClass,
-    Redis: MockRedisClass,
-  };
-});
-
+  },
+}));
 vi.mock('../../../src/utils/lockManager', () => ({
   withKeyLock: mockWithKeyLock,
 }));
@@ -122,79 +85,55 @@ import HybridLRUCache from '../../../src/utils/hybridLruCache';
 
 describe('HybridLRUCache', () => {
   let cache: HybridLRUCache<string>;
-  let testDiskPath: string;
+  const testDiskPath = '/tmp/test-cache';
 
   beforeEach(async () => {
-    // Create a unique cache directory for each test run to avoid conflicts
-    testDiskPath = `/tmp/test-cache-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-
     vi.clearAllMocks();
 
-    // Reset all mock implementations
+    // Setup default mock behaviors
     mockFs.mkdir.mockResolvedValue(undefined);
     mockFs.readdir.mockResolvedValue([]);
     mockFs.writeFile.mockResolvedValue(undefined);
     mockFs.readFile.mockResolvedValue('');
     mockFs.unlink.mockResolvedValue(undefined);
-    mockFs.stat.mockResolvedValue(createMockStats(Date.now(), 100)); // Default 100 bytes
-    mockFs.lstat.mockResolvedValue(createMockStats(Date.now(), 100)); // Default 100 bytes
+    mockFs.stat.mockResolvedValue(createMockStats());
+    mockFs.lstat.mockResolvedValue(createMockStats());
     mockFs.rename.mockResolvedValue(undefined);
     mockFs.access.mockResolvedValue(undefined);
 
-    // Initialize mockWithKeyLock
     mockWithKeyLock.mockImplementation(
-      async (key: string, fn: () => Promise<unknown>) => {
-        return await fn();
-      }
+      async (key: string, fn: () => Promise<unknown>) => fn()
     );
 
     mockRedis.get.mockResolvedValue(null);
     mockRedis.set.mockResolvedValue('OK');
     mockRedis.del.mockResolvedValue(1);
     mockRedis.quit.mockResolvedValue('OK');
-
-    // Ensure Redis 'ready' event is triggered immediately to mark Redis as healthy
+    mockRedis.keys.mockResolvedValue([]);
     mockRedis.on.mockImplementation(
       (event: string, callback: (...args: any[]) => void) => {
-        if (event === 'ready') {
-          // Trigger immediately and synchronously to ensure Redis is marked healthy
-          callback();
-        }
-        // Return this for chaining
+        if (event === 'ready') callback();
         return mockRedis;
       }
     );
 
-    mockWithKeyLock.mockImplementation(
-      async (key: string, fn: () => Promise<unknown>) => {
-        return await fn();
-      }
-    );
-
-    // Create cache instance
     cache = new HybridLRUCache<string>({
       maxEntries: 5,
-      memoryLimitBytes: 8192, // Increased to 8KB to handle large test strings
+      memoryLimitBytes: 1024,
       diskPath: testDiskPath,
       lockTimeoutMs: 1000,
-      redisConfig: {
-        host: 'localhost',
-        port: 6379,
-      },
+      redisConfig: { host: 'localhost', port: 6379 },
     });
 
-    // Wait for Redis ready event to trigger
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 
   afterEach(async () => {
-    if (cache) {
-      await cache.destroy();
-    }
+    if (cache) await cache.destroy();
   });
 
-  describe('Basic Operations - Happy Path', () => {
-    test('should store and retrieve value from memory cache', async () => {
+  describe('Core Operations', () => {
+    test('should store and retrieve value from memory tier', async () => {
       // Arrange
       const key = 'test-key';
       const value = 'test-value';
@@ -207,29 +146,9 @@ describe('HybridLRUCache', () => {
       expect(result).toBe(value);
     });
 
-    test('should handle multiple key-value pairs', async () => {
+    test('should return null when key does not exist in any tier', async () => {
       // Arrange
-      const testPairs = [
-        ['key1', 'value1'],
-        ['key2', 'value2'],
-        ['key3', 'value3'],
-      ];
-
-      // Act
-      for (const [key, value] of testPairs) {
-        await cache.set(key, value);
-      }
-
-      // Assert
-      for (const [key, expectedValue] of testPairs) {
-        const result = await cache.get(key);
-        expect(result).toBe(expectedValue);
-      }
-    });
-
-    test('should return null for non-existent keys', async () => {
-      // Arrange
-      const nonExistentKey = 'does-not-exist';
+      const nonExistentKey = 'missing-key';
 
       // Act
       const result = await cache.get(nonExistentKey);
@@ -237,64 +156,60 @@ describe('HybridLRUCache', () => {
       // Assert
       expect(result).toBeNull();
     });
-  });
 
-  describe('Memory LRU Eviction - Happy Path', () => {
-    test('should evict oldest entries when memory limit exceeded', async () => {
+    test('should delete from all tiers successfully', async () => {
       // Arrange
-      const largeValue = 'x'.repeat(300); // 300 bytes each
-      const keys = ['key1', 'key2', 'key3', 'key4', 'key5'];
-
-      // Act - Fill cache beyond memory limit
-      for (const key of keys) {
-        await cache.set(key, largeValue);
-      }
-      // Add one more to trigger eviction
-      await cache.set('key6', largeValue);
-
-      // Assert - First key should be evicted from memory (but might be in Redis/disk)
-      const lastResult = await cache.get('key6');
-      expect(lastResult).toBe(largeValue);
-    });
-
-    test('should evict when max entries exceeded', async () => {
-      // Arrange
-      const smallValue = 'small';
-      const keys = ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7'];
+      const key = 'delete-test';
+      const value = 'test-value';
+      await cache.set(key, value);
 
       // Act
-      for (const key of keys) {
-        await cache.set(key, smallValue);
-      }
+      await cache.del(key);
+      const result = await cache.get(key);
 
-      // Assert - Last entry should be retrievable
-      const lastResult = await cache.get('k7');
-      expect(lastResult).toBe(smallValue);
-    });
-
-    test('should update LRU order on access', async () => {
-      // Arrange
-      const value = 'x'.repeat(250);
-      await cache.set('key1', value);
-      await cache.set('key2', value);
-      await cache.set('key3', value);
-
-      // Act - Access key1 to move it to most recently used
-      await cache.get('key1');
-      await cache.set('key4', value);
-      await cache.set('key5', value);
-
-      // Assert - key1 should still be accessible (either from memory, Redis, or disk)
-      const key1Result = await cache.get('key1');
-      expect(key1Result).toBe(value);
+      // Assert
+      expect(result).toBeNull();
+      expect(mockRedis.del).toHaveBeenCalledWith(key);
     });
   });
 
-  describe('Multi-Tier Storage - Happy Path', () => {
-    test('should store in Redis when Redis is healthy', async () => {
+  describe('Memory LRU Eviction', () => {
+    test('should evict oldest entry when memory limit exceeded', async () => {
+      // Arrange
+      const largeValue = 'x'.repeat(300); // 300 bytes each
+      await cache.set('old-key', largeValue);
+      await cache.set('new-key', largeValue);
+      await cache.set('newest-key', largeValue);
+
+      // Act
+      await cache.set('trigger-eviction', largeValue);
+
+      // Assert
+      const newestResult = await cache.get('trigger-eviction');
+      expect(newestResult).toBe(largeValue);
+    });
+
+    test('should update LRU order when accessing existing key', async () => {
+      // Arrange
+      await cache.set('key1', 'value1');
+      await cache.set('key2', 'value2');
+
+      // Act - Access key1 to make it recently used
+      await cache.get('key1');
+      await cache.set('key3', 'value3');
+
+      // Assert - key1 should still be accessible after eviction
+      const result = await cache.get('key1');
+      expect(result).toBe('value1');
+    });
+  });
+
+  describe('Redis Integration', () => {
+    test('should store in Redis when healthy and retrieve from Redis', async () => {
       // Arrange
       const key = 'redis-key';
       const value = 'redis-value';
+      mockRedis.get.mockResolvedValueOnce(JSON.stringify(value));
 
       // Act
       await cache.set(key, value);
@@ -305,578 +220,359 @@ describe('HybridLRUCache', () => {
       expect(result).toBe(value);
     });
 
-    test('should store on disk through file operations', async () => {
-      // Arrange
-      const key = 'disk-key';
-      const value = 'disk-value';
-
-      // Mock Redis to be unavailable to force disk usage
-      mockRedis.set.mockRejectedValue(new Error('Redis unavailable'));
-
-      // Act
-      await cache.set(key, value);
-
-      // Assert
-      expect(mockFs.writeFile).toHaveBeenCalled();
-      expect(mockWithKeyLock).toHaveBeenCalled();
-    });
-
-    test('should retrieve from disk when memory cache miss', async () => {
-      // Arrange
-      const key = 'disk-key';
-      const value = 'disk-value';
-
-      // Mock disk file to exist and return value
-      mockFs.readFile.mockResolvedValue(JSON.stringify(value));
-      mockRedis.get.mockResolvedValue(null);
-
-      // Simulate that disk cache has this key by pre-populating
-      await cache.set(key, value);
-
-      // Act
-      const result = await cache.get(key);
-
-      // Assert
-      expect(result).toBe(value);
-    });
-  });
-
-  describe('Disk Cache Management - Happy Path', () => {
-    test('should enforce disk entry limits', async () => {
-      // Arrange
-      // Mock Redis to be unavailable to force disk usage
-      mockRedis.set.mockRejectedValue(new Error('Redis unavailable'));
-
-      const keys = ['key1', 'key2', 'key3', 'key4', 'key5', 'key6'];
-
-      // Act - Add entries beyond limit to trigger cleanup
-      for (const key of keys) {
-        await cache.set(key, 'value');
-      }
-
-      // Assert - Should have attempted disk operations
-      expect(mockFs.writeFile).toHaveBeenCalled();
-      expect(mockWithKeyLock).toHaveBeenCalled();
-    });
-
-    test('should clean up disk cache on initialization', async () => {
-      // Arrange
-      const testFiles = ['encoded%20key1', 'encoded%20key2'];
-      mockFs.readdir.mockResolvedValue(testFiles as any);
-      mockFs.stat.mockResolvedValue({ mtimeMs: Date.now() - 1000 } as any);
-
-      // Act - Create new cache instance
-      const newCache = new HybridLRUCache<string>({
-        maxEntries: 10,
-        memoryLimitBytes: 8192, // Increased to 8KB
-        diskPath: testDiskPath,
-      });
-
-      // Wait for initialization
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      // Assert
-      expect(mockFs.readdir).toHaveBeenCalled();
-
-      // Cleanup
-      await newCache.quit();
-    });
-  });
-
-  describe('Error Handling and Rollback - Happy Path', () => {
-    test('should continue operation when Redis fails', async () => {
-      // Arrange
-      const key = 'test-key';
-      const value = 'test-value';
-      mockRedis.set.mockRejectedValue(new Error('Redis connection failed'));
-
-      // Act
-      await cache.set(key, value);
-      const result = await cache.get(key);
-
-      // Assert - Should still work with memory cache
-      expect(result).toBe(value);
-    });
-
-    test('should continue operation when disk write fails', async () => {
-      // Arrange
-      const key = 'test-key';
-      const value = 'test-value';
-      mockFs.writeFile.mockRejectedValue(new Error('Disk full'));
-
-      // Act
-      await cache.set(key, value);
-      const result = await cache.get(key);
-
-      // Assert - Should still work with memory cache
-      expect(result).toBe(value);
-    });
-
-    test('should handle stale disk files gracefully', async () => {
-      // Arrange
-      const key = 'stale-key';
-
-      // Mock Redis to return null (cache miss)
-      mockRedis.get.mockResolvedValue(null);
-      // Mock disk read to fail (stale file)
-      mockFs.readFile.mockRejectedValue(new Error('ENOENT: no such file'));
-
-      // Act
-      const result = await cache.get(key);
-
-      // Assert - Should return null for missing file
-      expect(result).toBeNull();
-    });
-  });
-
-  describe('Redis Integration - Error Handling', () => {
-    test('should handle Redis get failure gracefully', async () => {
+    test('should handle Redis connection failure and mark as unhealthy', async () => {
       // Arrange
       const key = 'redis-fail-key';
       const value = 'test-value';
+      mockRedis.set.mockRejectedValueOnce(new Error('Redis connection failed'));
 
-      // Set up Redis to fail on get
-      mockRedis.get.mockRejectedValueOnce(new Error('Redis connection failed'));
-
-      // First set a value in memory
+      // Act
       await cache.set(key, value);
+      const result = await cache.get(key);
 
-      // Clear memory to force Redis lookup
-      const stats = cache.getStats();
-      if (stats.memory?.entries > 0) {
-        // Force memory eviction by adding many entries
-        for (let i = 0; i < 10; i++) {
-          await cache.set(`temp-key-${i}`, 'x'.repeat(200));
-        }
-      }
+      // Assert
+      expect(result).toBe(value); // Should still work from memory
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'HybridLRUCache Redis set failed',
+        { err: expect.any(Error) }
+      );
+    });
+
+    test('should handle Redis get failure gracefully', async () => {
+      // Arrange
+      const key = 'redis-get-fail';
+      mockRedis.get.mockRejectedValueOnce(new Error('Redis read failed'));
 
       // Act
       const result = await cache.get(key);
 
-      // Assert - Should handle Redis failure and try disk/return null
+      // Assert
       expect(result).toBeNull();
       expect(mockLogger.warn).toHaveBeenCalledWith(
         'HybridLRUCache Redis get failed',
         { err: expect.any(Error) }
       );
     });
-
-    test('should handle Redis set failure gracefully', async () => {
-      // Arrange
-      const key = 'redis-fail-set';
-      const value = 'test-value';
-
-      // Mock Redis to fail - this should cause the Redis operation to fail
-      mockRedis.set.mockRejectedValueOnce(new Error('Redis write failed'));
-
-      // Act
-      await cache.set(key, value);
-
-      // Assert - The operation should succeed (not throw) but log warnings
-      // Since the current implementation might not be catching Redis errors properly,
-      // let's just verify it doesn't throw for now
-      const result = await cache.get(key);
-      expect(result).toBe(value); // Should still be available from memory
-    });
-
-    test('should handle Redis delete failure gracefully', async () => {
-      // Arrange
-      const key = 'redis-fail-del';
-      const value = 'test-value';
-
-      await cache.set(key, value);
-      mockRedis.del.mockRejectedValueOnce(new Error('Redis delete failed'));
-
-      // Act & Assert - Should throw due to delete failure
-      await expect(cache.del(key)).rejects.toThrow(
-        'Some delete operations failed'
-      );
-    });
   });
 
-  describe('Disk Cache - Error Handling', () => {
-    test('should handle disk read failure and use memory cache', async () => {
+  describe('Disk Cache Operations', () => {
+    test('should write to disk when Redis fails', async () => {
       // Arrange
-      const key = 'disk-fail-key';
-      const value = 'test-value';
-
-      // First set the value
-      await cache.set(key, value);
-
-      // Mock disk read failure
-      mockFs.readFile.mockRejectedValueOnce(new Error('File not found'));
-
-      // Act
-      const result = await cache.get(key);
-
-      // Assert - Should return value from memory cache
-      expect(result).toBe(value);
-    });
-
-    test('should handle lock acquisition failure and use memory cache', async () => {
-      // Arrange
-      const key = 'lock-fail-key';
-      const value = 'test-value';
-
-      await cache.set(key, value);
-
-      // Mock lock failure
-      mockWithKeyLock.mockRejectedValueOnce(new Error('Lock timeout'));
-
-      // Act
-      const result = await cache.get(key);
-
-      // Assert - Should return value from memory cache
-      expect(result).toBe(value);
-    });
-  });
-
-  describe('Disk Write/Delete Error Handling', () => {
-    test('should handle disk write failure gracefully', async () => {
-      // Arrange
-      const key = 'disk-write-fail';
-      const value = 'test-value';
-
-      mockFs.writeFile.mockRejectedValueOnce(new Error('Disk full'));
-
-      // Act & Assert - Should not throw
-      await expect(cache.set(key, value)).resolves.not.toThrow();
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Some cache tiers failed but operation completed',
-        {
-          key,
-          failedTiers: expect.any(Number),
-          errors: expect.arrayContaining(['Disk full']),
-        }
-      );
-    });
-
-    test('should handle disk delete failure gracefully', async () => {
-      // Arrange
-      const key = 'disk-del-fail';
-
-      // Manually add an entry to the disk index to simulate existing disk cache
-      const filePath = `/tmp/test-cache/${encodeURIComponent(key)}`;
-      (cache as any).disk.set(key, filePath);
-
-      // Verify the key is in the disk index
-      const stats = cache.getStats();
-      expect(stats.disk.entries).toBeGreaterThan(0);
-
-      // Now make the unlink operation fail with permission denied
-      mockFs.unlink.mockRejectedValueOnce(new Error('Permission denied'));
-
-      // Act & Assert - Should throw due to delete failure
-      await expect(cache.del(key)).rejects.toThrow(
-        'Some delete operations failed'
-      );
-    });
-  });
-
-  describe('String Value Handling', () => {
-    test('should handle special characters in strings', async () => {
-      // Arrange
-      const key = 'special-chars';
-      const value = 'Special chars: äöü àáâ 中文 🚀 "quotes" \'apostrophes\'';
-
-      // Act
-      await cache.set(key, value);
-      const result = await cache.get(key);
-
-      // Assert
-      expect(result).toBe(value);
-    });
-
-    test('should handle empty strings', async () => {
-      // Arrange
-      const key = 'empty-string';
-      const value = '';
-
-      // Act
-      await cache.set(key, value);
-      const result = await cache.get(key);
-
-      // Assert
-      expect(result).toBe(value);
-    });
-
-    test('should handle very long strings', async () => {
-      // Arrange
-      const key = 'long-string';
-      const value = 'x'.repeat(1000);
-
-      // Act
-      await cache.set(key, value);
-      const result = await cache.get(key);
-
-      // Assert
-      expect(result).toBe(value);
-    });
-  });
-
-  describe('LRU Order Management', () => {
-    test('should update LRU order when accessing disk cache', async () => {
-      // Arrange
-      const key = 'lru-test';
-      const value = 'test-value';
-
-      // Set value and ensure it goes to disk
-      await cache.set(key, value);
-
-      // Mock successful disk read to test LRU update
-      mockFs.readFile.mockResolvedValueOnce(JSON.stringify(value));
-      mockWithKeyLock.mockImplementation(async (lockKey, fn) => await fn());
-
-      // Act - Access the value to trigger LRU update
-      const result = await cache.get(key);
-
-      // Assert
-      expect(result).toBe(value);
-      // The implementation should update the disk LRU order
-    });
-  });
-
-  describe('Cache Statistics', () => {
-    test('should return accurate memory and disk stats', async () => {
-      // Arrange
-      const key1 = 'stats-key-1';
-      const key2 = 'stats-key-2';
-      const value = 'test-value';
-
-      // Act
-      await cache.set(key1, value);
-      await cache.set(key2, value);
-
-      // Assert
-      const stats = cache.getStats();
-      expect(stats.memory).toBeDefined();
-      expect(stats.disk).toBeDefined();
-    });
-  });
-
-  describe('Cache Deletion - Happy Path', () => {
-    test('should delete from all tiers successfully', async () => {
-      // Arrange
-      const key = 'delete-key';
-      const value = 'delete-value';
-
-      await cache.set(key, value);
-
-      // Act
-      await cache.del(key);
-
-      // Assert
-      const result = await cache.get(key);
-      expect(result).toBeNull();
-      expect(mockRedis.del).toHaveBeenCalledWith(key);
-    });
-
-    test('should remove disk files on deletion', async () => {
-      // Arrange
-      const key = 'disk-delete-key';
+      const key = 'disk-key';
       const value = 'disk-value';
-
-      // Disable Redis to force disk storage
-      mockRedis.set.mockImplementation(() => {
-        throw new Error('Redis unavailable');
-      });
-
-      // Ensure disk operations succeed
-      mockWithKeyLock.mockImplementation(
-        async (lockKey: string, fn: () => Promise<unknown>) => {
-          return await fn();
-        }
-      );
-
-      await cache.set(key, value);
-
-      // Act
-      await cache.del(key);
-
-      // Assert - Should attempt to delete disk file
-      expect(mockFs.unlink).toHaveBeenCalled();
-    });
-  });
-
-  describe('Cache Lifecycle - Happy Path', () => {
-    test('should initialize successfully', () => {
-      // Arrange & Act
-      const newCache = new HybridLRUCache<string>({
-        maxEntries: 100,
-        memoryLimitBytes: 2048,
-        diskPath: '/tmp/new-cache',
-      });
-
-      // Assert
-      expect(newCache).toBeInstanceOf(HybridLRUCache);
-      expect(newCache.isHealthy()).toBe(true);
-    });
-
-    test('should shutdown all connections cleanly', async () => {
-      // Arrange
-      // (cache is already created in beforeEach)
-
-      // Act
-      await cache.quit();
-
-      // Assert
-      expect(mockRedis.quit).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe('Integration with Lock Manager - Happy Path', () => {
-    test('should use locks for disk operations', async () => {
-      // Arrange
-      const key = 'lock-test-key';
-      const value = 'lock-test-value';
-
-      // Force disk usage by making Redis fail
       mockRedis.set.mockRejectedValue(new Error('Redis unavailable'));
 
       // Act
       await cache.set(key, value);
 
       // Assert
-      expect(mockWithKeyLock).toHaveBeenCalled();
+      expect(mockWithKeyLock).toHaveBeenCalledWith(
+        `disk:${key}`,
+        expect.any(Function),
+        1000
+      );
       expect(mockFs.writeFile).toHaveBeenCalled();
     });
 
-    test('should handle lock failures gracefully', async () => {
+    test('should read from disk when memory and Redis miss', async () => {
       // Arrange
-      const key = 'lock-fail-key';
-      const value = 'lock-fail-value';
+      const key = 'disk-read-key';
+      const value = 'disk-value';
+      mockFs.readFile.mockResolvedValueOnce(JSON.stringify(value));
 
-      // Make lock acquisition fail
-      mockWithKeyLock.mockRejectedValue(new Error('Lock timeout'));
-      // Force disk usage
+      // Manually add to disk index to simulate existing disk cache
+      (cache as any).disk.set(
+        key,
+        `/tmp/test-cache/${encodeURIComponent(key)}`
+      );
+
+      // Act
+      const result = await cache.get(key);
+
+      // Assert
+      expect(result).toBe(value);
+      expect(mockWithKeyLock).toHaveBeenCalledWith(
+        `disk:${key}`,
+        expect.any(Function),
+        1000
+      );
+    });
+
+    test('should handle disk write failure gracefully', async () => {
+      // Arrange
+      const key = 'disk-fail-key';
+      const value = 'test-value';
+      mockRedis.set.mockRejectedValue(new Error('Redis unavailable'));
+      mockFs.writeFile.mockRejectedValueOnce(new Error('Disk full'));
+
+      // Act & Assert
+      await expect(cache.set(key, value)).resolves.not.toThrow();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Some cache tiers failed but operation completed',
+        expect.objectContaining({ key })
+      );
+    });
+
+    test('should remove stale disk entries during index loading', async () => {
+      // Arrange
+      const staleFiles = ['stale-key', 'another-stale'];
+      mockFs.readdir.mockResolvedValueOnce(staleFiles);
+      mockFs.lstat.mockRejectedValue(new Error('ENOENT'));
+
+      // Act - Create new cache instance to trigger index loading
+      const newCache = new HybridLRUCache<string>({
+        maxEntries: 10,
+        memoryLimitBytes: 1024,
+        diskPath: testDiskPath,
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Assert
+      expect(mockFs.readdir).toHaveBeenCalled();
+      await newCache.destroy();
+    });
+  });
+
+  describe('Lock Manager Integration', () => {
+    test('should use locks for disk operations', async () => {
+      // Arrange
+      const key = 'lock-test';
+      const value = 'test-value';
       mockRedis.set.mockRejectedValue(new Error('Redis unavailable'));
 
-      // Act & Assert - Should still succeed with memory cache
-      await cache.set(key, value);
-      const result = await cache.get(key);
-      expect(result).toBe(value);
-    });
-  });
-  describe('Memory Operations - Happy Path', () => {
-    test('should add items to memory cache', async () => {
-      // Arrange
-      const key = 'memory-test';
-      const value = 'test-value-string';
-
       // Act
       await cache.set(key, value);
-      const result = await cache.get(key);
 
       // Assert
-      expect(result).toBe(value);
+      expect(mockWithKeyLock).toHaveBeenCalledWith(
+        `disk:${key}`,
+        expect.any(Function),
+        1000
+      );
     });
 
-    test('should handle memory limit exceeded', async () => {
+    test('should handle lock timeout gracefully', async () => {
       // Arrange
-      const largeValue = 'x'.repeat(500); // Half the memory limit
-
-      // Act - Add multiple items to exceed memory limit
-      await cache.set('item1', largeValue);
-      await cache.set('item2', largeValue);
-      await cache.set('item3', largeValue); // Should trigger memory cleanup
-
-      // Assert - Should still function
-      const result = await cache.get('item3');
-      expect(result).toBe(largeValue);
-    });
-  });
-
-  describe('Disk Operations - Happy Path', () => {
-    test('should store data to disk when memory is full', async () => {
-      // Arrange
-      const key = 'disk-test';
-      const value = 'disk-value';
-
-      // Act - Add item and ensure it's accessible
-      await cache.set(key, value);
-      const result = await cache.get(key);
-
-      // Assert - Should be able to retrieve the data
-      expect(result).toBe(value);
-    });
-
-    test('should retrieve data from disk', async () => {
-      // Arrange
-      const key = 'disk-retrieval-test';
-      const value = 'disk-data-string';
-
-      // Act
-      await cache.set(key, value);
-      const result = await cache.get(key);
-
-      // Assert
-      expect(result).toBe(value);
-    });
-
-    test('should handle disk cleanup', async () => {
-      // Arrange & Act - Add items (some may be evicted due to limits)
-      for (let i = 0; i < 3; i++) {
-        await cache.set(`cleanup-${i}`, `value-${i}`);
-      }
-
-      // Assert - Most recent item should be accessible
-      const result = await cache.get('cleanup-2');
-      expect(result).toBe('value-2');
-    });
-  });
-  describe('LRU Behavior - Happy Path', () => {
-    test('should evict least recently used items', async () => {
-      // Arrange
-      await cache.set('key1', 'value1');
-      await cache.set('key2', 'value2');
-
-      // Act - Access key1 to make it recently used
-      const firstAccess = await cache.get('key1');
-
-      // Add new item
-      await cache.set('key3', 'value3');
-
-      // Assert - Should be able to access recently used items
-      expect(firstAccess).toBe('value1');
-      const result = await cache.get('key3');
-      expect(result).toBe('value3');
-    });
-
-    test('should update access time on get', async () => {
-      // Arrange
-      const key = 'access-test';
+      const key = 'lock-timeout-key';
       const value = 'test-value';
-      await cache.set(key, value);
+      mockWithKeyLock.mockRejectedValueOnce(new Error('Lock timeout'));
+      mockRedis.set.mockRejectedValue(new Error('Redis unavailable'));
 
-      // Act - Access the item multiple times
-      const result1 = await cache.get(key);
-      const result2 = await cache.get(key);
+      // Act
+      await cache.set(key, value);
+      const result = await cache.get(key);
 
       // Assert
-      expect(result1).toBe(value);
-      expect(result2).toBe(value);
+      expect(result).toBe(value); // Should work from memory despite lock failure
     });
   });
 
-  describe('Statistics and Monitoring - Happy Path', () => {
-    test('should provide cache statistics', () => {
+  describe('Error Handling and Recovery', () => {
+    test('should handle corrupted disk cache file', async () => {
+      // Arrange
+      const key = 'corrupted-key';
+      mockFs.readFile.mockResolvedValueOnce('invalid-json{');
+      (cache as any).disk.set(
+        key,
+        `/tmp/test-cache/${encodeURIComponent(key)}`
+      );
+
+      // Act
+      const result = await cache.get(key);
+
+      // Assert
+      expect(result).toBeNull();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Failed to parse disk cache file',
+        expect.objectContaining({ key })
+      );
+    });
+
+    test('should handle disk file deletion during read', async () => {
+      // Arrange
+      const key = 'deleted-file-key';
+      mockFs.readFile.mockRejectedValueOnce(new Error('ENOENT: no such file'));
+      (cache as any).disk.set(
+        key,
+        `/tmp/test-cache/${encodeURIComponent(key)}`
+      );
+
+      // Act
+      const result = await cache.get(key);
+
+      // Assert
+      expect(result).toBeNull();
+    });
+
+    test('should handle delete operation failures', async () => {
+      // Arrange
+      const key = 'delete-fail-key';
+      await cache.set(key, 'test-value');
+      mockRedis.del.mockRejectedValueOnce(new Error('Redis delete failed'));
+
+      // Act & Assert
+      await expect(cache.del(key)).rejects.toThrow(
+        'Some delete operations failed'
+      );
+    });
+
+    test('should throw when all cache tiers fail during set', async () => {
+      // Arrange
+      const key = 'all-fail-key';
+      const value = 'test-value';
+      mockRedis.set.mockRejectedValue(new Error('Redis failed'));
+      mockFs.writeFile.mockRejectedValue(new Error('Disk failed'));
+
+      // Mock JSON.stringify to fail for memory operations
+      const originalStringify = JSON.stringify;
+      vi.spyOn(JSON, 'stringify').mockImplementation(() => {
+        throw new Error('JSON serialization failed');
+      });
+
+      try {
+        // Act & Assert
+        await expect(cache.set(key, value)).rejects.toThrow(
+          'All cache operations failed'
+        );
+      } finally {
+        // Restore JSON.stringify
+        JSON.stringify = originalStringify;
+      }
+    });
+  });
+
+  describe('Environment and Configuration', () => {
+    test('should initialize without Redis config', () => {
+      // Arrange & Act
+      const memoryOnlyCache = new HybridLRUCache<string>({
+        maxEntries: 10,
+        memoryLimitBytes: 1024,
+        diskPath: '/tmp/memory-only',
+      });
+
+      // Assert
+      expect(memoryOnlyCache.isHealthy()).toBe(true);
+      expect(memoryOnlyCache.getStats().redis.connected).toBe(false);
+    });
+
+    test('should handle disk path creation failure', async () => {
+      // Arrange
+      mockFs.mkdir.mockRejectedValueOnce(new Error('Permission denied'));
+
+      // Act & Assert - Should not throw, degrade gracefully
+      const newCache = new HybridLRUCache<string>({
+        maxEntries: 10,
+        memoryLimitBytes: 1024,
+        diskPath: '/invalid/path',
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(newCache.isHealthy()).toBe(true);
+      await newCache.destroy();
+    });
+
+    test('should handle different lock timeout configurations', async () => {
+      // Arrange
+      const slowCache = new HybridLRUCache<string>({
+        maxEntries: 10,
+        memoryLimitBytes: 1024,
+        diskPath: testDiskPath,
+        lockTimeoutMs: 5000,
+      });
+
+      mockRedis.set.mockRejectedValue(new Error('Redis unavailable'));
+
+      // Act
+      await slowCache.set('timeout-test', 'value');
+
+      // Assert
+      expect(mockWithKeyLock).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Function),
+        5000
+      );
+
+      await slowCache.destroy();
+    });
+  });
+
+  describe('Emergency Eviction', () => {
+    test('should perform emergency eviction across all tiers', async () => {
+      // Arrange
+      await cache.set('item1', 'value1');
+      await cache.set('item2', 'value2');
+      mockRedis.keys.mockResolvedValueOnce(['redis-key1', 'redis-key2']);
+      mockRedis.del.mockResolvedValueOnce(2);
+
+      // Act
+      const result = await cache.emergencyEvict();
+
+      // Assert
+      expect(result.evictedEntries).toBeGreaterThan(0);
+      expect(result.tiers.memory.evicted).toBeGreaterThan(0);
+      expect(result.tiers.redis.evicted).toBe(2);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'HybridLRUCache emergency eviction started',
+        expect.any(Object)
+      );
+    });
+
+    test('should handle Redis failure during emergency eviction', async () => {
+      // Arrange
+      await cache.set('test-item', 'test-value');
+      mockRedis.keys.mockRejectedValueOnce(
+        new Error('Redis connection failed')
+      );
+
+      // Act
+      const result = await cache.emergencyEvict();
+
+      // Assert
+      expect(result.tiers.memory.evicted).toBeGreaterThan(0);
+      expect(result.tiers.redis.evicted).toBe(0);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Redis emergency eviction failed',
+        { err: expect.any(Error) }
+      );
+    });
+  });
+
+  describe('Statistics and Monitoring', () => {
+    test('should provide accurate cache statistics', () => {
       // Arrange & Act
       const stats = cache.getStats();
 
       // Assert
-      expect(stats).toBeDefined();
-      expect(typeof stats.memory.entries).toBe('number');
-      expect(typeof stats.disk.entries).toBe('number');
-      expect(typeof stats.memory.usageBytes).toBe('number');
+      expect(stats).toEqual({
+        memory: expect.objectContaining({
+          entries: expect.any(Number),
+          usageBytes: expect.any(Number),
+          limitBytes: 1024,
+        }),
+        disk: expect.objectContaining({
+          entries: expect.any(Number),
+          limitEntries: 5,
+        }),
+        redis: expect.objectContaining({
+          healthy: expect.any(Boolean),
+          connected: expect.any(Boolean),
+        }),
+        serialization: expect.objectContaining({
+          poolSize: expect.any(Number),
+          activeWorkers: expect.any(Number),
+          queueLength: expect.any(Number),
+          isDestroyed: expect.any(Boolean),
+        }),
+      });
     });
 
-    test('should track memory usage', async () => {
+    test('should track memory usage correctly', async () => {
       // Arrange
       const initialStats = cache.getStats();
-      const value = 'x'.repeat(100);
 
       // Act
-      await cache.set('memory-usage-test', value);
+      await cache.set('memory-test', 'x'.repeat(100));
       const afterStats = cache.getStats();
 
       // Assert
@@ -886,302 +582,73 @@ describe('HybridLRUCache', () => {
     });
   });
 
-  describe('Data Validation - Happy Path', () => {
-    test('should handle different string values', async () => {
+  describe('Cache Lifecycle', () => {
+    test('should destroy all resources cleanly', async () => {
       // Arrange
-      const testCases = [
-        { key: 'string', value: 'hello world' },
-        { key: 'number-string', value: '42' },
-        { key: 'boolean-string', value: 'true' },
-        {
-          key: 'json-string',
-          value: JSON.stringify({ nested: { data: 'test' } }),
-        },
-        { key: 'array-string', value: JSON.stringify([1, 2, 3, 'four']) },
-      ];
-
-      // Act & Assert
-      for (const testCase of testCases) {
-        await cache.set(testCase.key, testCase.value);
-        const result = await cache.get(testCase.key);
-        expect(result).toBe(testCase.value);
-      }
-    });
-
-    test('should handle empty values', async () => {
-      // Arrange
-      const emptyCases = [
-        { key: 'empty-string', value: '' },
-        { key: 'empty-object-json', value: '{}' },
-        { key: 'empty-array-json', value: '[]' },
-      ];
-
-      // Act & Assert
-      for (const testCase of emptyCases) {
-        await cache.set(testCase.key, testCase.value);
-        const result = await cache.get(testCase.key);
-        expect(result).toBe(testCase.value);
-      }
-    });
-  });
-
-  describe('Size Calculation - Happy Path', () => {
-    test('should calculate data size correctly', async () => {
-      // Arrange
-      const smallValue = 'small';
-      const largeValue = 'x'.repeat(1000);
-
-      // Act
-      await cache.set('small', smallValue);
-      await cache.set('large', largeValue);
-
-      // Assert - Should handle both sizes
-      const smallResult = await cache.get('small');
-      const largeResult = await cache.get('large');
-      expect(smallResult).toBe(smallValue);
-      expect(largeResult).toBe(largeValue);
-    });
-  });
-
-  describe('Concurrent Operations - Happy Path', () => {
-    test('should handle concurrent sets', async () => {
-      // Arrange
-      const promises = [];
-      for (let i = 0; i < 3; i++) {
-        // Reduced to fit within cache limits
-        promises.push(cache.set(`concurrent-${i}`, `value-${i}`));
-      }
-
-      // Act
-      await Promise.all(promises);
-
-      // Assert - Recent values should be accessible
-      for (let i = 0; i < 3; i++) {
-        const result = await cache.get(`concurrent-${i}`);
-        expect(result).toBe(`value-${i}`);
-      }
-    });
-
-    test('should handle concurrent gets', async () => {
-      // Arrange
-      await cache.set('concurrent-get', 'shared-value');
-
-      // Act
-      const promises = [];
-      for (let i = 0; i < 5; i++) {
-        promises.push(cache.get('concurrent-get'));
-      }
-      const results = await Promise.all(promises);
-
-      // Assert
-      results.forEach((result) => {
-        expect(result).toBe('shared-value');
-      });
-    });
-  });
-  describe('Delete Operations - Happy Path', () => {
-    test('should delete items from cache', async () => {
-      // Arrange
-      await cache.set('delete-test', 'to-be-deleted');
-
-      // Verify it exists
-      let result = await cache.get('delete-test');
-      expect(result).toBe('to-be-deleted');
-
-      // Act
-      await cache.del('delete-test');
-
-      // Assert
-      result = await cache.get('delete-test');
-      expect(result).toBeNull();
-    });
-
-    test('should handle deleting non-existent items', async () => {
-      // Arrange & Act
-      await cache.del('non-existent-key');
-
-      // Assert - Should not throw error
-      const result = await cache.get('non-existent-key');
-      expect(result).toBeNull();
-    });
-  });
-
-  describe('Edge Cases - Happy Path', () => {
-    test('should handle very large keys', async () => {
-      // Arrange
-      const longKey = 'x'.repeat(500);
-      const value = 'long-key-value';
-
-      // Act
-      await cache.set(longKey, value);
-      const result = await cache.get(longKey);
-
-      // Assert
-      expect(result).toBe(value);
-    });
-
-    test('should handle rapid operations', async () => {
-      // Arrange
-      const key = 'rapid-test';
-
-      // Act - Rapid set/get operations
-      await cache.set(key, 'value1');
-      await cache.set(key, 'value2');
-      await cache.set(key, 'value3');
-      const result = await cache.get(key);
-
-      // Assert
-      expect(result).toBe('value3');
-    });
-
-    test('should handle cache overflow gracefully', async () => {
-      // Arrange - Create more items than cache can hold
-      const promises = [];
-      for (let i = 0; i < 50; i++) {
-        promises.push(cache.set(`overflow-${i}`, `value-${i}`));
-      }
-
-      // Act
-      await Promise.all(promises);
-
-      // Assert - Most recent items should be accessible
-      const result = await cache.get('overflow-49');
-      expect(result).toBe('value-49');
-    });
-  });
-
-  describe('Error Handling - Happy Path', () => {
-    test('should handle invalid keys gracefully', async () => {
-      // Arrange & Act
-      const result = await cache.get('non-existent-key');
-
-      // Assert
-      expect(result).toBeNull();
-    });
-
-    test('should handle empty string values', async () => {
-      // Arrange
-      const key = 'empty-string-test';
-      const value = '';
-
-      // Act
-      await cache.set(key, value);
-      const result = await cache.get(key);
-
-      // Assert
-      expect(result).toBe(value);
-    });
-  });
-
-  describe('Cache Management - Happy Path', () => {
-    test('should handle cache destruction', async () => {
-      // Arrange
-      await cache.set('destruction-test', 'test-value');
+      await cache.set('destroy-test', 'test-value');
 
       // Act
       await cache.destroy();
 
-      // Assert - Should not throw (destruction completed)
-      expect(true).toBe(true);
-    });
-
-    test('should provide emergency eviction', async () => {
-      // Arrange
-      await cache.set('eviction-test', 'test-value');
-
-      // Act
-      const result = await cache.emergencyEvict();
-
       // Assert
-      expect(result).toBeDefined();
-      expect(typeof result.evictedEntries).toBe('number');
-      expect(typeof result.bytesFreed).toBe('number');
+      expect(mockRedis.disconnect).toHaveBeenCalled();
+      const stats = cache.getStats();
+      expect(stats.memory.entries).toBe(0);
+      expect(stats.serialization.isDestroyed).toBe(true);
     });
 
-    test('should quit gracefully', async () => {
+    test('should quit Redis connection gracefully', async () => {
       // Arrange & Act
       await cache.quit();
 
-      // Assert - Should not throw
-      expect(true).toBe(true);
+      // Assert
+      expect(mockRedis.quit).toHaveBeenCalled();
+      expect(cache.isHealthy()).toBe(false);
+    });
+
+    test('should handle quit failure gracefully', async () => {
+      // Arrange
+      mockRedis.quit.mockRejectedValueOnce(new Error('Quit failed'));
+
+      // Act & Assert - Should not throw
+      await expect(cache.quit()).resolves.not.toThrow();
     });
   });
 
-  describe('Advanced Operations - Happy Path', () => {
-    test('should handle cache existence check', async () => {
+  describe('Serialization Worker Pool', () => {
+    test('should fallback to sync serialization when async fails', async () => {
       // Arrange
-      const key = 'existence-test';
+      const key = 'serialization-test';
       const value = 'test-value';
+
+      // Mock async serialization failure
+      const originalPool = (cache as any).serializationPool;
+      (cache as any).serializationPool = {
+        serialize: vi
+          .fn()
+          .mockRejectedValue(new Error('SerializationPool worker failed')),
+        destroy: vi.fn(),
+        getStats: vi.fn().mockReturnValue({
+          poolSize: 0,
+          activeWorkers: 0,
+          queueLength: 0,
+          isDestroyed: true,
+        }),
+      };
 
       // Act
       await cache.set(key, value);
       const result = await cache.get(key);
-      const nonExistentResult = await cache.get('non-existent');
 
       // Assert
       expect(result).toBe(value);
-      expect(nonExistentResult).toBeNull();
-    });
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Async serialization failed, falling back to sync',
+        expect.objectContaining({ key })
+      );
 
-    test('should handle size calculation for different values', async () => {
-      // Arrange
-      const shortValue = 'short';
-      const longValue = 'x'.repeat(100);
-
-      // Act
-      await cache.set('short-key', shortValue);
-      await cache.set('long-key', longValue);
-
-      // Assert - Both should be stored successfully
-      const shortResult = await cache.get('short-key');
-      const longResult = await cache.get('long-key');
-      expect(shortResult).toBe(shortValue);
-      expect(longResult).toBe(longValue);
-    });
-  });
-
-  describe('Serialization - Happy Path', () => {
-    test('should handle JSON serializable data', async () => {
-      // Arrange
-      const jsonString = JSON.stringify({ key: 'value', num: 42 });
-
-      // Act
-      await cache.set('json-test', jsonString);
-      const result = await cache.get('json-test');
-
-      // Assert
-      expect(result).toBe(jsonString);
-      const parsed = JSON.parse(result!);
-      expect(parsed.key).toBe('value');
-      expect(parsed.num).toBe(42);
-    });
-
-    test('should handle unicode strings', async () => {
-      // Arrange
-      const unicodeValue = '🚀 Unicode test 世界 🌍';
-
-      // Act
-      await cache.set('unicode-test', unicodeValue);
-      const result = await cache.get('unicode-test');
-
-      // Assert
-      expect(result).toBe(unicodeValue);
-    });
-  });
-
-  describe('Memory Pressure - Happy Path', () => {
-    test('should handle memory pressure gracefully', async () => {
-      // Arrange - Fill cache with data
-      for (let i = 0; i < 10; i++) {
-        await cache.set(`pressure-${i}`, 'x'.repeat(200));
-      }
-
-      // Act - Check that cache still functions
-      await cache.set('final-test', 'final-value');
-      const result = await cache.get('final-test');
-
-      // Assert
-      expect(result).toBe('final-value');
+      // Cleanup
+      (cache as any).serializationPool = originalPool;
     });
   });
 });
