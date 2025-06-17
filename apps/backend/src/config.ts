@@ -132,6 +132,9 @@ export const config = {
     // Maximum age for lock files before considering them stale
     staleLockAgeMs: parseEnvNumber(process.env.LOCK_STALE_AGE_MS, 600000), // 10 minutes
 
+    // Retry delay when lock acquisition fails
+    retryDelayMs: parseEnvNumber(process.env.LOCK_RETRY_DELAY_MS, 100),
+
     enableLockLogging: parseEnvBoolean(process.env.DEBUG_LOCK_LOGGING, false), // FIX: Added missing property
   },
 

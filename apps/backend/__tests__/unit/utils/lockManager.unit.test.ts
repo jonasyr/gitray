@@ -1,45 +1,14 @@
-// apps/backend/__tests__/utils/lockManager.test.ts
+// apps/backend/__tests__/unit/utils/lockManager.unit.test.ts
 
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Stats } from 'fs';
 
-// Create a proper Stats mock object
-const createMockStats = (mtimeMs: number = Date.now() - 1000): Stats =>
-  ({
-    mtimeMs,
-    isFile: vi.fn().mockReturnValue(true),
-    isDirectory: vi.fn().mockReturnValue(false),
-    isBlockDevice: vi.fn().mockReturnValue(false),
-    isCharacterDevice: vi.fn().mockReturnValue(false),
-    isSymbolicLink: vi.fn().mockReturnValue(false),
-    isFIFO: vi.fn().mockReturnValue(false),
-    isSocket: vi.fn().mockReturnValue(false),
-    dev: 0,
-    ino: 0,
-    mode: 0,
-    nlink: 0,
-    uid: 0,
-    gid: 0,
-    rdev: 0,
-    size: 0,
-    blksize: 0,
-    blocks: 0,
-    atimeMs: mtimeMs,
-    ctimeMs: mtimeMs,
-    birthtimeMs: mtimeMs,
-    atime: new Date(mtimeMs),
-    mtime: new Date(mtimeMs),
-    ctime: new Date(mtimeMs),
-    birthtime: new Date(mtimeMs),
-  }) as Stats;
-
-// Create comprehensive mocks before any imports
+// Mock file system operations
 const mockFileHandle = {
   writeFile: vi.fn(),
   close: vi.fn(),
 };
 
-// Create comprehensive mocks using vi.hoisted
 const mockFs = vi.hoisted(() => ({
   mkdir: vi.fn(),
   open: vi.fn(),
@@ -48,629 +17,643 @@ const mockFs = vi.hoisted(() => ({
   stat: vi.fn(),
 }));
 
-// Mock timer functions to prevent background intervals
-const originalSetInterval = global.setInterval;
-const originalClearInterval = global.clearInterval;
-const mockSetInterval = vi.fn();
-const mockClearInterval = vi.fn();
-
-// Store interval IDs to track them
-const activeIntervals = new Set<NodeJS.Timeout>();
-
-// Set up environment variables BEFORE any imports
-process.env.NODE_ENV = 'test';
-process.env.JEST_WORKER_ID = '1';
-
-// Mock global timer functions
-global.setInterval = mockSetInterval.mockImplementation(() => {
-  // Return a mock interval ID but don't actually start the interval
-  const mockIntervalId = Symbol('mockInterval') as any;
-  activeIntervals.add(mockIntervalId);
-  return mockIntervalId;
-}) as any;
-
-global.clearInterval = mockClearInterval.mockImplementation(
-  (intervalId: any) => {
-    if (intervalId) {
-      activeIntervals.delete(intervalId);
-    }
-  }
-) as any;
-
-// Mock fs/promises with proper pattern to match lockManager import
-vi.mock('fs', () => ({
-  promises: mockFs,
-}));
-
-// Mock logger
+// Mock dependencies
+vi.mock('fs', () => ({ promises: mockFs }));
 vi.mock('../../../src/services/logger', () => ({
   __esModule: true,
   default: global.mockLogger,
   getLogger: global.getLogger,
 }));
 
-// Mock config
-vi.mock('../../../src/config', () => ({
-  lockConfig: {
-    lockDir: '/tmp/test-locks',
-    defaultTimeoutMs: 5000,
-    cleanupIntervalMs: 10000,
-    staleLockAgeMs: 30000,
-    enableLockLogging: true,
-  },
-}));
+describe('Lock Manager Unit Tests', () => {
+  let mockEnv: any;
+  let lockManager: any;
 
-// Import after mocking
-import {
-  withKeyLock,
-  withOrderedLocks,
-  getLockMetrics,
-  getActiveLocks,
-  shutdownLockManager,
-} from '../../../src/utils/lockManager';
-
-describe('Lock Manager', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
 
-    // Clear mock interval tracking
-    activeIntervals.clear();
+    // Reset environment
+    mockEnv = { ...process.env };
+    delete process.env.NODE_ENV;
+    delete process.env.JEST_WORKER_ID;
 
-    // Initialize mock return values for this test
+    // Clear module cache to test different environment configurations
+    vi.resetModules();
+
+    // Setup default successful mocks
     mockFileHandle.writeFile.mockResolvedValue(undefined);
     mockFileHandle.close.mockResolvedValue(undefined);
     mockFs.mkdir.mockResolvedValue(undefined);
     mockFs.open.mockResolvedValue(mockFileHandle);
     mockFs.unlink.mockResolvedValue(undefined);
     mockFs.readdir.mockResolvedValue([]);
-    mockFs.stat.mockResolvedValue(createMockStats());
+    mockFs.stat.mockResolvedValue({ mtimeMs: Date.now() - 1000 } as Stats);
   });
 
-  afterEach(async () => {
-    // Shutdown the lockManager to clear any timers
-    try {
-      await shutdownLockManager();
-    } catch {
-      // Ignore shutdown errors in tests
-    }
-
-    // Verify all intervals were cleared
-    expect(activeIntervals.size).toBe(0);
+  afterEach(() => {
+    process.env = mockEnv;
   });
 
-  describe('Basic Lock Operations - Happy Path', () => {
-    test('should acquire and release lock successfully', async () => {
+  describe('Environment Configuration Logic', () => {
+    test('should start cleanup scheduler when not in test environment', async () => {
       // Arrange
-      const lockKey = 'test-lock';
-      const executionOrder: string[] = [];
+      process.env.NODE_ENV = 'production';
+      const mockSetInterval = vi
+        .spyOn(global, 'setInterval')
+        .mockImplementation(() => 'timer-id' as any);
 
-      const testFunction = async () => {
-        executionOrder.push('function-start');
-        executionOrder.push('function-end');
-        return 'success';
-      };
+      // Mock config after environment is set
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          enableLockLogging: true,
+        },
+      }));
 
-      // Ensure the first fs.open call succeeds immediately
-      mockFs.open.mockResolvedValueOnce(mockFileHandle);
-
-      // Act
-      const result = await withKeyLock(lockKey, testFunction);
+      // Act - Import causes constructor to run
+      await import('../../../src/utils/lockManager');
 
       // Assert
-      expect(result).toBe('success');
-      expect(mockFs.mkdir).toHaveBeenCalledWith('/tmp/test-locks', {
-        recursive: true,
-      });
-      expect(mockFs.open).toHaveBeenCalledWith(
-        '/tmp/test-locks/test-lock',
-        'wx'
-      );
-      expect(mockFileHandle.writeFile).toHaveBeenCalled();
-      expect(mockFileHandle.close).toHaveBeenCalled();
-      expect(mockFs.unlink).toHaveBeenCalledWith('/tmp/test-locks/test-lock');
-      expect(executionOrder).toEqual(['function-start', 'function-end']);
+      expect(mockSetInterval).toHaveBeenCalledWith(expect.any(Function), 10000);
+
+      mockSetInterval.mockRestore();
     });
 
-    test('should handle async function execution correctly', async () => {
+    test('should not start cleanup scheduler when in test environment', async () => {
       // Arrange
-      const lockKey = 'async-test';
-      let executedValue = '';
+      process.env.NODE_ENV = 'test';
+      const mockSetInterval = vi
+        .spyOn(global, 'setInterval')
+        .mockImplementation(() => 'timer-id' as any);
 
-      const asyncTestFunction = async () => {
-        executedValue = 'started';
-        // Simulate async work
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        executedValue = 'completed';
-        return { status: 'done', value: executedValue };
-      };
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          enableLockLogging: true,
+        },
+      }));
 
       // Act
-      const result = await withKeyLock(lockKey, asyncTestFunction);
+      await import('../../../src/utils/lockManager');
 
       // Assert
-      expect(result).toEqual({ status: 'done', value: 'completed' });
-      expect(executedValue).toBe('completed');
+      expect(mockSetInterval).not.toHaveBeenCalled();
+
+      mockSetInterval.mockRestore();
     });
 
-    test('should propagate function return values correctly', async () => {
+    test('should not start cleanup scheduler when JEST_WORKER_ID is set', async () => {
       // Arrange
-      const lockKey = 'return-test';
-      const expectedReturn = { data: [1, 2, 3], count: 3 };
+      process.env.JEST_WORKER_ID = '1';
+      const mockSetInterval = vi
+        .spyOn(global, 'setInterval')
+        .mockImplementation(() => 'timer-id' as any);
 
-      const returnTestFunction = async () => {
-        return expectedReturn;
-      };
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          enableLockLogging: true,
+        },
+      }));
 
       // Act
-      const result = await withKeyLock(lockKey, returnTestFunction);
+      await import('../../../src/utils/lockManager');
 
       // Assert
-      expect(result).toEqual(expectedReturn);
-    });
-  });
+      expect(mockSetInterval).not.toHaveBeenCalled();
 
-  describe('Request Coalescing - Happy Path', () => {
-    test('should coalesce identical concurrent requests', async () => {
-      // Arrange
-      const lockKey = 'coalesce-test';
-      let executionCount = 0;
-
-      const testFunction = async () => {
-        executionCount++;
-        return `execution-${executionCount}`;
-      };
-
-      // Act
-      const promises = [
-        withKeyLock(lockKey, testFunction),
-        withKeyLock(lockKey, testFunction),
-        withKeyLock(lockKey, testFunction),
-      ];
-
-      const results = await Promise.all(promises);
-
-      // Assert
-      expect(executionCount).toBe(1);
-      expect(results).toEqual(['execution-1', 'execution-1', 'execution-1']);
-      expect(mockFs.open).toHaveBeenCalledTimes(1);
-    });
-
-    test('should handle error propagation in coalesced requests', async () => {
-      // Arrange
-      const lockKey = 'error-coalesce';
-      const expectedError = new Error('Test error');
-
-      const errorFunction = async () => {
-        throw expectedError;
-      };
-
-      // Act & Assert
-      const promises = [
-        withKeyLock(lockKey, errorFunction),
-        withKeyLock(lockKey, errorFunction),
-      ];
-
-      await expect(Promise.all(promises)).rejects.toThrow('Test error');
-    });
-
-    test('should not coalesce different keys', async () => {
-      // Arrange
-      let execution1 = false;
-      let execution2 = false;
-
-      const function1 = async () => {
-        execution1 = true;
-        return 'result1';
-      };
-
-      const function2 = async () => {
-        execution2 = true;
-        return 'result2';
-      };
-
-      // Act
-      const [result1, result2] = await Promise.all([
-        withKeyLock('key1', function1),
-        withKeyLock('key2', function2),
-      ]);
-
-      // Assert
-      expect(execution1).toBe(true);
-      expect(execution2).toBe(true);
-      expect(result1).toBe('result1');
-      expect(result2).toBe('result2');
-      expect(mockFs.open).toHaveBeenCalledTimes(2);
+      mockSetInterval.mockRestore();
     });
   });
 
-  describe('Lock Metrics - Happy Path', () => {
-    test('should track lock acquisition metrics', async () => {
-      // Arrange
-      const lockKey = 'metrics-test';
-      const testFunction = async () => 'success';
+  describe('Error Code Handling', () => {
+    beforeEach(async () => {
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 1000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          retryDelayMs: 10, // Fast retry for tests
+          enableLockLogging: false,
+        },
+      }));
 
-      // Get initial metrics to calculate the delta
-      const initialMetrics = getLockMetrics();
-
-      // Act
-      await withKeyLock(lockKey, testFunction);
-      const finalMetrics = getLockMetrics();
-
-      // Assert - Check that metrics increased by 1
-      expect(finalMetrics.acquisitions).toBe(initialMetrics.acquisitions + 1);
-      expect(finalMetrics.averageWaitTime).toBeGreaterThanOrEqual(0);
-      expect(finalMetrics.currentLocks).toBe(0);
+      const module = await import('../../../src/utils/lockManager');
+      lockManager = module;
     });
 
-    test('should track multiple lock operations', async () => {
+    test('should retry when lock exists and eventually succeed', async () => {
       // Arrange
-      const testFunction = async () => 'success';
+      const existsError = new Error('File exists');
+      (existsError as any).code = 'EEXIST';
 
-      // Get initial metrics to calculate the delta
-      const initialMetrics = getLockMetrics();
-
-      // Act
-      await withKeyLock('key1', testFunction);
-      await withKeyLock('key2', testFunction);
-      await withKeyLock('key3', testFunction);
-
-      const finalMetrics = getLockMetrics();
-
-      // Assert - Check that metrics increased by 3
-      expect(finalMetrics.acquisitions).toBe(initialMetrics.acquisitions + 3);
-      expect(finalMetrics.currentLocks).toBe(0);
-    });
-
-    test('should provide active locks information', async () => {
-      // Arrange
-      const lockKey = 'active-test';
-      let activeLocksDuringExecution: any[] = [];
-
-      const testFunction = async () => {
-        activeLocksDuringExecution = getActiveLocks();
-        return 'success';
-      };
-
-      // Act
-      await withKeyLock(lockKey, testFunction);
-
-      // Assert
-      expect(activeLocksDuringExecution).toHaveLength(1);
-      expect(activeLocksDuringExecution[0]).toMatchObject({
-        key: lockKey,
-        startTime: expect.any(Number),
-        pid: expect.any(Number),
-        hostname: expect.any(String),
-      });
-
-      const currentActiveLocks = getActiveLocks();
-      expect(currentActiveLocks).toHaveLength(0);
-    });
-  });
-
-  describe('Stale Lock Cleanup - Happy Path', () => {
-    test('should clean up stale locks when manually triggered', async () => {
-      // Arrange
-      const staleLockFiles = ['stale-lock-1', 'stale-lock-2'];
-      const currentTime = Date.now();
-
-      mockFs.readdir.mockResolvedValue(staleLockFiles as any);
-      mockFs.stat.mockImplementation(() => {
-        return Promise.resolve({
-          mtimeMs: currentTime - 60000, // 60 seconds old (stale)
-        } as any);
-      });
-
-      // Act - Trigger cleanup through shutdown (which calls cleanup)
-      await shutdownLockManager();
-
-      // Assert
-      expect(mockFs.readdir).toHaveBeenCalled();
-      expect(mockFs.unlink).toHaveBeenCalledTimes(2);
-    });
-
-    test('should preserve recent locks during cleanup', async () => {
-      // Arrange
-      const lockFiles = ['recent-lock', 'stale-lock'];
-      const currentTime = Date.now();
-
-      mockFs.readdir.mockResolvedValue(lockFiles as any);
-      mockFs.stat.mockImplementation((filePath: any) => {
-        if (typeof filePath === 'string' && filePath.includes('recent-lock')) {
-          return Promise.resolve({ mtimeMs: currentTime - 5000 } as any); // 5 seconds old (recent)
-        } else {
-          return Promise.resolve({ mtimeMs: currentTime - 60000 } as any); // 60 seconds old (stale)
-        }
-      });
-
-      // Act
-      await shutdownLockManager();
-
-      // Assert
-      expect(mockFs.unlink).toHaveBeenCalledTimes(1);
-    });
-
-    test('should verify timer mocking is working', () => {
-      // Since we prevent the timer from starting in test environment,
-      // we just verify our mock setup is correct
-      expect(mockSetInterval).toBeDefined();
-      expect(mockClearInterval).toBeDefined();
-      expect(activeIntervals).toBeDefined();
-    });
-  });
-
-  describe('Error Handling - Happy Path', () => {
-    test('should handle lock directory creation gracefully', async () => {
-      // Arrange
-      const lockKey = 'mkdir-test';
-      const testFunction = async () => 'success';
-
-      mockFs.mkdir.mockRejectedValueOnce(new Error('Permission denied'));
-
-      // Act & Assert
-      await expect(withKeyLock(lockKey, testFunction)).rejects.toThrow();
-    });
-
-    test('should handle file cleanup errors gracefully', async () => {
-      // Arrange
-      const lockKey = 'cleanup-error-test';
-      const testFunction = async () => 'success';
-
-      mockFs.unlink.mockRejectedValue(new Error('File in use'));
-
-      // Act
-      const result = await withKeyLock(lockKey, testFunction);
-
-      // Assert
-      expect(result).toBe('success');
-    });
-
-    test('should propagate function errors correctly', async () => {
-      // Arrange
-      const lockKey = 'function-error-test';
-      const expectedError = new Error('Function failed');
-
-      const errorFunction = async () => {
-        throw expectedError;
-      };
-
-      // Act & Assert
-      await expect(withKeyLock(lockKey, errorFunction)).rejects.toThrow(
-        'Function failed'
-      );
-
-      expect(mockFileHandle.close).toHaveBeenCalled();
-      expect(mockFs.unlink).toHaveBeenCalled();
-    });
-  });
-
-  describe('Lock Timeout Handling - Happy Path', () => {
-    test('should use custom timeout when provided', async () => {
-      // Arrange
-      const lockKey = 'timeout-test';
-      const customTimeout = 100; // Use shorter timeout for testing
-      const testFunction = async () => 'success';
-
-      const lockExistsError = new Error('File exists');
-      (lockExistsError as any).code = 'EEXIST';
-
-      // Mock to fail initially, then succeed after a delay
       let callCount = 0;
       mockFs.open.mockImplementation(() => {
         callCount++;
-        if (callCount < 5) {
-          return Promise.reject(lockExistsError);
-        }
+        if (callCount < 3) return Promise.reject(existsError);
         return Promise.resolve(mockFileHandle);
       });
 
-      // Act & Assert - This should succeed before timeout
-      const result = await withKeyLock(lockKey, testFunction, customTimeout);
-      expect(result).toBe('success');
-    });
-
-    test('should use default timeout when not provided', async () => {
-      // Arrange
-      const lockKey = 'default-timeout-test';
-      const testFunction = async () => 'success';
+      const testFn = vi.fn().mockResolvedValue('success');
 
       // Act
-      const result = await withKeyLock(lockKey, testFunction);
+      const result = await lockManager.withKeyLock('test-key', testFn);
 
       // Assert
       expect(result).toBe('success');
-    });
-  });
-
-  describe('Shutdown Behavior - Happy Path', () => {
-    test('should shutdown cleanly and stop cleanup scheduler', async () => {
-      // Act
-      await shutdownLockManager();
-
-      // Assert - In test environment, timer doesn't start so clearInterval may not be called
-      // But we should still verify that fs cleanup operations happen
-      expect(mockFs.readdir).toHaveBeenCalled();
+      expect(mockFs.open).toHaveBeenCalledTimes(3);
+      expect(testFn).toHaveBeenCalledTimes(1);
     });
 
-    test('should provide final metrics on shutdown', async () => {
+    test('should handle ENOENT error when checking stale locks', async () => {
       // Arrange
-      const lockKey = 'shutdown-test';
-      const testFunction = async () => 'success';
+      const existsError = new Error('File exists');
+      (existsError as any).code = 'EEXIST';
 
-      await withKeyLock(lockKey, testFunction);
+      const noentError = new Error('No such file');
+      (noentError as any).code = 'ENOENT';
 
-      // Act
-      await shutdownLockManager();
-      const finalMetrics = getLockMetrics();
+      mockFs.open.mockRejectedValueOnce(existsError);
+      mockFs.stat.mockRejectedValueOnce(noentError);
+      mockFs.open.mockResolvedValueOnce(mockFileHandle);
 
-      // Assert
-      expect(finalMetrics.acquisitions).toBeGreaterThan(0);
-      expect(finalMetrics.currentLocks).toBe(0);
-    });
-  });
-
-  describe('Cross-Process Simulation - Happy Path', () => {
-    test('should handle concurrent lock attempts from different processes', async () => {
-      // Arrange
-      const lockKey = 'cross-process-test';
-      let process1Complete = false;
-      let process2Complete = false;
-
-      const process1Function = async () => {
-        process1Complete = true;
-        return 'process1-result';
-      };
-
-      const process2Function = async () => {
-        process2Complete = true;
-        return 'process2-result';
-      };
+      const testFn = vi.fn().mockResolvedValue('success');
 
       // Act
-      const [result1, result2] = await Promise.all([
-        withKeyLock(lockKey, process1Function),
-        withKeyLock(lockKey, process2Function),
-      ]);
-
-      // Assert - Both should complete with coalescing
-      expect(process1Complete).toBe(true);
-      expect(process2Complete).toBe(false); // Coalesced, didn't execute
-      expect(result1).toBe('process1-result');
-      expect(result2).toBe('process1-result'); // Same result due to coalescing
-    });
-  });
-
-  describe('Ordered Locks - Deadlock Prevention', () => {
-    test('should acquire locks in sorted order', async () => {
-      // Arrange
-      const executionOrder: string[] = [];
-      const locks = ['lock-z', 'lock-a', 'lock-m'];
-
-      const testFunction = async () => {
-        executionOrder.push('function-executed');
-        return 'success';
-      };
-
-      // Act
-      const result = await withOrderedLocks(locks, testFunction);
+      const result = await lockManager.withKeyLock('test-key', testFn);
 
       // Assert
       expect(result).toBe('success');
-      expect(executionOrder).toEqual(['function-executed']);
-
-      // Verify locks were acquired in sorted order (lock-a, lock-m, lock-z)
-      expect(mockFs.open).toHaveBeenCalledWith('/tmp/test-locks/lock-a', 'wx');
-      expect(mockFs.open).toHaveBeenCalledWith('/tmp/test-locks/lock-m', 'wx');
-      expect(mockFs.open).toHaveBeenCalledWith('/tmp/test-locks/lock-z', 'wx');
+      expect(mockFs.stat).toHaveBeenCalled();
     });
 
-    test('should handle single lock correctly', async () => {
+    test('should throw timeout error when lock acquisition exceeds timeout', async () => {
       // Arrange
-      const locks = ['single-lock'];
-      const testFunction = async () => 'single-result';
+      const existsError = new Error('File exists');
+      (existsError as any).code = 'EEXIST';
+
+      mockFs.open.mockRejectedValue(existsError);
+      // Mock stat to return a recent timestamp, so the lock appears fresh (not stale)
+      const recentTime = Date.now() - 10; // 10ms ago, definitely not stale
+      mockFs.stat.mockResolvedValue({ mtimeMs: recentTime } as Stats);
+
+      const testFn = vi.fn();
+
+      // Act & Assert - Use 50ms timeout with 10ms retry delay for fast test
+      await expect(
+        lockManager.withKeyLock('test-key', testFn, 50)
+      ).rejects.toThrow(/Lock timeout for test-key/);
+
+      expect(testFn).not.toHaveBeenCalled();
+    });
+
+    test('should propagate non-EEXIST errors immediately', async () => {
+      // Arrange
+      const permissionError = new Error('Permission denied');
+      (permissionError as any).code = 'EACCES';
+
+      mockFs.open.mockRejectedValue(permissionError);
+      const testFn = vi.fn();
+
+      // Act & Assert
+      await expect(lockManager.withKeyLock('test-key', testFn)).rejects.toThrow(
+        'Permission denied'
+      );
+    });
+  });
+
+  describe('Stale Lock Detection Logic', () => {
+    beforeEach(async () => {
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          retryDelayMs: 10, // Fast retry for tests
+          enableLockLogging: true,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      lockManager = module;
+    });
+
+    test('should remove stale lock when age exceeds timeout', async () => {
+      // Arrange
+      const existsError = new Error('File exists');
+      (existsError as any).code = 'EEXIST';
+
+      const oldTime = Date.now() - 60000; // 60 seconds ago
+
+      mockFs.open.mockRejectedValueOnce(existsError);
+      mockFs.stat.mockResolvedValueOnce({ mtimeMs: oldTime } as Stats);
+      mockFs.unlink.mockResolvedValueOnce(undefined);
+      mockFs.open.mockResolvedValueOnce(mockFileHandle);
+
+      const testFn = vi.fn().mockResolvedValue('success');
 
       // Act
-      const result = await withOrderedLocks(locks, testFunction);
+      const result = await lockManager.withKeyLock('test-key', testFn, 5000);
 
       // Assert
-      expect(result).toBe('single-result');
-      expect(mockFs.open).toHaveBeenCalledWith(
-        '/tmp/test-locks/single-lock',
-        'wx'
+      expect(result).toBe('success');
+      expect(mockFs.unlink).toHaveBeenCalled();
+      expect(mockFs.open).toHaveBeenCalledTimes(2); // Once failed, once succeeded
+    });
+
+    test('should not remove recent lock during stale check', async () => {
+      // Arrange
+      const existsError = new Error('File exists');
+      (existsError as any).code = 'EEXIST';
+
+      const recentTime = Date.now() - 1000; // 1 second ago
+
+      mockFs.open.mockRejectedValue(existsError);
+      mockFs.stat.mockResolvedValue({ mtimeMs: recentTime } as Stats);
+
+      const testFn = vi.fn();
+
+      // Act & Assert
+      await expect(
+        lockManager.withKeyLock('test-key', testFn, 50)
+      ).rejects.toThrow(/Lock timeout/);
+
+      expect(mockFs.unlink).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Configuration-Driven Behavior', () => {
+    test('should log when enableLockLogging is true', async () => {
+      // Arrange
+      process.env.NODE_ENV = 'test';
+      const mockLogger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      };
+
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          enableLockLogging: true,
+        },
+      }));
+
+      vi.doMock('../../../src/services/logger', () => ({
+        getLogger: () => mockLogger,
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      const testFn = vi.fn().mockResolvedValue('success');
+
+      // Act
+      await module.withKeyLock('test-key', testFn);
+
+      // Assert
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Attempting to acquire lock',
+        expect.any(Object)
       );
     });
 
-    test('should handle empty lock array', async () => {
+    test('should not log when enableLockLogging is false', async () => {
       // Arrange
-      const locks: string[] = [];
-      const testFunction = async () => 'empty-result';
+      process.env.NODE_ENV = 'test';
+      const mockLogger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      };
+
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          enableLockLogging: false,
+        },
+      }));
+
+      vi.doMock('../../../src/services/logger', () => ({
+        getLogger: () => mockLogger,
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      const testFn = vi.fn().mockResolvedValue('success');
 
       // Act
-      const result = await withOrderedLocks(locks, testFunction);
+      await module.withKeyLock('test-key', testFn);
+
+      // Assert
+      expect(mockLogger.debug).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Request Coalescing Logic', () => {
+    beforeEach(async () => {
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          enableLockLogging: false,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      lockManager = module;
+    });
+
+    test('should execute function only once for concurrent requests with same key', async () => {
+      // Arrange
+      let executionCount = 0;
+      const testFn = vi.fn().mockImplementation(async () => {
+        executionCount++;
+        return `result-${executionCount}`;
+      });
+
+      // Act
+      const [result1, result2, result3] = await Promise.all([
+        lockManager.withKeyLock('same-key', testFn),
+        lockManager.withKeyLock('same-key', testFn),
+        lockManager.withKeyLock('same-key', testFn),
+      ]);
+
+      // Assert
+      expect(executionCount).toBe(1);
+      expect(result1).toBe('result-1');
+      expect(result2).toBe('result-1');
+      expect(result3).toBe('result-1');
+      expect(testFn).toHaveBeenCalledTimes(1);
+    });
+
+    test('should propagate errors to all coalesced requests', async () => {
+      // Arrange
+      const testError = new Error('Function failed');
+      const testFn = vi.fn().mockRejectedValue(testError);
+
+      // Act & Assert
+      const promises = [
+        lockManager.withKeyLock('error-key', testFn),
+        lockManager.withKeyLock('error-key', testFn),
+      ];
+
+      await expect(Promise.all(promises)).rejects.toThrow('Function failed');
+      expect(testFn).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Lock Release Error Handling', () => {
+    beforeEach(async () => {
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          enableLockLogging: false,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      lockManager = module;
+    });
+
+    test('should succeed when function completes despite file handle close error', async () => {
+      // Arrange
+      mockFileHandle.close.mockRejectedValue(new Error('Handle close failed'));
+      const testFn = vi.fn().mockResolvedValue('success');
+
+      // Act
+      const result = await lockManager.withKeyLock('test-key', testFn);
+
+      // Assert
+      expect(result).toBe('success');
+      expect(mockFs.unlink).toHaveBeenCalled(); // Cleanup should still happen
+    });
+
+    test('should succeed when function completes despite file unlink error', async () => {
+      // Arrange
+      mockFs.unlink.mockRejectedValue(new Error('File deletion failed'));
+      const testFn = vi.fn().mockResolvedValue('success');
+
+      // Act
+      const result = await lockManager.withKeyLock('test-key', testFn);
+
+      // Assert
+      expect(result).toBe('success');
+    });
+
+    test('should still cleanup lock tracking when release fails', async () => {
+      // Arrange
+      mockFileHandle.close.mockRejectedValue(new Error('Close failed'));
+      mockFs.unlink.mockRejectedValue(new Error('Unlink failed'));
+
+      const testFn = vi.fn().mockResolvedValue('success');
+
+      // Act
+      const result = await lockManager.withKeyLock('test-key', testFn);
+      const activeLocks = lockManager.getActiveLocks();
+
+      // Assert
+      expect(result).toBe('success');
+      expect(activeLocks).toHaveLength(0); // Should be cleaned up from tracking
+    });
+  });
+
+  describe('Force Release Functionality', () => {
+    beforeEach(async () => {
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          enableLockLogging: false,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      lockManager = module;
+    });
+
+    test('should return true when force release succeeds', async () => {
+      // Arrange
+      mockFs.unlink.mockResolvedValue(undefined);
+
+      // Act
+      const result = await lockManager.forceReleaseLock('test-key');
+
+      // Assert
+      expect(result).toBe(true);
+      expect(mockFs.unlink).toHaveBeenCalledWith('/tmp/test-locks/test-key');
+    });
+
+    test('should return false when force release fails', async () => {
+      // Arrange
+      mockFs.unlink.mockRejectedValue(new Error('Permission denied'));
+
+      // Act
+      const result = await lockManager.forceReleaseLock('test-key');
+
+      // Assert
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('Ordered Locks Deadlock Prevention', () => {
+    beforeEach(async () => {
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          enableLockLogging: false,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      lockManager = module;
+    });
+
+    test('should acquire locks in sorted order regardless of input order', async () => {
+      // Arrange
+      const lockOrder: string[] = [];
+
+      // Capture the order locks are acquired by monitoring fs.open calls
+      mockFs.open.mockImplementation((path: string) => {
+        const lockName = path.split('/').pop();
+        lockOrder.push(lockName!);
+        return Promise.resolve(mockFileHandle);
+      });
+
+      const testFn = vi.fn().mockResolvedValue('success');
+
+      // Act
+      await lockManager.withOrderedLocks(
+        ['lock-z', 'lock-a', 'lock-m'],
+        testFn
+      );
+
+      // Assert
+      expect(lockOrder).toEqual(['lock-a', 'lock-m', 'lock-z']);
+      expect(testFn).toHaveBeenCalledTimes(1);
+    });
+
+    test('should handle empty lock array by executing function immediately', async () => {
+      // Arrange
+      const testFn = vi.fn().mockResolvedValue('empty-result');
+
+      // Act
+      const result = await lockManager.withOrderedLocks([], testFn);
 
       // Assert
       expect(result).toBe('empty-result');
-      // No lock operations should have been called
+      expect(mockFs.open).not.toHaveBeenCalled();
     });
 
-    test('should prevent deadlock with consistent ordering', async () => {
+    test('should remove duplicate locks before sorting', async () => {
       // Arrange
-      const results: string[] = [];
+      const lockOrder: string[] = [];
 
-      // Simulate two concurrent operations that would deadlock with different lock orders
-      const operation1 = async () => {
-        return withOrderedLocks(
-          ['repo-access:repo1', 'disk:key1'],
-          async () => {
-            results.push('operation1');
-            return 'result1';
-          }
-        );
-      };
+      mockFs.open.mockImplementation((path: string) => {
+        const lockName = path.split('/').pop();
+        lockOrder.push(lockName!);
+        return Promise.resolve(mockFileHandle);
+      });
 
-      const operation2 = async () => {
-        return withOrderedLocks(
-          ['disk:key1', 'repo-access:repo1'],
-          async () => {
-            results.push('operation2');
-            return 'result2';
-          }
-        );
-      };
+      const testFn = vi.fn().mockResolvedValue('success');
 
       // Act
-      const [result1, result2] = await Promise.all([
-        operation1(),
-        operation2(),
-      ]);
-
-      // Assert
-      expect(results).toHaveLength(1); // Due to coalescing, only one should execute
-      expect([result1, result2]).toContain('result1');
-      // Both operations should use the same sorted lock order internally
-    });
-
-    test('should handle duplicate locks in array', async () => {
-      // Arrange
-      const locks = ['lock-b', 'lock-a', 'lock-b', 'lock-a'];
-      const testFunction = async () => 'duplicate-result';
-
-      // Act
-      const result = await withOrderedLocks(locks, testFunction);
-
-      // Assert
-      expect(result).toBe('duplicate-result');
-      // Should only acquire each unique lock once, in sorted order
-    });
-
-    test('should propagate errors correctly', async () => {
-      // Arrange
-      const locks = ['error-lock-z', 'error-lock-a'];
-      const testError = new Error('Test error in ordered locks');
-      const testFunction = async () => {
-        throw testError;
-      };
-
-      // Act & Assert
-      await expect(withOrderedLocks(locks, testFunction)).rejects.toThrow(
-        'Test error in ordered locks'
+      await lockManager.withOrderedLocks(
+        ['lock-b', 'lock-a', 'lock-b'],
+        testFn
       );
+
+      // Assert
+      expect(lockOrder).toEqual(['lock-a', 'lock-b']); // Duplicates removed, sorted
+      expect(mockFs.open).toHaveBeenCalledTimes(2); // Only 2 unique locks
     });
   });
 
-  afterAll(async () => {
-    // Ensure final cleanup
-    try {
-      await shutdownLockManager();
-    } catch {
-      // Ignore shutdown errors in tests
-    }
+  describe('Metrics Calculation', () => {
+    beforeEach(async () => {
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          enableLockLogging: false,
+        },
+      }));
 
-    // Restore original timer functions
-    global.setInterval = originalSetInterval;
-    global.clearInterval = originalClearInterval;
+      const module = await import('../../../src/utils/lockManager');
+      lockManager = module;
+    });
 
-    // Verify all intervals were cleared
-    expect(activeIntervals.size).toBe(0);
+    test('should correctly calculate average wait time over multiple acquisitions', async () => {
+      // Arrange
+      const testFn = vi.fn().mockResolvedValue('success');
+      const initialMetrics = lockManager.getLockMetrics();
+
+      // Act - Perform multiple lock operations
+      await lockManager.withKeyLock('key1', testFn);
+      await lockManager.withKeyLock('key2', testFn);
+      await lockManager.withKeyLock('key3', testFn);
+
+      const finalMetrics = lockManager.getLockMetrics();
+
+      // Assert
+      expect(finalMetrics.acquisitions).toBe(initialMetrics.acquisitions + 3);
+      expect(finalMetrics.averageWaitTime).toBeGreaterThanOrEqual(0);
+      expect(finalMetrics.currentLocks).toBe(0); // All should be released
+    });
+
+    test('should track timeout events when they occur', async () => {
+      // Arrange
+      const existsError = new Error('File exists');
+      (existsError as any).code = 'EEXIST';
+
+      mockFs.open.mockRejectedValue(existsError);
+      mockFs.stat.mockRejectedValue(existsError); // Always fail stale check
+
+      const testFn = vi.fn();
+      const initialMetrics = lockManager.getLockMetrics();
+
+      // Act & Assert
+      await expect(
+        lockManager.withKeyLock('timeout-key', testFn, 50)
+      ).rejects.toThrow(/Lock timeout/);
+
+      const finalMetrics = lockManager.getLockMetrics();
+      expect(finalMetrics.timeouts).toBe(initialMetrics.timeouts + 1);
+    });
   });
 });

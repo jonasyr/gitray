@@ -129,15 +129,13 @@ class LockManager {
   /**
    * FIX: Improved stale lock detection with better error handling
    */
-  private async tryRemoveIfStale(
-    lockPath: string,
-    timeout: number
-  ): Promise<boolean> {
+  private async tryRemoveIfStale(lockPath: string): Promise<boolean> {
     try {
       const stat = await fs.stat(lockPath);
       const age = Date.now() - stat.mtimeMs;
 
-      if (age > timeout) {
+      // Use the configured stale lock age, not the acquisition timeout
+      if (age > lockConfig.staleLockAgeMs) {
         await fs.unlink(lockPath);
         this.metrics.staleCleaned++;
 
@@ -214,7 +212,7 @@ class LockManager {
         }
 
         // Try to remove stale lock
-        const wasStale = await this.tryRemoveIfStale(lockPath, timeout);
+        const wasStale = await this.tryRemoveIfStale(lockPath);
         if (wasStale) {
           continue; // Try again immediately
         }
@@ -235,7 +233,9 @@ class LockManager {
         }
 
         // Wait before retrying
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await new Promise((resolve) =>
+          setTimeout(resolve, lockConfig.retryDelayMs)
+        );
       }
     }
   }
