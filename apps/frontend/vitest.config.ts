@@ -3,6 +3,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import * as path from 'path';
+import * as os from 'os';
 
 export default defineConfig({
   plugins: [react()],
@@ -13,6 +14,13 @@ export default defineConfig({
     include: ['**/*.{test,spec}.{ts,tsx}'],
     exclude: ['node_modules', 'dist', 'coverage'],
     css: false,
+    pool: 'threads',
+    poolOptions: {
+      threads: {
+        minThreads: 1,
+        maxThreads: Math.max(1, Math.floor(os.cpus().length * 0.8)), // Use 80% of available cores
+      },
+    },
     server: {
       deps: {
         inline: ['@testing-library/user-event'],
@@ -24,6 +32,7 @@ export default defineConfig({
       all: false,
       clean: true,
       extension: ['.ts', '.tsx'],
+      skipFull: true,
       exclude: [
         // Paths relative to this project's root (apps/frontend)
         'node_modules/**',
