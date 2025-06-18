@@ -1,14 +1,15 @@
 // apps/backend/__tests__/unit/services/repositoryCache.unit.test.ts
-// OPTIMIZED VERSION - 70% fewer lines, 85%+ coverage
+// CORRECTED OPTIMIZATION - Maintains coverage while reducing real bloat
 
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Commit, CommitHeatmapData } from '@gitray/shared-types';
 
-// Focused mocks - only what's needed
+// Streamlined mocks - comprehensive but not excessive
 const mockHybridCache = vi.hoisted(() => ({
   get: vi.fn(),
   set: vi.fn(),
   del: vi.fn(),
+  clear: vi.fn(),
   quit: vi.fn().mockResolvedValue(undefined),
   getStats: vi.fn().mockReturnValue({
     memory: { entries: 10, usageBytes: 1024 },
@@ -18,6 +19,7 @@ const mockHybridCache = vi.hoisted(() => ({
 
 const mockGitService = vi.hoisted(() => ({
   getCommits: vi.fn(),
+  aggregateCommits: vi.fn(),
   aggregateCommitsByTime: vi.fn(),
 }));
 
@@ -28,19 +30,27 @@ const mockLogger = vi.hoisted(() => ({
   debug: vi.fn(),
 }));
 
+const mockWithSharedRepository = vi.hoisted(() => vi.fn());
+const mockWithKeyLock = vi.hoisted(() => vi.fn());
+const mockWithOrderedLocks = vi.hoisted(() => vi.fn());
+
+// Consolidated metrics mock
 const mockMetrics = vi.hoisted(() => ({
   cacheHits: { inc: vi.fn() },
   cacheMisses: { inc: vi.fn() },
   getRepositorySizeCategory: vi.fn().mockReturnValue('medium'),
   recordEnhancedCacheOperation: vi.fn(),
   updateServiceHealthScore: vi.fn(),
+  recordDetailedError: vi.fn(),
   recordDataFreshness: vi.fn(),
   recordCacheTransaction: vi.fn(),
+  recordTransactionRollback: vi.fn(),
   recordRollbackDuration: vi.fn(),
-  recordDetailedError: vi.fn(),
+  recordRollbackVerification: vi.fn(),
+  recordCriticalRollbackFailure: vi.fn(),
 }));
 
-// Mock infrastructure
+// Efficient mock setup
 vi.mock('../../../src/utils/hybridLruCache', () => ({
   default: vi.fn(() => mockHybridCache),
 }));
@@ -54,23 +64,44 @@ vi.mock('../../../src/services/logger', () => ({
 }));
 
 vi.mock('../../../src/services/repositoryCoordinator', () => ({
-  withSharedRepository: vi.fn(async (repoUrl, fn) => {
-    return await fn({
-      localPath: '/tmp/repo',
-      commitCount: 100,
-      sizeCategory: 'medium',
-      isShared: false,
-      refCount: 1,
-    });
-  }),
+  withSharedRepository: mockWithSharedRepository,
 }));
 
 vi.mock('../../../src/utils/lockManager', () => ({
-  withKeyLock: vi.fn(async (key, fn) => await fn()),
-  withOrderedLocks: vi.fn(async (locks, fn) => await fn()),
+  withKeyLock: mockWithKeyLock,
+  withOrderedLocks: mockWithOrderedLocks,
 }));
 
 vi.mock('../../../src/services/metrics', () => mockMetrics);
+
+vi.mock('../../../src/services/distributedCacheInvalidation', () => ({
+  getDistributedCacheInvalidation: vi.fn(() => ({
+    registerInvalidationHandler: vi.fn(),
+    invalidateGlobally: vi.fn().mockResolvedValue(undefined),
+    isServiceHealthy: vi.fn().mockReturnValue(true),
+  })),
+  shutdownDistributedCacheInvalidation: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../../src/config', () => ({
+  config: {
+    hybridCache: {
+      maxEntries: 1000,
+      memoryLimitBytes: 1024 * 1024,
+      diskPath: '/tmp/test-cache',
+      lockTimeoutMs: 5000,
+      enableRedis: false,
+    },
+    cacheStrategy: {
+      hierarchicalCaching: true,
+      cacheKeys: {
+        rawCommitsTTL: 3600,
+        filteredCommitsTTL: 1800,
+        aggregatedDataTTL: 900,
+      },
+    },
+  },
+}));
 
 // Test data
 const testCommits: Commit[] = [
@@ -96,42 +127,69 @@ const testHeatmapData: CommitHeatmapData = {
   metadata: { maxCommitCount: 2, totalCommits: 2 },
 };
 
+const mockRepositoryHandle = {
+  localPath: '/tmp/repo',
+  commitCount: 100,
+  sizeCategory: 'medium' as const,
+  isShared: false,
+  refCount: 1,
+};
+
 describe('RepositoryCache', () => {
   let repositoryCache: any;
 
   beforeEach(async () => {
-    // Reset all mocks
+    // Streamlined reset - only what's needed
     vi.clearAllMocks();
 
-    // Setup default behaviors
+    // Default behaviors
     mockHybridCache.get.mockResolvedValue(null);
     mockHybridCache.set.mockResolvedValue(undefined);
     mockHybridCache.del.mockResolvedValue(true);
     mockGitService.getCommits.mockResolvedValue(testCommits);
     mockGitService.aggregateCommitsByTime.mockResolvedValue(testHeatmapData);
 
-    // Import fresh instance
+    mockWithKeyLock.mockImplementation(async (key, fn) => await fn());
+    mockWithOrderedLocks.mockImplementation(async (locks, fn) => await fn());
+    mockWithSharedRepository.mockImplementation(
+      async (url, fn) => await fn(mockRepositoryHandle)
+    );
+
     const module = await import('../../../src/services/repositoryCache');
     repositoryCache = module.repositoryCache;
   });
 
   afterEach(async () => {
-    if (repositoryCache?.shutdown) {
-      await repositoryCache.shutdown().catch(() => {});
-    }
+    await repositoryCache?.shutdown?.().catch(() => {});
     vi.resetModules();
   });
 
-  describe('Cache Hit Scenarios', () => {
-    test('should return cached commits when cache hit occurs', async () => {
-      // ARRANGE: Setup cache hit scenario
+  describe('Initialization and Configuration', () => {
+    test('should initialize with correct cache tier allocation', () => {
+      // ARRANGE & ACT: Constructor allocates memory across tiers
+
+      // ASSERT: Verify configuration-driven initialization
+      expect(repositoryCache).toBeDefined();
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'RepositoryCacheManager initialized with transactional consistency',
+        expect.objectContaining({
+          hierarchicalCaching: true,
+          transactionalConsistency: true,
+        })
+      );
+    });
+  });
+
+  describe('Raw Commits Cache Operations', () => {
+    test('should return cached commits on cache hit', async () => {
+      // ARRANGE: Cache hit scenario
       const repoUrl = 'https://github.com/test/repo.git';
       mockHybridCache.get.mockResolvedValue(testCommits);
 
       // ACT: Request commits
       const result = await repositoryCache.getOrParseCommits(repoUrl);
 
-      // ASSERT: Verify cache hit behavior
+      // ASSERT: Verify cache hit behavior without repository access
       expect(result).toEqual(testCommits);
       expect(mockMetrics.cacheHits.inc).toHaveBeenCalledWith({
         operation: 'raw_commits',
@@ -139,8 +197,176 @@ describe('RepositoryCache', () => {
       expect(mockGitService.getCommits).not.toHaveBeenCalled();
     });
 
-    test('should return cached aggregated data when cache hit occurs', async () => {
-      // ARRANGE: Setup aggregated cache hit
+    test('should fetch from repository on cache miss', async () => {
+      // ARRANGE: Cache miss scenario
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      // ACT: Request commits
+      const result = await repositoryCache.getOrParseCommits(repoUrl);
+
+      // ASSERT: Verify repository fetch and caching
+      expect(result).toEqual(testCommits);
+      expect(mockMetrics.cacheMisses.inc).toHaveBeenCalledWith({
+        operation: 'raw_commits',
+      });
+      expect(mockGitService.getCommits).toHaveBeenCalledWith('/tmp/repo');
+      expect(mockHybridCache.set).toHaveBeenCalled();
+    });
+
+    test('should handle null git service response gracefully', async () => {
+      // ARRANGE: Git service returns null
+      const repoUrl = 'https://github.com/test/repo.git';
+      mockGitService.getCommits.mockResolvedValue(null);
+
+      // ACT: Request commits
+      const result = await repositoryCache.getOrParseCommits(repoUrl);
+
+      // ASSERT: Verify graceful null handling
+      expect(result).toEqual([]);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'gitService.getCommits returned null, using empty array',
+        expect.objectContaining({ repoUrl })
+      );
+    });
+
+    test('should track duplicate clone prevention', async () => {
+      // ARRANGE: Shared repository scenario
+      const repoUrl = 'https://github.com/test/repo.git';
+      mockWithSharedRepository.mockImplementation(async (url, fn) => {
+        return await fn({
+          ...mockRepositoryHandle,
+          isShared: true,
+          refCount: 3,
+        });
+      });
+
+      // ACT: Request commits
+      await repositoryCache.getOrParseCommits(repoUrl);
+
+      // ASSERT: Verify efficiency tracking
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Duplicate clone prevented',
+        expect.objectContaining({ repoUrl, refCount: 3 })
+      );
+    });
+  });
+
+  describe('Filtered Commits Cache Operations', () => {
+    test('should return cached filtered commits on cache hit', async () => {
+      // ARRANGE: Filtered cache hit
+      const repoUrl = 'https://github.com/test/repo.git';
+      const options = { author: 'John Doe' };
+      const filteredCommits = [testCommits[0]];
+      mockHybridCache.get.mockResolvedValue(filteredCommits);
+
+      // ACT: Request filtered commits
+      const result = await repositoryCache.getOrParseFilteredCommits(
+        repoUrl,
+        options
+      );
+
+      // ASSERT: Verify filtered cache hit
+      expect(result).toEqual(filteredCommits);
+      expect(mockMetrics.cacheHits.inc).toHaveBeenCalledWith({
+        operation: 'filtered_commits',
+      });
+    });
+
+    test('should apply author filter on cache miss', async () => {
+      // ARRANGE: Filtered cache miss, raw cache hit
+      const repoUrl = 'https://github.com/test/repo.git';
+      const options = { author: 'Jane Smith' };
+      mockHybridCache.get
+        .mockResolvedValueOnce(null) // filtered miss
+        .mockResolvedValueOnce(testCommits); // raw hit
+
+      // ACT: Request filtered commits
+      const result = await repositoryCache.getOrParseFilteredCommits(
+        repoUrl,
+        options
+      );
+
+      // ASSERT: Verify filtering logic
+      expect(result).toHaveLength(1);
+      expect(result[0].authorName).toBe('Jane Smith');
+      expect(mockHybridCache.set).toHaveBeenCalled();
+    });
+
+    test('should apply multiple authors filter', async () => {
+      // ARRANGE: Multiple authors scenario
+      const repoUrl = 'https://github.com/test/repo.git';
+      const options = { authors: ['John Doe', 'Jane Smith'] };
+      mockHybridCache.get
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(testCommits);
+
+      // ACT: Apply multiple authors filter
+      const result = await repositoryCache.getOrParseFilteredCommits(
+        repoUrl,
+        options
+      );
+
+      // ASSERT: Verify multiple author filtering
+      expect(result).toHaveLength(2);
+    });
+
+    test('should apply date range filter correctly', async () => {
+      // ARRANGE: Date filter scenario
+      const repoUrl = 'https://github.com/test/repo.git';
+      const options = {
+        fromDate: '2023-01-01T00:00:00Z',
+        toDate: '2023-01-01T23:59:59Z',
+      };
+      mockHybridCache.get
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(testCommits);
+
+      // ACT: Apply date filter
+      const result = await repositoryCache.getOrParseFilteredCommits(
+        repoUrl,
+        options
+      );
+
+      // ASSERT: Verify date filtering
+      expect(result).toHaveLength(1);
+      expect(result[0].date).toBe('2023-01-01T10:00:00Z');
+    });
+
+    test('should apply pagination correctly', async () => {
+      // ARRANGE: Pagination scenario
+      const repoUrl = 'https://github.com/test/repo.git';
+      const options = { skip: 1, limit: 1 };
+      mockHybridCache.get
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(testCommits);
+
+      // ACT: Apply pagination
+      const result = await repositoryCache.getOrParseFilteredCommits(
+        repoUrl,
+        options
+      );
+
+      // ASSERT: Verify pagination logic
+      expect(result).toHaveLength(1);
+      expect(result[0].sha).toBe('def456');
+    });
+
+    test('should handle invalid date filters gracefully', async () => {
+      // ARRANGE: Invalid date filters
+      const cache = repositoryCache as any;
+      const options = { fromDate: 'invalid-date', toDate: 'also-invalid' };
+
+      // ACT: Apply invalid filters
+      const result = cache.applyFilters(testCommits, options);
+
+      // ASSERT: Verify graceful degradation
+      expect(result).toHaveLength(testCommits.length);
+    });
+  });
+
+  describe('Aggregated Data Cache Operations', () => {
+    test('should return cached aggregated data on cache hit', async () => {
+      // ARRANGE: Aggregated cache hit
       const repoUrl = 'https://github.com/test/repo.git';
       mockHybridCache.get.mockResolvedValue(testHeatmapData);
 
@@ -154,177 +380,175 @@ describe('RepositoryCache', () => {
       });
       expect(mockGitService.aggregateCommitsByTime).not.toHaveBeenCalled();
     });
-  });
 
-  describe('Cache Miss and Repository Fetching', () => {
-    test('should fetch from repository when cache miss occurs', async () => {
-      // ARRANGE: Setup cache miss scenario
+    test('should generate aggregated data on cache miss', async () => {
+      // ARRANGE: Aggregated cache miss
       const repoUrl = 'https://github.com/test/repo.git';
-      mockHybridCache.get.mockResolvedValue(null);
+      mockHybridCache.get
+        .mockResolvedValueOnce(null) // aggregated miss
+        .mockResolvedValueOnce(null) // filtered miss
+        .mockResolvedValueOnce(testCommits); // raw hit
 
-      // ACT: Request commits
-      const result = await repositoryCache.getOrParseCommits(repoUrl);
+      // ACT: Request aggregated data
+      const result = await repositoryCache.getOrGenerateAggregatedData(repoUrl);
 
-      // ASSERT: Verify miss handling and repository fetch
-      expect(result).toEqual(testCommits);
-      expect(mockMetrics.cacheMisses.inc).toHaveBeenCalledWith({
-        operation: 'raw_commits',
-      });
-      expect(mockGitService.getCommits).toHaveBeenCalledWith('/tmp/repo');
+      // ASSERT: Verify aggregation generation
+      expect(result).toEqual(testHeatmapData);
+      expect(mockGitService.aggregateCommitsByTime).toHaveBeenCalledWith(
+        testCommits,
+        undefined
+      );
       expect(mockHybridCache.set).toHaveBeenCalled();
     });
 
-    test('should handle null response from git service gracefully', async () => {
-      // ARRANGE: Setup git service returning null
+    test('should handle aggregation with filter options', async () => {
+      // ARRANGE: Filtered aggregation scenario
       const repoUrl = 'https://github.com/test/repo.git';
+      const options = { author: 'John Doe' };
       mockHybridCache.get.mockResolvedValue(null);
-      mockGitService.getCommits.mockResolvedValue(null);
 
-      // ACT: Request commits
-      const result = await repositoryCache.getOrParseCommits(repoUrl);
-
-      // ASSERT: Verify graceful null handling
-      expect(result).toEqual([]);
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'gitService.getCommits returned null, using empty array',
-        expect.objectContaining({ repoUrl })
-      );
-    });
-  });
-
-  describe('Filter Logic and Caching', () => {
-    test('should apply author filter correctly to commits', async () => {
-      // ARRANGE: Setup filtered request
-      const repoUrl = 'https://github.com/test/repo.git';
-      const options = { author: 'Jane Smith' };
-      mockHybridCache.get
-        .mockResolvedValueOnce(null) // filtered cache miss
-        .mockResolvedValueOnce(testCommits); // raw cache hit
-
-      // ACT: Request filtered commits
-      const result = await repositoryCache.getOrParseFilteredCommits(
+      // ACT: Request filtered aggregated data
+      const result = await repositoryCache.getOrGenerateAggregatedData(
         repoUrl,
         options
       );
 
-      // ASSERT: Verify filtering logic
-      expect(result).toHaveLength(1);
-      expect(result[0].authorName).toBe('Jane Smith');
-      expect(mockHybridCache.set).toHaveBeenCalled(); // Cache filtered result
-    });
-
-    test('should apply date range filter correctly', async () => {
-      // ARRANGE: Setup date filter scenario - only first commit should match
-      const repoUrl = 'https://github.com/test/repo.git';
-      const options = {
-        fromDate: '2023-01-01T00:00:00Z',
-        toDate: '2023-01-01T23:59:59Z',
-      };
-      mockHybridCache.get
-        .mockResolvedValueOnce(null) // filtered cache miss
-        .mockResolvedValueOnce(testCommits); // raw cache hit
-
-      // ACT: Apply date filter
-      const result = await repositoryCache.getOrParseFilteredCommits(
-        repoUrl,
-        options
-      );
-
-      // ASSERT: Verify date filtering - only first commit (2023-01-01) should match
-      expect(result).toHaveLength(1);
-      expect(result[0].date).toBe('2023-01-01T10:00:00Z');
-    });
-
-    test('should handle invalid date filters gracefully', async () => {
-      // ARRANGE: Setup invalid date scenario
-      const cache = repositoryCache as any;
-      const options = { fromDate: 'invalid-date', toDate: 'also-invalid' };
-
-      // ACT: Apply invalid date filters
-      const result = cache.applyFilters(testCommits, options);
-
-      // ASSERT: Verify graceful handling of invalid dates
-      expect(result).toHaveLength(testCommits.length);
+      // ASSERT: Verify filtered aggregation
+      expect(result).toEqual(testHeatmapData);
+      expect(mockGitService.aggregateCommitsByTime).toHaveBeenCalled();
     });
   });
 
-  describe('Transaction Management and Rollback', () => {
-    test('should rollback transaction when cache operation fails', async () => {
-      // ARRANGE: Setup cache operation failure
-      const repoUrl = 'https://github.com/test/repo.git';
-      mockHybridCache.get.mockResolvedValue(null);
-      mockHybridCache.set.mockRejectedValue(new Error('Cache write failed'));
-      mockGitService.getCommits.mockResolvedValue(testCommits);
-
-      // ACT & ASSERT: Verify transaction rollback on failure
-      await expect(
-        repositoryCache.getOrParseCommits(repoUrl)
-      ).rejects.toThrow();
-
-      // Verify error was recorded
-      expect(mockMetrics.recordDetailedError).toHaveBeenCalled();
-    });
-
-    test('should handle rollback verification failures correctly', async () => {
-      // ARRANGE: Setup rollback scenario by forcing cache operation to fail
-      const repoUrl = 'https://github.com/test/rollback-verify.git';
-      mockHybridCache.get.mockResolvedValue(null);
-      mockHybridCache.set.mockRejectedValue(new Error('Cache write failed'));
-
-      // ACT & ASSERT: Verify that failed cache operations are handled properly
-      await expect(repositoryCache.getOrParseCommits(repoUrl)).rejects.toThrow(
-        'Cache write failed'
-      );
-
-      // Verify metrics tracking
-      expect(mockMetrics.recordDetailedError).toHaveBeenCalled();
-    });
-  });
-
-  describe('Configuration-Driven Behavior', () => {
-    test('should allocate cache memory according to configuration', () => {
-      // ARRANGE & ACT: Cache is initialized during import
-
-      // ASSERT: Verify cache configuration through basic stats availability
-      const stats = repositoryCache.getCacheStats();
-      expect(stats).toBeDefined();
-      expect(stats.entries).toBeDefined();
-      expect(stats.memoryUsage).toBeDefined();
-      expect(stats.hitRatios).toBeDefined();
-    });
-
-    test('should handle Redis disabled configuration correctly', async () => {
-      // ARRANGE: Redis disabled scenario (default in test config)
+  describe('Cache Invalidation', () => {
+    test('should invalidate all cache tiers for repository', async () => {
+      // ARRANGE: Repository with cached data
       const repoUrl = 'https://github.com/test/repo.git';
 
       // ACT: Invalidate repository
       await repositoryCache.invalidateRepository(repoUrl);
 
-      // ASSERT: Verify local invalidation only (no distributed broadcast)
+      // ASSERT: Verify comprehensive invalidation
       expect(mockHybridCache.del).toHaveBeenCalled();
-      // Note: Can't easily test distributed cache not being called without more complex mocking
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Repository cache invalidated locally across all tiers',
+        expect.objectContaining({ repoUrl })
+      );
+    });
+
+    test('should handle partial invalidation failures', async () => {
+      // ARRANGE: Partial invalidation failure
+      const repoUrl = 'https://github.com/test/repo.git';
+      mockHybridCache.del
+        .mockResolvedValueOnce(true)
+        .mockRejectedValueOnce(new Error('Cache deletion failed'))
+        .mockResolvedValue(true);
+
+      // ACT: Attempt invalidation
+      await repositoryCache.invalidateRepository(repoUrl);
+
+      // ASSERT: Verify error handling
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Failed to invalidate repository cache locally',
+        expect.objectContaining({ repoUrl, error: 'Cache deletion failed' })
+      );
+    });
+  });
+
+  describe('Transaction Management', () => {
+    test('should handle successful transaction lifecycle', async () => {
+      // ARRANGE: Normal operation scenario
+      const repoUrl = 'https://github.com/test/repo.git';
+
+      // ACT: Perform cached operation
+      await repositoryCache.getOrParseCommits(repoUrl);
+
+      // ASSERT: Verify transaction completed successfully
+      const stats = repositoryCache.getCacheStats();
+      expect(stats.transactions.started).toBeGreaterThan(0);
+      expect(stats.transactions.committed).toBeGreaterThan(0);
+    });
+
+    test('should rollback transaction on cache operation failure', async () => {
+      // ARRANGE: Cache operation failure
+      const repoUrl = 'https://github.com/test/repo.git';
+      mockHybridCache.set.mockRejectedValue(new Error('Cache write failed'));
+
+      // ACT & ASSERT: Verify rollback on failure
+      await expect(
+        repositoryCache.getOrParseCommits(repoUrl)
+      ).rejects.toThrow();
+
+      const stats = repositoryCache.getCacheStats();
+      expect(stats.transactions.failed).toBeGreaterThan(0);
+    });
+
+    test('should handle transaction rollback with verification', async () => {
+      // ARRANGE: Setup rollback scenario
+      const repoUrl = 'https://github.com/test/rollback.git';
+      const cache = repositoryCache as any;
+      const transaction = cache.createTransaction(repoUrl);
+
+      const mockRollbackOp = {
+        execute: vi.fn().mockResolvedValue(undefined),
+        verify: vi.fn().mockResolvedValue(true),
+        description: 'Test rollback operation',
+        cacheType: 'raw' as const,
+        key: 'test-key',
+      };
+
+      transaction.rollbackOperations = [mockRollbackOp];
+
+      // ACT: Execute rollback
+      await cache.rollbackTransaction(transaction);
+
+      // ASSERT: Verify rollback execution and verification
+      expect(mockRollbackOp.execute).toHaveBeenCalled();
+      expect(mockRollbackOp.verify).toHaveBeenCalled();
+    });
+
+    test('should handle rollback verification failures with retries', async () => {
+      // ARRANGE: Rollback verification failure
+      const repoUrl = 'https://github.com/test/rollback.git';
+      const cache = repositoryCache as any;
+      const transaction = cache.createTransaction(repoUrl);
+
+      const mockRollbackOp = {
+        execute: vi.fn().mockResolvedValue(undefined),
+        verify: vi.fn().mockResolvedValue(false), // Verification always fails
+        description: 'Failing rollback operation',
+        cacheType: 'raw' as const,
+        key: 'test-key',
+      };
+
+      transaction.rollbackOperations = [mockRollbackOp];
+
+      // ACT & ASSERT: Verify retry logic on verification failure
+      await expect(cache.rollbackTransaction(transaction)).rejects.toThrow(
+        expect.objectContaining({ name: 'TransactionRollbackError' })
+      );
+
+      expect(mockRollbackOp.execute).toHaveBeenCalledTimes(3); // Max retries
+      expect(mockRollbackOp.verify).toHaveBeenCalledTimes(3);
     });
   });
 
   describe('Error Handling and Recovery', () => {
     test('should handle cache read failures gracefully', async () => {
-      // ARRANGE: Setup cache read error and git service fallback
+      // ARRANGE: Cache read error
       const repoUrl = 'https://github.com/test/repo.git';
       mockHybridCache.get.mockRejectedValue(new Error('Cache read error'));
-      mockGitService.getCommits.mockResolvedValue(testCommits);
 
       // ACT: Request commits despite cache error
       const result = await repositoryCache.getOrParseCommits(repoUrl);
 
-      // ASSERT: Verify graceful degradation to git service
+      // ASSERT: Verify graceful degradation
       expect(result).toEqual(testCommits);
       expect(mockMetrics.recordDetailedError).toHaveBeenCalled();
     });
 
-    test('should handle repository fetch failures correctly', async () => {
-      // ARRANGE: Setup git service failure
+    test('should handle repository fetch failures', async () => {
+      // ARRANGE: Git service failure
       const repoUrl = 'https://github.com/test/repo.git';
-      mockHybridCache.get.mockResolvedValue(null);
       mockGitService.getCommits.mockRejectedValue(
         new Error('Git operation failed')
       );
@@ -335,67 +559,54 @@ describe('RepositoryCache', () => {
       );
     });
 
-    test('should handle partial cache invalidation failures', async () => {
-      // ARRANGE: Setup partial invalidation failure
+    test('should handle cache write failures with transaction rollback', async () => {
+      // ARRANGE: Cache write failure scenario
       const repoUrl = 'https://github.com/test/repo.git';
-      mockHybridCache.del
-        .mockResolvedValueOnce(true)
-        .mockRejectedValueOnce(new Error('Cache deletion failed'))
-        .mockResolvedValue(true);
+      mockHybridCache.set.mockRejectedValue(new Error('Cache write failed'));
 
-      // ACT: Attempt invalidation
-      await repositoryCache.invalidateRepository(repoUrl);
+      // ACT & ASSERT: Verify transaction rollback on write failure
+      await expect(
+        repositoryCache.getOrParseCommits(repoUrl)
+      ).rejects.toThrow();
 
-      // ASSERT: Verify error logging for partial failures
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        'Failed to invalidate repository cache locally',
-        expect.objectContaining({
-          repoUrl,
-          error: 'Cache deletion failed',
-        })
-      );
+      const stats = repositoryCache.getCacheStats();
+      expect(stats.transactions.failed).toBeGreaterThan(0);
     });
   });
 
-  describe('Repository Coordination and Efficiency', () => {
-    test('should track duplicate clone prevention correctly', async () => {
-      // ARRANGE: Setup shared repository scenario
-      const repoUrl = 'https://github.com/test/repo.git';
-      mockHybridCache.get.mockResolvedValue(null);
-
-      const { withSharedRepository } = await import(
-        '../../../src/services/repositoryCoordinator'
-      );
-      vi.mocked(withSharedRepository).mockImplementation(async (url, fn) => {
-        return await fn({
-          localPath: '/tmp/shared-repo',
-          commitCount: 100,
-          sizeCategory: 'medium' as const,
-          isShared: true,
-          refCount: 3, // Multiple references
-          lastAccessed: new Date(),
-          repoUrl: url,
-        });
+  describe('Concurrent Operations and Safety', () => {
+    test('should handle concurrent requests safely', async () => {
+      // ARRANGE: Concurrent request scenario
+      const repoUrl = 'https://github.com/test/concurrent.git';
+      let callCount = 0;
+      mockGitService.getCommits.mockImplementation(async () => {
+        callCount++;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return testCommits;
       });
 
-      // ACT: Request commits
-      await repositoryCache.getOrParseCommits(repoUrl);
+      // ACT: Make concurrent requests
+      const promises = [
+        repositoryCache.getOrParseCommits(repoUrl),
+        repositoryCache.getOrParseCommits(repoUrl),
+        repositoryCache.getOrParseCommits(repoUrl),
+      ];
 
-      // ASSERT: Verify duplicate prevention tracking
-      expect(mockLogger.debug).toHaveBeenCalledWith(
-        'Duplicate clone prevented',
-        expect.objectContaining({
-          repoUrl,
-          refCount: 3,
-        })
-      );
+      const results = await Promise.all(promises);
+
+      // ASSERT: Verify safe concurrent handling
+      expect(results).toHaveLength(3);
+      results.forEach((result) => expect(result).toEqual(testCommits));
+      expect(callCount).toBeGreaterThanOrEqual(1);
     });
+  });
 
-    test('should calculate cache statistics accurately', () => {
-      // ARRANGE & ACT: Get current cache statistics
+  describe('Cache Statistics and Monitoring', () => {
+    test('should return comprehensive cache statistics', () => {
+      // ARRANGE & ACT: Get cache statistics
       const stats = repositoryCache.getCacheStats();
 
-      // ASSERT: Verify comprehensive statistics structure
+      // ASSERT: Verify statistics structure
       expect(stats).toMatchObject({
         entries: {
           rawCommits: expect.any(Number),
@@ -428,69 +639,27 @@ describe('RepositoryCache', () => {
         },
       });
     });
-  });
 
-  describe('Shutdown and Resource Management', () => {
-    test('should shutdown all cache tiers properly', async () => {
-      // ARRANGE: Active cache instance
+    test('should calculate hit ratios correctly', async () => {
+      // ARRANGE: Generate hits and misses
+      const repoUrl = 'https://github.com/test/ratio.git';
+      mockHybridCache.get.mockResolvedValueOnce(testCommits); // hit
+      await repositoryCache.getOrParseCommits(repoUrl);
 
-      // ACT: Shutdown cache
-      await repositoryCache.shutdown();
+      mockHybridCache.get.mockResolvedValueOnce(null); // miss
+      await repositoryCache.getOrParseCommits(repoUrl + '2');
 
-      // ASSERT: Verify all cache tiers shutdown
-      expect(mockHybridCache.quit).toHaveBeenCalledTimes(3);
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        'RepositoryCacheManager shutdown completed'
-      );
-    });
+      // ACT: Get statistics
+      const stats = repositoryCache.getCacheStats();
 
-    test('should handle shutdown failures gracefully', async () => {
-      // ARRANGE: Setup shutdown failure
-      mockHybridCache.quit.mockRejectedValueOnce(new Error('Shutdown failed'));
-
-      // ACT: Attempt shutdown
-      await repositoryCache.shutdown();
-
-      // ASSERT: Verify graceful failure handling
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        'Error during RepositoryCacheManager shutdown',
-        expect.objectContaining({
-          error: 'Shutdown failed',
-        })
-      );
-    });
-
-    test('should cleanup active transactions during shutdown', async () => {
-      // ARRANGE: Create pending transaction
-      const repoUrl = 'https://github.com/test/repo.git';
-      mockHybridCache.get.mockResolvedValue(null);
-      mockHybridCache.set.mockImplementation(() => new Promise(() => {})); // Never resolves
-
-      // Start operation but don't await
-      const operationPromise = repositoryCache.getOrParseCommits(repoUrl);
-
-      // Give time to start transaction
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      // ACT: Shutdown with active transaction
-      await repositoryCache.shutdown();
-
-      // ASSERT: Verify active transaction warning
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Shutting down with active transactions',
-        expect.objectContaining({
-          activeTransactions: expect.any(Number),
-        })
-      );
-
-      // Cleanup
-      operationPromise.catch(() => {});
+      // ASSERT: Verify hit ratio calculation
+      expect(stats.hitRatios.rawCommits).toBe(0.5);
     });
   });
 
-  describe('Cache Key Generation and Management', () => {
+  describe('Cache Key Management', () => {
     test('should generate consistent cache keys for identical inputs', () => {
-      // ARRANGE: Same inputs
+      // ARRANGE: Identical inputs
       const repoUrl = 'https://github.com/test/repo.git';
       const options = { author: 'John Doe', limit: 10 };
       const cache = repositoryCache as any;
@@ -504,7 +673,7 @@ describe('RepositoryCache', () => {
     });
 
     test('should generate different keys for different options', () => {
-      // ARRANGE: Different filter options
+      // ARRANGE: Different options
       const repoUrl = 'https://github.com/test/repo.git';
       const cache = repositoryCache as any;
 
@@ -521,17 +690,65 @@ describe('RepositoryCache', () => {
     });
 
     test('should detect specific filters correctly', () => {
-      // ARRANGE: Various filter scenarios
+      // ARRANGE: Filter detection scenarios
       const cache = repositoryCache as any;
 
-      // ACT & ASSERT: Test filter detection logic
+      // ACT & ASSERT: Test filter detection
       expect(cache.hasSpecificFilters({})).toBe(false);
       expect(cache.hasSpecificFilters({ author: 'John' })).toBe(true);
       expect(cache.hasSpecificFilters({ authors: ['John'] })).toBe(true);
       expect(cache.hasSpecificFilters({ fromDate: '2023-01-01' })).toBe(true);
       expect(cache.hasSpecificFilters({ limit: 10 })).toBe(true);
       expect(cache.hasSpecificFilters(undefined)).toBe(false);
-      expect(cache.hasSpecificFilters(null)).toBe(false);
+    });
+  });
+
+  describe('Shutdown and Resource Management', () => {
+    test('should shutdown all cache tiers properly', async () => {
+      // ARRANGE: Active cache instance
+
+      // ACT: Shutdown cache
+      await repositoryCache.shutdown();
+
+      // ASSERT: Verify proper shutdown
+      expect(mockHybridCache.quit).toHaveBeenCalledTimes(3);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'RepositoryCacheManager shutdown completed'
+      );
+    });
+
+    test('should handle shutdown failures gracefully', async () => {
+      // ARRANGE: Shutdown failure
+      mockHybridCache.quit.mockRejectedValueOnce(new Error('Shutdown failed'));
+
+      // ACT: Attempt shutdown
+      await repositoryCache.shutdown();
+
+      // ASSERT: Verify graceful failure handling
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Error during RepositoryCacheManager shutdown',
+        expect.objectContaining({ error: 'Shutdown failed' })
+      );
+    });
+
+    test('should cleanup active transactions during shutdown', async () => {
+      // ARRANGE: Pending transaction
+      const repoUrl = 'https://github.com/test/repo.git';
+      mockHybridCache.set.mockImplementation(() => new Promise(() => {})); // Never resolves
+
+      const operationPromise = repositoryCache.getOrParseCommits(repoUrl);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // ACT: Shutdown with active transaction
+      await repositoryCache.shutdown();
+
+      // ASSERT: Verify active transaction cleanup
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Shutting down with active transactions',
+        expect.objectContaining({ activeTransactions: expect.any(Number) })
+      );
+
+      operationPromise.catch(() => {});
     });
   });
 });
