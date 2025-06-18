@@ -195,7 +195,7 @@ interface CacheTransaction {
  * - Transactional consistency ensures cache coherence across tiers
  * - Repository coordination eliminates redundant Git clones
  */
-class RepositoryCacheManager {
+export class RepositoryCacheManager {
   /** Primary cache tier: Raw Git commit data shared across all operations */
   private rawCommitsCache: HybridLRUCache<Commit[]>;
 
