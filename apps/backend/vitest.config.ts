@@ -26,7 +26,7 @@ export default defineConfig({
       all: false, // Explicitly set all to false
       clean: true, // Clean coverage directory before running
       extension: ['.ts'], // <--- Added: Only consider .ts files for coverage
-      skipFull: true,
+      // skipFull: true,
       exclude: [
         // Paths relative to this project's root (apps/backend)
         'node_modules/**',
