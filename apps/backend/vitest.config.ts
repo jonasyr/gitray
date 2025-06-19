@@ -23,7 +23,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**'], // Only include files from the src directory for this project
-      all: false, // Explicitly set all to false
+      all: true, // Include all files in src, not just executed ones
       clean: true, // Clean coverage directory before running
       extension: ['.ts'], // <--- Added: Only consider .ts files for coverage
       // skipFull: true,
