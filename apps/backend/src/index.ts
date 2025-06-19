@@ -323,6 +323,161 @@ export async function startApplication() {
       process.exit(1);
     });
 
+    // NEW: Process monitoring for coordination system health
+    if (config.repositoryCache?.enabled) {
+      // Monitor every 5 minutes
+      setInterval(
+        () => {
+          try {
+            const coordinationMetrics = repositoryCoordinator.getMetrics();
+
+            // Warn if too many repositories cached
+            const maxRepos = config.repositoryCache?.maxRepositories || 50;
+            if (coordinationMetrics.cachedRepositories > maxRepos * 0.9) {
+              logger.warn('Repository cache nearing capacity', {
+                cached: coordinationMetrics.cachedRepositories,
+                max: maxRepos,
+                utilizationPercent: Math.round(
+                  (coordinationMetrics.cachedRepositories / maxRepos) * 100
+                ),
+              });
+            }
+
+            // Warn if too many active clones
+            if (coordinationMetrics.activeClones > 5) {
+              logger.warn('High number of active clone operations', {
+                activeClones: coordinationMetrics.activeClones,
+                suggestion:
+                  'Consider increasing coordination timeouts or reducing concurrent requests',
+              });
+            }
+
+            // Log efficiency metrics
+            if (coordinationMetrics.duplicateClonesPrevented > 0) {
+              logger.info('Repository coordination efficiency', {
+                duplicateClonesPrevented:
+                  coordinationMetrics.duplicateClonesPrevented,
+                coalescedOperations: coordinationMetrics.coalescedOperations,
+                cacheHitRate:
+                  coordinationMetrics.cacheHits /
+                  (coordinationMetrics.cacheHits +
+                    coordinationMetrics.cacheMisses),
+              });
+            }
+          } catch (monitorError) {
+            logger.debug('Coordination monitoring failed', {
+              error: monitorError,
+            });
+          }
+        },
+        5 * 60 * 1000
+      ); // Every 5 minutes
+    }
+
+    // Initialize cache stats logging (moved from .then() callback)
+    setTimeout(async () => {
+      try {
+        // Import cache stats for logging
+        const { getCacheStats } = await import('./services/cache');
+        const stats = getCacheStats();
+
+        logger.info('Cache system initialized', {
+          activeBackend: stats.activeBackend,
+          memoryEntries: stats.memory.entries,
+          redisHealthy: stats.redis.healthy,
+          hybridStats: stats.hybrid
+            ? {
+                memoryEntries: stats.hybrid.memory.entries,
+                diskEntries: stats.hybrid.disk.entries,
+                memoryUsageMB: Math.round(
+                  stats.hybrid.memory.usageBytes / 1024 ** 2
+                ),
+              }
+            : null,
+        });
+
+        // NEW: Log repository coordination system status
+        if (config.repositoryCache?.enabled) {
+          const coordinationMetrics = repositoryCoordinator.getMetrics();
+          logger.info('Repository coordination system initialized', {
+            cachedRepositories: coordinationMetrics.cachedRepositories,
+            activeClones: coordinationMetrics.activeClones,
+            totalDiskUsageMB: Math.round(
+              coordinationMetrics.totalDiskUsageBytes / 1024 ** 2
+            ),
+          });
+
+          // Log repository cache manager status
+          const { getRepositoryCacheStats } = await import(
+            './services/repositoryCache'
+          );
+          const cacheStats = getRepositoryCacheStats();
+          logger.info('Repository cache manager initialized', {
+            hierarchicalCaching: config.cacheStrategy?.hierarchicalCaching,
+            cacheEntries: cacheStats.entries,
+            memoryUsageMB: Math.round(cacheStats.memoryUsage.total / 1024 ** 2),
+            hitRatios: cacheStats.hitRatios,
+          });
+        } else {
+          logger.info('Repository coordination system disabled');
+        }
+
+        // Start enhanced metrics update scheduler
+        const metricsInterval = setInterval(async () => {
+          await updateCacheMetrics(); // Backward compatibility
+          await updateAllEnhancedMetrics(); // New comprehensive metrics
+
+          // Note: Coordination metrics are updated automatically by the coordinator
+          // No need for separate updateCoordinationMetrics function
+        }, 30000); // Every 30 seconds
+
+        logger.info('Enhanced metrics scheduler started');
+
+        // Store metricsInterval for cleanup during shutdown
+        (server as any)._metricsInterval = metricsInterval;
+      } catch (err) {
+        logger.warn('Failed to get cache/coordination stats during startup', {
+          err,
+        });
+      }
+    }, 1000); // Wait 1 second for all systems to initialize
+
+    // Setup graceful shutdown (moved from .then() callback)
+    setupGracefulShutdown(server, async () => {
+      try {
+        // Stop metrics scheduler
+        const metricsInterval = (server as any)._metricsInterval;
+        if (metricsInterval) {
+          clearInterval(metricsInterval);
+          logger.info('Enhanced metrics scheduler stopped');
+        }
+
+        // NEW: Shutdown repository coordination systems
+        if (config.repositoryCache?.enabled) {
+          logger.info('Shutting down repository coordination systems...');
+
+          const shutdownStart = Date.now();
+
+          // Shutdown in order: coordinator → cache manager
+          await repositoryCoordinator.shutdown();
+          logger.info('Repository coordinator shutdown completed');
+
+          await repositoryCache.shutdown();
+          logger.info('Repository cache manager shutdown completed');
+
+          const shutdownTime = Date.now() - shutdownStart;
+          logger.info('Repository coordination systems shutdown completed', {
+            shutdownTime,
+          });
+        }
+      } catch (coordShutdownError) {
+        logger.error('Error during coordination systems shutdown', {
+          error: coordShutdownError,
+        });
+        // Don't throw - continue with other cleanup
+      }
+    });
+
     return { app, server };
   } catch (error) {
     logger.error('Failed to start application', { error });
@@ -335,162 +490,8 @@ if (require.main === module) {
   // Start the application with error handling
   logger.info('📋 About to call startApplication()...');
   startApplication()
-    .then(({ server }) => {
+    .then(() => {
       logger.info('✅ Application started successfully!');
-      // ENHANCED: Cache and coordination system initialization
-      let metricsInterval: NodeJS.Timeout | null = null;
-
-      setTimeout(async () => {
-        try {
-          // Import cache stats for logging
-          const { getCacheStats } = await import('./services/cache');
-          const stats = getCacheStats();
-
-          logger.info('Cache system initialized', {
-            activeBackend: stats.activeBackend,
-            memoryEntries: stats.memory.entries,
-            redisHealthy: stats.redis.healthy,
-            hybridStats: stats.hybrid
-              ? {
-                  memoryEntries: stats.hybrid.memory.entries,
-                  diskEntries: stats.hybrid.disk.entries,
-                  memoryUsageMB: Math.round(
-                    stats.hybrid.memory.usageBytes / 1024 ** 2
-                  ),
-                }
-              : null,
-          });
-
-          // NEW: Log repository coordination system status
-          if (config.repositoryCache?.enabled) {
-            const coordinationMetrics = repositoryCoordinator.getMetrics();
-            logger.info('Repository coordination system initialized', {
-              cachedRepositories: coordinationMetrics.cachedRepositories,
-              activeClones: coordinationMetrics.activeClones,
-              totalDiskUsageMB: Math.round(
-                coordinationMetrics.totalDiskUsageBytes / 1024 ** 2
-              ),
-            });
-
-            // Log repository cache manager status
-            const { getRepositoryCacheStats } = await import(
-              './services/repositoryCache'
-            );
-            const cacheStats = getRepositoryCacheStats();
-            logger.info('Repository cache manager initialized', {
-              hierarchicalCaching: config.cacheStrategy?.hierarchicalCaching,
-              cacheEntries: cacheStats.entries,
-              memoryUsageMB: Math.round(
-                cacheStats.memoryUsage.total / 1024 ** 2
-              ),
-              hitRatios: cacheStats.hitRatios,
-            });
-          } else {
-            logger.info('Repository coordination system disabled');
-          }
-
-          // Start enhanced metrics update scheduler
-          metricsInterval = setInterval(async () => {
-            await updateCacheMetrics(); // Backward compatibility
-            await updateAllEnhancedMetrics(); // New comprehensive metrics
-
-            // Note: Coordination metrics are updated automatically by the coordinator
-            // No need for separate updateCoordinationMetrics function
-          }, 30000); // Every 30 seconds
-
-          logger.info('Enhanced metrics scheduler started');
-        } catch (err) {
-          logger.warn('Failed to get cache/coordination stats during startup', {
-            err,
-          });
-        }
-      }, 1000); // Wait 1 second for all systems to initialize
-
-      // ENHANCED: Handle graceful shutdown with coordination systems
-      setupGracefulShutdown(server, async () => {
-        try {
-          // Stop metrics scheduler
-          if (metricsInterval) {
-            clearInterval(metricsInterval);
-            logger.info('Enhanced metrics scheduler stopped');
-          }
-
-          // NEW: Shutdown repository coordination systems
-          if (config.repositoryCache?.enabled) {
-            logger.info('Shutting down repository coordination systems...');
-
-            const shutdownStart = Date.now();
-
-            // Shutdown in order: coordinator → cache manager
-            await repositoryCoordinator.shutdown();
-            logger.info('Repository coordinator shutdown completed');
-
-            await repositoryCache.shutdown();
-            logger.info('Repository cache manager shutdown completed');
-
-            const shutdownTime = Date.now() - shutdownStart;
-            logger.info('Repository coordination systems shutdown completed', {
-              shutdownTime,
-            });
-          }
-        } catch (coordShutdownError) {
-          logger.error('Error during coordination systems shutdown', {
-            error: coordShutdownError,
-          });
-          // Don't throw - continue with other cleanup
-        }
-      });
-
-      // NEW: Process monitoring for coordination system health
-      if (config.repositoryCache?.enabled) {
-        // Monitor every 5 minutes
-        setInterval(
-          () => {
-            try {
-              const coordinationMetrics = repositoryCoordinator.getMetrics();
-
-              // Warn if too many repositories cached
-              const maxRepos = config.repositoryCache?.maxRepositories || 50;
-              if (coordinationMetrics.cachedRepositories > maxRepos * 0.9) {
-                logger.warn('Repository cache nearing capacity', {
-                  cached: coordinationMetrics.cachedRepositories,
-                  max: maxRepos,
-                  utilizationPercent: Math.round(
-                    (coordinationMetrics.cachedRepositories / maxRepos) * 100
-                  ),
-                });
-              }
-
-              // Warn if too many active clones
-              if (coordinationMetrics.activeClones > 5) {
-                logger.warn('High number of active clone operations', {
-                  activeClones: coordinationMetrics.activeClones,
-                  suggestion:
-                    'Consider increasing coordination timeouts or reducing concurrent requests',
-                });
-              }
-
-              // Log efficiency metrics
-              if (coordinationMetrics.duplicateClonesPrevented > 0) {
-                logger.info('Repository coordination efficiency', {
-                  duplicateClonesPrevented:
-                    coordinationMetrics.duplicateClonesPrevented,
-                  coalescedOperations: coordinationMetrics.coalescedOperations,
-                  cacheHitRate:
-                    coordinationMetrics.cacheHits /
-                    (coordinationMetrics.cacheHits +
-                      coordinationMetrics.cacheMisses),
-                });
-              }
-            } catch (monitorError) {
-              logger.debug('Coordination monitoring failed', {
-                error: monitorError,
-              });
-            }
-          },
-          5 * 60 * 1000
-        ); // Every 5 minutes
-      }
     })
     .catch((error) => {
       logger.error('❌ Failed to start application:', { error });

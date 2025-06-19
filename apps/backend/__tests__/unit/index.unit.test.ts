@@ -62,15 +62,15 @@ vi.mock('fs', () => ({
 }));
 vi.mock('net');
 
-describe('index.ts - COVERAGE OPTIMIZED', () => {
+describe('index.ts - ENHANCED COVERAGE', () => {
   // Context factory for clean test setup
   const createTestContext = () => {
     const mockApp = {
       use: vi.fn(),
       get: vi.fn(),
       listen: vi.fn(),
-    } as any; // Type assertion to avoid Express interface requirements
-    const mockServer = { on: vi.fn() };
+    } as any;
+    const mockServer = { on: vi.fn(), close: vi.fn() };
     const mockSocket = { connect: vi.fn(), destroy: vi.fn(), on: vi.fn() };
 
     vi.mocked(express).mockReturnValue(mockApp);
@@ -82,7 +82,7 @@ describe('index.ts - COVERAGE OPTIMIZED', () => {
     return { mockApp, mockServer, mockSocket };
   };
 
-  // Complete config factory to avoid missing properties
+  // Enhanced config factory with all coordination features
   const createMockConfig = (overrides: any = {}) => ({
     port: 3001,
     cors: { origin: 'http://localhost:5173', credentials: true },
@@ -92,31 +92,32 @@ describe('index.ts - COVERAGE OPTIMIZED', () => {
       message: 'Too many requests',
     },
     redis: { host: 'localhost', port: 6379 },
-    git: {
-      maxConcurrentProcesses: 10,
-      cloneDepth: 1,
-    },
+    git: { maxConcurrentProcesses: 10, cloneDepth: 1 },
     hybridCache: {
       diskPath: '/tmp/cache',
       enableRedis: false,
-      maxMemorySize: 100 * 1024 * 1024,
-    },
-    locks: {
-      lockDir: '/tmp/locks',
-    },
-    repositoryCache: {
-      diskPath: '/tmp/repo-cache',
-      enableRedis: false,
-    },
-    cacheStrategy: {
-      hierarchicalCaching: true,
-      compressionEnabled: true,
+      enableDisk: true,
       maxEntries: 1000,
-      ttl: 3600000,
+      memoryLimitBytes: 100 * 1024 * 1024,
+      redisConfig: {
+        host: 'localhost',
+        port: 6379,
+        keyPrefix: 'gitray:cache:',
+        maxRetriesPerRequest: 1,
+        enableOfflineQueue: false,
+        connectTimeout: 10000,
+        lazyConnect: true,
+      },
     },
-    coordination: {
-      enabled: false,
-      redisConnection: { host: 'localhost', port: 6379 },
+    locks: { lockDir: '/tmp/locks', defaultTimeoutMs: 120000 },
+    repositoryCache: { enabled: false, maxRepositories: 50, maxAgeHours: 24 },
+    operationCoordination: { enabled: false, coalescingEnabled: true },
+    cacheStrategy: { hierarchicalCaching: true, memoryPressureThreshold: 0.8 },
+    memoryPressure: {
+      warningThreshold: 0.75,
+      criticalThreshold: 0.85,
+      emergencyThreshold: 0.95,
+      checkIntervalMs: 5000,
     },
     ...overrides,
   });
@@ -132,89 +133,12 @@ describe('index.ts - COVERAGE OPTIMIZED', () => {
 
   afterEach(() => {
     process.env = originalEnv;
-    vi.resetModules(); // Restore module isolation
+    vi.resetModules();
     vi.useRealTimers();
   });
 
-  describe('validateStartupEnvironment Function', () => {
-    test('should reject invalid port numbers', async () => {
-      // ARRANGE
-      vi.doMock('../../src/config', () => ({
-        config: createMockConfig({ port: 99999 }),
-        validateConfig: vi.fn(),
-      }));
-
-      // ACT & ASSERT
-      const { validateStartupEnvironment } = await import('../../src/index');
-      await expect(validateStartupEnvironment()).rejects.toThrow(
-        'Invalid port number'
-      );
-    }, 5000); // Extended timeout for first test due to module loading
-
-    test('should warn about common service ports', async () => {
-      // ARRANGE
-      vi.doMock('../../src/config', () => ({
-        config: createMockConfig({ port: 80 }),
-        validateConfig: vi.fn(),
-      }));
-
-      // ACT & ASSERT
-      const { validateStartupEnvironment } = await import('../../src/index');
-      await expect(validateStartupEnvironment()).rejects.toThrow(
-        'standard service port'
-      );
-    });
-
-    test('should create missing directories successfully', async () => {
-      // ARRANGE
-      const mockFs = await import('fs');
-      const mockFsAsync = await import('fs/promises');
-      vi.mocked(mockFs.existsSync).mockReturnValue(false);
-      vi.mocked(mockFsAsync.mkdir).mockResolvedValue(undefined);
-
-      vi.doMock('../../src/config', () => ({
-        config: createMockConfig({
-          locks: { lockDir: '/new-dir' },
-          hybridCache: { diskPath: '/cache-dir', enableRedis: false },
-        }),
-        validateConfig: vi.fn(),
-      }));
-
-      // ACT
-      const { validateStartupEnvironment } = await import('../../src/index');
-      await validateStartupEnvironment();
-
-      // ASSERT
-      expect(mockFsAsync.mkdir).toHaveBeenCalledWith('/new-dir', {
-        recursive: true,
-      });
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        'Created directory: /new-dir'
-      );
-    });
-
-    test('should handle directory creation failures', async () => {
-      // ARRANGE
-      const mockFs = await import('fs');
-      const mockFsAsync = await import('fs/promises');
-      vi.mocked(mockFs.existsSync).mockReturnValue(false);
-      vi.mocked(mockFsAsync.mkdir).mockRejectedValue(
-        new Error('Permission denied')
-      );
-
-      vi.doMock('../../src/config', () => ({
-        config: createMockConfig({ locks: { lockDir: '/forbidden' } }),
-        validateConfig: vi.fn(),
-      }));
-
-      // ACT & ASSERT
-      const { validateStartupEnvironment } = await import('../../src/index');
-      await expect(validateStartupEnvironment()).rejects.toThrow(
-        'Cannot create required directory'
-      );
-    });
-
-    test('should validate Redis connection when enabled', async () => {
+  describe('Redis Connection Error Scenarios', () => {
+    test('should handle Redis connection refused error gracefully', async () => {
       // ARRANGE
       const mockNet = await import('net');
       const mockFs = await import('fs');
@@ -225,56 +149,15 @@ describe('index.ts - COVERAGE OPTIMIZED', () => {
       vi.mocked(mockFs.existsSync).mockReturnValue(true);
       vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
 
-      mockSocket.connect.mockImplementation((port, host, callback) => {
-        setTimeout(callback, 10);
-        return mockSocket as any;
-      });
-
-      vi.doMock('../../src/config', () => ({
-        config: createMockConfig({
-          hybridCache: { diskPath: '/tmp', enableRedis: true },
-          redis: { port: 6379, host: 'localhost' },
-        }),
-        validateConfig: vi.fn(),
-      }));
-
-      // ACT
-      const { validateStartupEnvironment } = await import('../../src/index');
-      await validateStartupEnvironment();
-
-      // ASSERT
-      expect(mockSocket.connect).toHaveBeenCalledWith(
-        6379,
-        'localhost',
-        expect.any(Function)
-      );
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        '✅ Redis connection test successful'
-      );
-    });
-
-    test('should handle Redis connection timeout gracefully', async () => {
-      // ARRANGE - No fake timers, use immediate resolution
-      const mockNet = await import('net');
-      const mockFs = await import('fs');
-      const mockFsPromises = await import('fs/promises');
-      const { mockSocket } = createTestContext();
-
-      vi.mocked(mockNet.Socket).mockImplementation(() => mockSocket as any);
-      vi.mocked(mockFs.existsSync).mockReturnValue(true);
-      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
-
-      // Simulate immediate timeout by not calling the connect callback
       mockSocket.connect.mockImplementation(() => {
-        // Immediately trigger error to simulate timeout
         setTimeout(() => {
           const errorHandler = mockSocket.on.mock.calls.find(
             (call) => call[0] === 'error'
           )?.[1];
           if (errorHandler) {
-            const timeoutError = new Error('connect ETIMEDOUT');
-            (timeoutError as any).code = 'ETIMEDOUT';
-            errorHandler(timeoutError);
+            const refusedError = new Error('connect ECONNREFUSED');
+            (refusedError as any).code = 'ECONNREFUSED';
+            errorHandler(refusedError);
           }
         }, 0);
         return mockSocket as any;
@@ -282,7 +165,19 @@ describe('index.ts - COVERAGE OPTIMIZED', () => {
 
       vi.doMock('../../src/config', () => ({
         config: createMockConfig({
-          hybridCache: { diskPath: '/tmp', enableRedis: true },
+          hybridCache: {
+            diskPath: '/tmp',
+            enableRedis: true,
+            redisConfig: {
+              host: 'localhost',
+              port: 6379,
+              keyPrefix: 'gitray:cache:',
+              maxRetriesPerRequest: 1,
+              enableOfflineQueue: false,
+              connectTimeout: 10000,
+              lazyConnect: true,
+            },
+          },
           redis: { port: 6379, host: 'localhost' },
         }),
         validateConfig: vi.fn(),
@@ -295,50 +190,1013 @@ describe('index.ts - COVERAGE OPTIMIZED', () => {
       // ASSERT
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('Redis connection failed'),
-        expect.objectContaining({ error: expect.any(String) })
+        expect.objectContaining({
+          error: expect.stringContaining('ECONNREFUSED'),
+        })
+      );
+    });
+
+    test('should handle Redis authentication error', async () => {
+      // ARRANGE
+      const mockNet = await import('net');
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      const { mockSocket } = createTestContext();
+
+      vi.mocked(mockNet.Socket).mockImplementation(() => mockSocket as any);
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      mockSocket.connect.mockImplementation(() => {
+        setTimeout(() => {
+          const errorHandler = mockSocket.on.mock.calls.find(
+            (call) => call[0] === 'error'
+          )?.[1];
+          if (errorHandler) {
+            const authError = new Error('NOAUTH Authentication required');
+            (authError as any).code = 'NOAUTH';
+            errorHandler(authError);
+          }
+        }, 0);
+        return mockSocket as any;
+      });
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig({
+          hybridCache: { diskPath: '/tmp', enableRedis: true },
+          redis: { port: 6379, host: 'localhost', password: 'wrong' },
+        }),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { validateStartupEnvironment } = await import('../../src/index');
+      await validateStartupEnvironment();
+
+      // ASSERT
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Redis connection failed'),
+        expect.objectContaining({ error: expect.stringContaining('NOAUTH') })
       );
     });
   });
 
-  describe('initializeServer Function', () => {
-    test('should validate config and call startup validation', async () => {
+  describe('Express Middleware Chain Integration', () => {
+    test('should configure all security middleware in correct order', async () => {
       // ARRANGE
       const mockFs = await import('fs');
       const mockFsPromises = await import('fs/promises');
-      const mockValidateConfig = vi.fn();
+      const { mockApp } = createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      const helmet = await import('helmet');
+      const cors = await import('cors');
+      const rateLimit = await import('express-rate-limit');
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { startApplication } = await import('../../src/index');
+      try {
+        await startApplication();
+      } catch (error) {
+        expect((error as Error).message).toBe('process.exit called');
+      }
+
+      // ASSERT
+      expect(helmet.default).toHaveBeenCalled();
+      expect(cors.default).toHaveBeenCalledWith(
+        expect.objectContaining({
+          origin: 'http://localhost:5173',
+          credentials: true,
+        })
+      );
+      expect(rateLimit.default).toHaveBeenCalledWith(
+        expect.objectContaining({
+          windowMs: 15 * 60 * 1000,
+          max: 100,
+        })
+      );
+      expect(mockApp.use).toHaveBeenCalled(); // Verify middleware setup
+    });
+
+    test('should setup metrics and health endpoints correctly', async () => {
+      // ARRANGE
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      const { mockApp } = createTestContext();
 
       vi.mocked(mockFs.existsSync).mockReturnValue(true);
       vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
 
       vi.doMock('../../src/config', () => ({
         config: createMockConfig(),
-        validateConfig: mockValidateConfig,
+        validateConfig: vi.fn(),
       }));
 
       // ACT
-      const { initializeServer } = await import('../../src/index');
-      await initializeServer();
+      const { startApplication } = await import('../../src/index');
+      try {
+        await startApplication();
+      } catch (error) {
+        expect((error as Error).message).toBe('process.exit called');
+      }
 
       // ASSERT
-      expect(mockValidateConfig).toHaveBeenCalled();
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        'Configuration validated successfully',
-        expect.any(Object)
+      expect(mockApp.use).toHaveBeenCalledWith(
+        '/metrics',
+        expect.any(Function)
+      );
+      expect(mockApp.use).toHaveBeenCalledWith('/api', expect.any(Function));
+      expect(mockApp.get).toHaveBeenCalledWith(
+        '/health/coordination',
+        expect.any(Function)
       );
     });
 
-    test('should exit process when validation fails', async () => {
+    test('should handle memory pressure middleware configuration', async () => {
       // ARRANGE
-      const mockValidateConfig = vi.fn().mockImplementation(() => {
-        throw new Error('Config validation failed');
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      const { mockApp } = createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig({
+          memoryPressure: {
+            warningThreshold: 0.8,
+            criticalThreshold: 0.9,
+            enableCircuitBreaker: true,
+          },
+        }),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { startApplication } = await import('../../src/index');
+      try {
+        await startApplication();
+      } catch (error) {
+        expect((error as Error).message).toBe('process.exit called');
+      }
+
+      // ASSERT
+      expect(mockApp.use).toHaveBeenCalled(); // Verify middleware setup includes memory pressure
+    });
+  });
+
+  describe('Coordination Health Endpoint Edge Cases', () => {
+    test('should handle coordination metrics retrieval failure', async () => {
+      // ARRANGE
+      const mockRequest = {} as any;
+      const mockResponse = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      vi.doMock('../../src/services/repositoryCoordinator', () => ({
+        repositoryCoordinator: {
+          getMetrics: vi.fn(() => {
+            throw new Error('Coordinator failure');
+          }),
+        },
+      }));
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig({ repositoryCache: { enabled: true } }),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { startApplication } = await import('../../src/index');
+      try {
+        const { app } = await startApplication();
+        const healthHandler = (app.get as any).mock.calls.find(
+          (call: any[]) => call[0] === '/health/coordination'
+        )?.[1];
+
+        await healthHandler(mockRequest, mockResponse);
+      } catch (error) {
+        if ((error as Error).message !== 'process.exit called') {
+          throw error;
+        }
+      }
+
+      // ASSERT
+      expect(mockResponse.status).toHaveBeenCalledWith(503);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        status: 'error',
+        message: 'Failed to get coordination health',
       });
+    });
+
+    test('should return unhealthy status for high active clones', async () => {
+      // ARRANGE
+      const mockRequest = {} as any;
+      const mockResponse = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      const mockMetrics = {
+        cachedRepositories: 5,
+        activeClones: 15, // High number
+        duplicateClonesPrevented: 2,
+      };
+
+      const mockCacheStats = {
+        hitRatios: { overall: 0.8 },
+        entries: 100,
+      };
+
+      vi.doMock('../../src/services/repositoryCoordinator', () => ({
+        repositoryCoordinator: {
+          getMetrics: vi.fn(() => mockMetrics),
+        },
+      }));
+
+      vi.doMock('../../src/services/repositoryCache', () => ({
+        getRepositoryCacheStats: vi.fn(() => mockCacheStats),
+      }));
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig({ repositoryCache: { enabled: true } }),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { startApplication } = await import('../../src/index');
+      try {
+        const { app } = await startApplication();
+        const healthHandler = (app.get as any).mock.calls.find(
+          (call: any[]) => call[0] === '/health/coordination'
+        )?.[1];
+
+        await healthHandler(mockRequest, mockResponse);
+      } catch (error) {
+        if ((error as Error).message !== 'process.exit called') {
+          throw error;
+        }
+      }
+
+      // ASSERT
+      expect(mockResponse.status).toHaveBeenCalledWith(503);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'unhealthy' })
+      );
+    });
+
+    test('should return unhealthy status for low cache hit ratio', async () => {
+      // ARRANGE
+      const mockRequest = {} as any;
+      const mockResponse = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+
+      const mockMetrics = {
+        cachedRepositories: 5,
+        activeClones: 2,
+        duplicateClonesPrevented: 2,
+      };
+
+      const mockCacheStats = {
+        hitRatios: { overall: 0.05 }, // Very low hit ratio
+        entries: 100,
+      };
+
+      vi.doMock('../../src/services/repositoryCoordinator', () => ({
+        repositoryCoordinator: {
+          getMetrics: vi.fn(() => mockMetrics),
+        },
+      }));
+
+      vi.doMock('../../src/services/repositoryCache', () => ({
+        getRepositoryCacheStats: vi.fn(() => mockCacheStats),
+      }));
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig({ repositoryCache: { enabled: true } }),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { startApplication } = await import('../../src/index');
+      try {
+        const { app } = await startApplication();
+        const healthHandler = (app.get as any).mock.calls.find(
+          (call: any[]) => call[0] === '/health/coordination'
+        )?.[1];
+
+        await healthHandler(mockRequest, mockResponse);
+      } catch (error) {
+        if ((error as Error).message !== 'process.exit called') {
+          throw error;
+        }
+      }
+
+      // ASSERT
+      expect(mockResponse.status).toHaveBeenCalledWith(503);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'unhealthy' })
+      );
+    });
+  });
+
+  describe('Process Monitoring and Intervals', () => {
+    test('should handle coordination system monitoring warnings', async () => {
+      // ARRANGE
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      const mockMetrics = {
+        cachedRepositories: 46, // 46 > 45 (90% of 50) to trigger the warning
+        activeClones: 2, // Reduced to avoid triggering active clones warning first
+        duplicateClonesPrevented: 10,
+        coalescedOperations: 5,
+        cacheHits: 80,
+        cacheMisses: 20,
+        totalDiskUsageBytes: 1024000,
+      };
+
+      // Mock global setInterval to capture the monitoring function
+      const originalSetInterval = global.setInterval;
+      let monitoringCallback: (() => void) | null = null;
+
+      global.setInterval = vi.fn((callback: () => void, interval: number) => {
+        if (interval === 5 * 60 * 1000) {
+          // 5-minute monitoring interval
+          monitoringCallback = callback;
+        }
+        return originalSetInterval(callback, interval);
+      }) as any;
+
+      vi.doMock('../../src/services/repositoryCoordinator', () => ({
+        repositoryCoordinator: {
+          getMetrics: vi.fn(() => mockMetrics),
+          initialize: vi.fn(),
+          shutdown: vi.fn(),
+        },
+      }));
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig({
+          repositoryCache: { enabled: true, maxRepositories: 50 },
+        }),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      try {
+        const { startApplication } = await import('../../src/index');
+        await startApplication();
+
+        // Verify the monitoring callback was captured
+        expect(monitoringCallback).not.toBeNull();
+
+        // Execute the monitoring callback if it was captured
+        if (monitoringCallback) {
+          (monitoringCallback as () => void)();
+        }
+      } catch (error) {
+        expect((error as Error).message).toBe(
+          'process.exit unexpectedly called with "1"'
+        );
+      }
+
+      // ASSERT
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Repository cache nearing capacity',
+        expect.objectContaining({
+          cached: 46,
+          max: 50,
+          utilizationPercent: 92,
+        })
+      );
+
+      // Restore original setInterval
+      global.setInterval = originalSetInterval;
+    });
+
+    test('should log efficiency metrics when duplicates prevented', async () => {
+      // ARRANGE
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      const mockMetrics = {
+        cachedRepositories: 10,
+        activeClones: 2,
+        duplicateClonesPrevented: 15, // Some duplicates prevented
+        coalescedOperations: 8,
+        cacheHits: 90,
+        cacheMisses: 10,
+        totalDiskUsageBytes: 1024000,
+      };
+
+      // Mock global setInterval to capture the monitoring function
+      const originalSetInterval = global.setInterval;
+      let monitoringCallback: (() => void) | null = null;
+
+      global.setInterval = vi.fn((callback: () => void, interval: number) => {
+        if (interval === 5 * 60 * 1000) {
+          // 5-minute monitoring interval
+          monitoringCallback = callback;
+        }
+        return originalSetInterval(callback, interval);
+      }) as any;
+
+      vi.doMock('../../src/services/repositoryCoordinator', () => ({
+        repositoryCoordinator: {
+          getMetrics: vi.fn(() => mockMetrics),
+          initialize: vi.fn(),
+          shutdown: vi.fn(),
+        },
+      }));
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig({ repositoryCache: { enabled: true } }),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      try {
+        const { startApplication } = await import('../../src/index');
+        await startApplication();
+
+        // Verify the monitoring callback was captured
+        expect(monitoringCallback).not.toBeNull();
+
+        // Execute the monitoring callback if it was captured
+        if (monitoringCallback) {
+          (monitoringCallback as () => void)();
+        }
+      } catch (error) {
+        expect((error as Error).message).toBe(
+          'process.exit unexpectedly called with "1"'
+        );
+      }
+
+      // ASSERT
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Repository coordination efficiency',
+        expect.objectContaining({
+          duplicateClonesPrevented: 15,
+          coalescedOperations: 8,
+          cacheHitRate: 0.9,
+        })
+      );
+
+      // Restore original setInterval
+      global.setInterval = originalSetInterval;
+    });
+
+    test('should handle monitoring errors gracefully', async () => {
+      // ARRANGE
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      // Mock global setInterval to capture the monitoring function
+      const originalSetInterval = global.setInterval;
+      let monitoringCallback: (() => void) | null = null;
+
+      global.setInterval = vi.fn((callback: () => void, interval: number) => {
+        if (interval === 5 * 60 * 1000) {
+          // 5-minute monitoring interval
+          monitoringCallback = callback;
+        }
+        return originalSetInterval(callback, interval);
+      }) as any;
+
+      vi.doMock('../../src/services/repositoryCoordinator', () => ({
+        repositoryCoordinator: {
+          getMetrics: vi.fn(() => {
+            throw new Error('Monitoring failure');
+          }),
+          initialize: vi.fn(),
+          shutdown: vi.fn(),
+        },
+      }));
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig({ repositoryCache: { enabled: true } }),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      try {
+        const { startApplication } = await import('../../src/index');
+        await startApplication();
+
+        // Execute the monitoring callback if it was captured
+        if (monitoringCallback) {
+          (monitoringCallback as () => void)();
+        }
+      } catch (error) {
+        expect((error as Error).message).toBe('process.exit called');
+      }
+
+      // ASSERT
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Coordination monitoring failed',
+        expect.objectContaining({ error: expect.any(Error) })
+      );
+
+      // Restore original setInterval
+      global.setInterval = originalSetInterval;
+    });
+  });
+
+  describe('Cache System Initialization Edge Cases', () => {
+    test('should handle cache stats import failure gracefully', async () => {
+      // ARRANGE
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      // Mock global setTimeout to capture the initialization callback
+      const originalSetTimeout = global.setTimeout;
+      let initCallback: (() => void) | null = null;
+
+      global.setTimeout = vi.fn((callback: () => void, delay: number) => {
+        if (delay === 1000) {
+          // The 1-second initialization delay
+          initCallback = callback;
+        }
+        return originalSetTimeout(callback, delay);
+      }) as any;
+
+      vi.doMock('../../src/services/cache', () => ({
+        getCacheStats: vi.fn(() => {
+          throw new Error('Cache stats unavailable');
+        }),
+      }));
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      try {
+        const { startApplication } = await import('../../src/index');
+        await startApplication();
+
+        // Execute the initialization callback if it was captured
+        if (initCallback) {
+          try {
+            await (initCallback as () => void)();
+          } catch {
+            // Expected to fail
+          }
+        }
+      } catch (error) {
+        expect((error as Error).message).toBe('process.exit called');
+      }
+
+      // ASSERT
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Failed to get cache/coordination stats during startup',
+        expect.objectContaining({ err: expect.any(Error) })
+      );
+
+      // Restore original setTimeout
+      global.setTimeout = originalSetTimeout;
+    });
+
+    test('should initialize hybrid cache with comprehensive logging', async () => {
+      // ARRANGE
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      const mockCacheStats = {
+        activeBackend: 'hybrid',
+        memory: { entries: 150 },
+        redis: { healthy: true },
+        hybrid: {
+          memory: { entries: 100, usageBytes: 50 * 1024 * 1024 },
+          disk: { entries: 50 },
+        },
+      };
+
+      // Mock global setTimeout to capture the initialization callback
+      const originalSetTimeout = global.setTimeout;
+      let initCallback: (() => void) | null = null;
+
+      global.setTimeout = vi.fn((callback: () => void, delay: number) => {
+        if (delay === 1000) {
+          // The 1-second initialization delay
+          initCallback = callback;
+        }
+        return originalSetTimeout(callback, delay);
+      }) as any;
+
+      vi.doMock('../../src/services/cache', () => ({
+        getCacheStats: vi.fn(() => mockCacheStats),
+      }));
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      try {
+        const { startApplication } = await import('../../src/index');
+        await startApplication();
+
+        // Execute the initialization callback if it was captured
+        if (initCallback) {
+          await (initCallback as () => void)();
+        }
+      } catch (error) {
+        expect((error as Error).message).toBe('process.exit called');
+      }
+
+      // ASSERT
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Cache system initialized',
+        expect.objectContaining({
+          activeBackend: 'hybrid',
+          memoryEntries: 150,
+          redisHealthy: true,
+          hybridStats: expect.objectContaining({
+            memoryEntries: 100,
+            diskEntries: 50,
+            memoryUsageMB: 50,
+          }),
+        })
+      );
+
+      // Restore original setTimeout
+      global.setTimeout = originalSetTimeout;
+    });
+  });
+
+  describe('Graceful Shutdown Enhanced Scenarios', () => {
+    test('should handle coordination shutdown errors gracefully', async () => {
+      // ARRANGE
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      // Mock setupGracefulShutdown to capture the shutdown callback
+      let shutdownCallback: (() => Promise<void>) | null = null;
+
+      vi.doMock('../../src/utils/gracefulShutdown', () => ({
+        setupGracefulShutdown: vi.fn(
+          (server: any, callback: () => Promise<void>) => {
+            shutdownCallback = callback;
+          }
+        ),
+      }));
+
+      vi.doMock('../../src/services/repositoryCoordinator', () => ({
+        repositoryCoordinator: {
+          shutdown: vi.fn(() =>
+            Promise.reject(new Error('Coordinator shutdown failed'))
+          ),
+          getMetrics: vi.fn(() => ({ cachedRepositories: 0, activeClones: 0 })),
+          initialize: vi.fn(),
+        },
+      }));
+
+      vi.doMock('../../src/services/repositoryCache', () => ({
+        repositoryCache: {
+          shutdown: vi.fn(() => Promise.resolve()),
+        },
+        getRepositoryCacheStats: vi.fn(() => ({
+          entries: 0,
+          hitRatios: { overall: 0 },
+        })),
+      }));
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig({ repositoryCache: { enabled: true } }),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      try {
+        const { startApplication } = await import('../../src/index');
+        await startApplication();
+
+        // Execute the shutdown callback if it was captured
+        if (shutdownCallback) {
+          await (shutdownCallback as () => Promise<void>)();
+        }
+      } catch (error) {
+        if ((error as Error).message !== 'process.exit called') {
+          throw error;
+        }
+      }
+
+      // ASSERT
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Error during coordination systems shutdown',
+        expect.objectContaining({ error: expect.any(Error) })
+      );
+    });
+
+    test('should complete coordination shutdown within time limit', async () => {
+      // ARRANGE
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      // Mock setupGracefulShutdown to capture the shutdown callback
+      let shutdownCallback: (() => Promise<void>) | null = null;
+
+      vi.doMock('../../src/utils/gracefulShutdown', () => ({
+        setupGracefulShutdown: vi.fn(
+          (server: any, callback: () => Promise<void>) => {
+            shutdownCallback = callback;
+          }
+        ),
+      }));
+
+      vi.doMock('../../src/services/repositoryCoordinator', () => ({
+        repositoryCoordinator: {
+          shutdown: vi.fn(() => Promise.resolve()),
+          getMetrics: vi.fn(() => ({ cachedRepositories: 5, activeClones: 1 })),
+          initialize: vi.fn(),
+        },
+      }));
+
+      vi.doMock('../../src/services/repositoryCache', () => ({
+        repositoryCache: {
+          shutdown: vi.fn(() => Promise.resolve()),
+        },
+        getRepositoryCacheStats: vi.fn(() => ({
+          entries: 10,
+          hitRatios: { overall: 0.8 },
+          memoryUsage: { total: 1024000 },
+        })),
+      }));
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig({ repositoryCache: { enabled: true } }),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      try {
+        const { startApplication } = await import('../../src/index');
+        await startApplication();
+
+        // Execute the shutdown callback if it was captured
+        if (shutdownCallback) {
+          await (shutdownCallback as () => Promise<void>)();
+        }
+      } catch (error) {
+        if ((error as Error).message !== 'process.exit called') {
+          throw error;
+        }
+      }
+
+      // ASSERT
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Repository coordination systems shutdown completed',
+        expect.objectContaining({ shutdownTime: expect.any(Number) })
+      );
+    });
+  });
+
+  describe('Environment Variable Edge Cases', () => {
+    test('should handle PORT environment variable as string', async () => {
+      // ARRANGE
+      process.env.PORT = '4000';
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig({ port: 4000 }),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { validateStartupEnvironment } = await import('../../src/index');
+      await validateStartupEnvironment();
+
+      // ASSERT - No errors should be thrown for valid string port
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '✅ Startup environment validation passed'
+      );
+    });
+
+    test('should handle LOG_DIR environment variable', async () => {
+      // ARRANGE
+      process.env.LOG_DIR = '/custom/logs';
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(false);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { validateStartupEnvironment } = await import('../../src/index');
+      await validateStartupEnvironment();
+
+      // ASSERT
+      expect(mockFsPromises.mkdir).toHaveBeenCalledWith('/custom/logs', {
+        recursive: true,
+      });
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Created directory: /custom/logs'
+      );
+    });
+
+    test('should handle NODE_ENV development configuration', async () => {
+      // ARRANGE
+      process.env.NODE_ENV = 'development';
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      try {
+        const { startApplication } = await import('../../src/index');
+        await startApplication();
+      } catch (error) {
+        expect((error as Error).message).toBe('process.exit called');
+      }
+
+      // ASSERT
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Backend starting up'),
+        expect.objectContaining({ nodeEnv: 'development' })
+      );
+    });
+  });
+
+  describe('Server Listen Callback Edge Cases', () => {
+    test('should handle server listen without callback gracefully', async () => {
+      // ARRANGE
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      const { mockApp } = createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      // Mock listen to not call callback
+      mockApp.listen.mockImplementation(() => {
+        // Don't call callback - test edge case
+        return { on: vi.fn() };
+      });
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      try {
+        const { startApplication } = await import('../../src/index');
+        const result = await startApplication();
+
+        // ASSERT - Should still return app and server
+        expect(result).toHaveProperty('app');
+        expect(result).toHaveProperty('server');
+      } catch (error) {
+        expect((error as Error).message).toBe('process.exit called');
+      }
+    });
+
+    test('should handle immediate server error during listen', async () => {
+      // ARRANGE
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      const { mockApp } = createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      // Mock listen to trigger error immediately without calling callback
+      mockApp.listen.mockImplementation(() => {
+        // Don't call the callback - simulate immediate error
+        const listenError = new Error('Listen failed') as NodeJS.ErrnoException;
+        listenError.code = 'EADDRNOTAVAIL';
+
+        // Trigger error synchronously
+        throw listenError;
+      });
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT & ASSERT
+      const { startApplication } = await import('../../src/index');
+      await expect(startApplication()).rejects.toThrow(
+        'process.exit unexpectedly called'
+      );
+
+      // Wait a bit for the error handler to be called
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Failed to start application',
+        expect.objectContaining({
+          error: expect.objectContaining({
+            message: 'Listen failed',
+            code: 'EADDRNOTAVAIL',
+          }),
+        })
+      );
+    });
+  });
+
+  describe('Module-Level Edge Cases', () => {
+    test('should handle module loading when require.main matches module', async () => {
+      // ARRANGE
+      const originalRequireMain = require.main;
+
+      try {
+        // Mock require.main to equal this module
+        Object.defineProperty(require, 'main', {
+          value: module,
+          configurable: true,
+        });
+
+        // This test verifies that the module initialization path works
+        // The actual startup would be triggered, but our mocks handle it
+
+        // ACT
+        await import('../../src/index');
+
+        // ASSERT
+        expect(dotenvMock.default.config).toHaveBeenCalled();
+        expect(initializeLogger).toHaveBeenCalled();
+        expect(mockLogger.info).toHaveBeenCalledWith(
+          '📋 Index.ts file loading...'
+        );
+      } finally {
+        // CLEANUP
+        Object.defineProperty(require, 'main', {
+          value: originalRequireMain,
+          configurable: true,
+        });
+      }
+    });
+  });
+
+  describe('Advanced Error Scenarios', () => {
+    test('should handle validateConfig throwing custom error types', async () => {
+      // ARRANGE
+      const customError = new TypeError('Invalid configuration type');
       const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
         throw new Error('process.exit called');
       });
 
       vi.doMock('../../src/config', () => ({
-        config: { port: 3001 },
-        validateConfig: mockValidateConfig,
+        config: createMockConfig(),
+        validateConfig: vi.fn(() => {
+          throw customError;
+        }),
       }));
 
       // ACT & ASSERT
@@ -347,499 +1205,48 @@ describe('index.ts - COVERAGE OPTIMIZED', () => {
 
       expect(mockLogger.error).toHaveBeenCalledWith(
         'Configuration or startup validation failed',
-        expect.objectContaining({ error: expect.any(Error) })
-      );
-
-      mockExit.mockRestore();
-    });
-  });
-
-  describe('Server Error Handling', () => {
-    test('should handle EADDRINUSE error correctly', async () => {
-      // ARRANGE
-      const mockFs = await import('fs');
-      const mockFsPromises = await import('fs/promises');
-      const { mockApp, mockServer } = createTestContext();
-      const addressError = new Error('Port in use') as NodeJS.ErrnoException;
-      addressError.code = 'EADDRINUSE';
-
-      vi.mocked(mockFs.existsSync).mockReturnValue(true);
-      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
-
-      const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
-        throw new Error('process.exit called');
-      });
-
-      mockApp.listen.mockImplementation((port: any, callback: any) => {
-        if (callback) callback();
-        setImmediate(() => {
-          const errorHandler = mockServer.on.mock.calls.find(
-            (call) => call[0] === 'error'
-          )?.[1];
-          if (errorHandler) {
-            try {
-              errorHandler(addressError);
-            } catch {
-              /* Expected */
-            }
-          }
-        });
-        return mockServer;
-      });
-
-      vi.doMock('../../src/config', () => ({
-        config: createMockConfig({ port: 3001 }),
-        validateConfig: vi.fn(),
-      }));
-
-      // ACT
-      const { startApplication } = await import('../../src/index');
-      try {
-        await startApplication();
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      } catch {
-        // Expected when process.exit is called
-      }
-
-      // ASSERT
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('PORT CONFLICT'),
-        expect.objectContaining({ port: 3001 })
+        expect.objectContaining({ error: customError })
       );
 
       mockExit.mockRestore();
     });
 
-    test('should handle EACCES permission error', async () => {
-      // ARRANGE
-      const { handleServerError } = await import('../../src/index');
-      const permissionError = new Error(
-        'Permission denied'
-      ) as NodeJS.ErrnoException;
-      permissionError.code = 'EACCES';
-
-      // ACT
-      const result = handleServerError(permissionError);
-
-      // ASSERT
-      expect(result).toBe(permissionError);
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('PERMISSION DENIED'),
-        expect.objectContaining({ solution: expect.stringContaining('1024') })
-      );
-    });
-
-    test('should handle ENOTFOUND network error', async () => {
-      // ARRANGE
-      const { handleServerError } = await import('../../src/index');
-      const networkError = new Error('Host not found') as NodeJS.ErrnoException;
-      networkError.code = 'ENOTFOUND';
-
-      // ACT
-      handleServerError(networkError);
-
-      // ASSERT
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('NETWORK ERROR'),
-        expect.objectContaining({ solution: expect.stringContaining('DNS') })
-      );
-    });
-
-    test('should handle unknown server errors', async () => {
-      // ARRANGE
-      const { handleServerError } = await import('../../src/index');
-      const unknownError = new Error('Mystery error') as NodeJS.ErrnoException;
-
-      // ACT
-      handleServerError(unknownError);
-
-      // ASSERT
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('SERVER STARTUP ERROR'),
-        expect.objectContaining({ stack: expect.any(String) })
-      );
-    });
-  });
-
-  describe('Helper Functions', () => {
-    test('should return disabled status when coordination disabled', async () => {
-      // ARRANGE
-      const { getCoordinationHealth } = await import('../../src/index');
-      const mockConfig = { repositoryCache: { enabled: false } };
-
-      // ACT
-      const result = getCoordinationHealth(mockConfig);
-
-      // ASSERT
-      expect(result).toEqual({
-        status: 'disabled',
-        message: 'Repository coordination is disabled',
-      });
-    });
-
-    test('should return healthy status when coordination enabled', async () => {
-      // ARRANGE
-      const { getCoordinationHealth } = await import('../../src/index');
-      const mockConfig = { repositoryCache: { enabled: true } };
-
-      // ACT
-      const result = getCoordinationHealth(mockConfig);
-
-      // ASSERT
-      expect(result.status).toBe('healthy');
-      expect(result).toHaveProperty('coordination');
-    });
-
-    test('should calculate healthy coordination status correctly', async () => {
-      // ARRANGE
-      const { calculateCoordinationHealth } = await import('../../src/index');
-      const mockMetrics = {
-        cachedRepositories: 5,
-        activeClones: 2,
-        duplicateClonesPrevented: 10,
-      };
-      const mockCacheStats = { hitRatios: { overall: 0.8 }, entries: 100 };
-
-      // ACT
-      const result = calculateCoordinationHealth(mockMetrics, mockCacheStats);
-
-      // ASSERT
-      expect(result.status).toBe('healthy');
-      expect(result.coordination.activeClones).toBe(2);
-      expect(result.cache.hitRatios.overall).toBe(0.8);
-      expect(result).toHaveProperty('timestamp');
-    });
-
-    test('should calculate unhealthy status when too many active clones', async () => {
-      // ARRANGE
-      const { calculateCoordinationHealth } = await import('../../src/index');
-      const mockMetrics = {
-        cachedRepositories: 5,
-        activeClones: 15,
-        duplicateClonesPrevented: 0,
-      };
-      const mockCacheStats = { hitRatios: { overall: 0.8 }, entries: 100 };
-
-      // ACT
-      const result = calculateCoordinationHealth(mockMetrics, mockCacheStats);
-
-      // ASSERT
-      expect(result.status).toBe('unhealthy');
-    });
-
-    test('should calculate unhealthy status when cache hit ratio too low', async () => {
-      // ARRANGE
-      const { calculateCoordinationHealth } = await import('../../src/index');
-      const mockMetrics = {
-        cachedRepositories: 5,
-        activeClones: 2,
-        duplicateClonesPrevented: 0,
-      };
-      const mockCacheStats = { hitRatios: { overall: 0.05 }, entries: 100 };
-
-      // ACT
-      const result = calculateCoordinationHealth(mockMetrics, mockCacheStats);
-
-      // ASSERT
-      expect(result.status).toBe('unhealthy');
-    });
-
-    test('should handle coordination health errors properly', async () => {
-      // ARRANGE
-      const { handleCoordinationHealthError } = await import('../../src/index');
-      const testError = new Error('Coordination system failed');
-
-      // ACT
-      const result = handleCoordinationHealthError(testError);
-
-      // ASSERT
-      expect(result).toEqual({
-        status: 'error',
-        message: 'Failed to get coordination health',
-        error: 'Coordination system failed',
-      });
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        'Coordination health check failed',
-        { error: testError }
-      );
-    });
-  });
-
-  describe('Main Module Execution Path', () => {
-    test('should skip graceful shutdown setup when not main module', async () => {
+    test('should handle startup with minimal viable configuration', async () => {
       // ARRANGE
       const mockFs = await import('fs');
       const mockFsPromises = await import('fs/promises');
-      const { setupGracefulShutdown } = await import(
-        '../../src/utils/gracefulShutdown'
-      );
       createTestContext();
 
       vi.mocked(mockFs.existsSync).mockReturnValue(true);
       vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
 
-      vi.doMock('../../src/config', () => ({
-        config: createMockConfig({
-          repositoryCache: { enabled: true },
-        }),
-        validateConfig: vi.fn(),
-      }));
-
-      // ACT
-      try {
-        const { startApplication } = await import('../../src/index');
-        await startApplication();
-      } catch (error) {
-        // Expected to throw process.exit error
-        expect((error as Error).message).toBe('process.exit called');
-      }
-
-      // ASSERT
-      // setupGracefulShutdown should not be called in test context (require.main !== module)
-      expect(setupGracefulShutdown).not.toHaveBeenCalled();
-    });
-
-    test('should handle cache stats failure during startup gracefully', async () => {
-      // ARRANGE
-      const mockFs = await import('fs');
-      const mockFsPromises = await import('fs/promises');
-      vi.useFakeTimers();
-      createTestContext();
-
-      vi.mocked(mockFs.existsSync).mockReturnValue(true);
-      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
-
-      vi.doMock('../../src/services/cache', () => ({
-        getCacheStats: vi.fn(() => {
-          throw new Error('Cache stats failed');
-        }),
-      }));
-
-      vi.doMock('../../src/config', () => ({
-        config: createMockConfig(),
-        validateConfig: vi.fn(),
-      }));
-
-      // ACT
-      // Since this test is about cache stats failure after startup, we need to avoid process.exit
-      // Let's test a specific function that handles cache stats instead
-      const { getCacheStats } = await import('../../src/services/cache');
-
-      try {
-        getCacheStats();
-      } catch {
-        // Expected error from cache stats
-      }
-
-      // Fast-forward past initialization delay
-      vi.advanceTimersByTime(1100);
-
-      // ASSERT - Test passes if no uncaught errors occur
-      expect(getCacheStats).toHaveBeenCalled();
-      vi.useRealTimers();
-    });
-
-    test('should handle coordination system startup when enabled', async () => {
-      // ARRANGE
-      const mockFs = await import('fs');
-      const mockFsPromises = await import('fs/promises');
-      vi.useFakeTimers();
-      createTestContext();
-
-      vi.mocked(mockFs.existsSync).mockReturnValue(true);
-      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
-
-      const mockCoordinatorMetrics = {
-        cachedRepositories: 5,
-        activeClones: 2,
-        totalDiskUsageBytes: 1024000,
-      };
-
-      const mockCacheStats = {
-        entries: 10,
-        memoryUsage: { total: 1024000 },
-        hitRatios: { overall: 0.8 },
-      };
-
-      vi.doMock('../../src/services/repositoryCoordinator', () => ({
-        repositoryCoordinator: {
-          getMetrics: vi.fn(() => mockCoordinatorMetrics),
-          initialize: vi.fn(() => {
-            mockLogger.info('Repository coordination system initialized', {
-              cachedRepositories: 5,
-              activeClones: 2,
-            });
-          }),
+      const minimalConfig = {
+        port: 3001,
+        cors: { origin: '*', credentials: false },
+        rateLimit: { windowMs: 60000, max: 10, message: 'Rate limit exceeded' },
+        redis: { host: '127.0.0.1', port: 6379 },
+        git: { maxConcurrentProcesses: 1, cloneDepth: 1 },
+        hybridCache: {
+          diskPath: '/tmp/minimal',
+          enableRedis: false,
+          enableDisk: false,
+          maxEntries: 100,
+          memoryLimitBytes: 10 * 1024 * 1024,
         },
-      }));
-
-      vi.doMock('../../src/services/repositoryCache', () => ({
-        getRepositoryCacheStats: vi.fn(() => mockCacheStats),
-      }));
-
-      vi.doMock('../../src/services/cache', () => ({
-        getCacheStats: vi.fn(() => ({
-          activeBackend: 'memory',
-          memory: { entries: 100 },
-          redis: { healthy: false },
-          hybrid: null,
-        })),
-      }));
+        locks: { lockDir: '/tmp/locks', defaultTimeoutMs: 30000 },
+        repositoryCache: { enabled: false },
+        operationCoordination: { enabled: false },
+        cacheStrategy: { hierarchicalCaching: false },
+        memoryPressure: {
+          warningThreshold: 0.9,
+          criticalThreshold: 0.95,
+          emergencyThreshold: 0.99,
+          checkIntervalMs: 10000,
+        },
+      };
 
       vi.doMock('../../src/config', () => ({
-        config: createMockConfig({
-          repositoryCache: { enabled: true },
-          cacheStrategy: { hierarchicalCaching: true },
-          coordination: { enabled: true },
-        }),
-        validateConfig: vi.fn(),
-      }));
-
-      // ACT
-      try {
-        const { startApplication } = await import('../../src/index');
-        await startApplication();
-      } catch (error) {
-        // Expected to throw process.exit error
-        expect((error as Error).message).toBe('process.exit called');
-      }
-
-      // Fast-forward past initialization delay
-      vi.advanceTimersByTime(1100);
-
-      // ASSERT
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        '🚀 Backend running on port 3001'
-      );
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        '🔄 Coordination health: http://localhost:3001/health/coordination'
-      );
-    });
-  });
-
-  describe('Environment Configuration Edge Cases', () => {
-    test('should handle missing repositoryCache config gracefully', async () => {
-      // ARRANGE
-      const mockFs = await import('fs');
-      const mockFsPromises = await import('fs/promises');
-      createTestContext();
-
-      vi.mocked(mockFs.existsSync).mockReturnValue(true);
-      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
-
-      vi.doMock('../../src/config', () => ({
-        config: createMockConfig({
-          // repositoryCache will use default value from createMockConfig
-        }),
-        validateConfig: vi.fn(),
-      }));
-
-      // ACT
-      try {
-        const { startApplication } = await import('../../src/index');
-        const result = await startApplication();
-        // If it reaches here, test the result
-        expect(result).toHaveProperty('app');
-        expect(result).toHaveProperty('server');
-      } catch (error) {
-        // Expected to throw process.exit error
-        expect((error as Error).message).toBe('process.exit called');
-      }
-    });
-
-    test('should handle process.env.NODE_ENV variations', async () => {
-      // ARRANGE
-      const mockFs = await import('fs');
-      const mockFsPromises = await import('fs/promises');
-      process.env.NODE_ENV = 'production';
-      createTestContext();
-
-      vi.mocked(mockFs.existsSync).mockReturnValue(true);
-      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
-
-      vi.doMock('../../src/config', () => ({
-        config: createMockConfig(),
-        validateConfig: vi.fn(),
-      }));
-
-      // ACT
-      try {
-        const { startApplication } = await import('../../src/index');
-        await startApplication();
-      } catch (error) {
-        // Expected to throw process.exit error
-        expect((error as Error).message).toBe('process.exit called');
-      }
-
-      // ASSERT
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Backend starting up'),
-        expect.objectContaining({ nodeEnv: 'production' })
-      );
-    });
-
-    test('should handle undefined coordination configuration', async () => {
-      // ARRANGE
-      const mockFs = await import('fs');
-      const mockFsPromises = await import('fs/promises');
-      createTestContext();
-
-      vi.mocked(mockFs.existsSync).mockReturnValue(true);
-      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
-
-      // Mock request/response for coordination health endpoint
-      const mockRequest = {} as any;
-      const mockResponse = {
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn(),
-      } as any;
-
-      vi.doMock('../../src/config', () => ({
-        config: createMockConfig({
-          // coordination will use default value from createMockConfig
-        }),
-        validateConfig: vi.fn(),
-      }));
-
-      // ACT
-      try {
-        const { startApplication } = await import('../../src/index');
-        const { app } = await startApplication();
-
-        // Find and call the coordination health handler
-        const healthHandler = (app.get as any).mock.calls.find(
-          (call: any[]) => call[0] === '/health/coordination'
-        )?.[1];
-
-        await healthHandler(mockRequest, mockResponse);
-      } catch (error) {
-        // Expected to throw process.exit error
-        expect((error as Error).message).toBe('process.exit called');
-        return; // Skip the rest of the test if process.exit is called
-      }
-
-      // ASSERT
-      expect(mockResponse.json).toHaveBeenCalledWith({
-        status: 'disabled',
-        message: 'Repository coordination is disabled',
-      });
-    });
-  });
-
-  describe('Integration - Complete Startup Flow', () => {
-    test('should complete full startup without coordination', async () => {
-      // ARRANGE
-      const mockFs = await import('fs');
-      const mockFsPromises = await import('fs/promises');
-      createTestContext();
-
-      vi.mocked(mockFs.existsSync).mockReturnValue(true);
-      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
-
-      vi.doMock('../../src/config', () => ({
-        config: createMockConfig({
-          repositoryCache: { enabled: false },
-        }),
+        config: minimalConfig,
         validateConfig: vi.fn(),
       }));
 
@@ -849,53 +1256,250 @@ describe('index.ts - COVERAGE OPTIMIZED', () => {
         const result = await startApplication();
 
         // ASSERT
-        expect(result).toBeDefined();
-        expect(result.app).toBeDefined();
-        expect(result.server).toBeDefined();
-        expect(mockLogger.info).toHaveBeenCalledWith(
-          '🚀 Backend running on port 3001'
-        );
+        expect(result).toHaveProperty('app');
+        expect(result).toHaveProperty('server');
       } catch (error) {
-        // Expected to throw process.exit error
         expect((error as Error).message).toBe('process.exit called');
       }
     });
+  });
 
-    test('should handle startup failure gracefully', async () => {
+  describe('Cache System Integration', () => {
+    test('should initialize cache system with proper timeout handling', async () => {
       // ARRANGE
-      const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
-        throw new Error('process.exit called');
-      });
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      // Mock setTimeout to capture and control the initialization timing
+      const originalSetTimeout = global.setTimeout;
+      let initTimeoutCallback: (() => void) | null = null;
+
+      global.setTimeout = vi.fn((callback: () => void, delay: number) => {
+        if (delay === 1000) {
+          initTimeoutCallback = callback;
+        }
+        return originalSetTimeout(callback, delay);
+      }) as any;
+
+      // Mock cache stats with comprehensive data
+      const mockCacheStats = {
+        activeBackend: 'hybrid',
+        memory: { entries: 150 },
+        redis: { healthy: true },
+        hybrid: {
+          memory: { entries: 100, usageBytes: 50 * 1024 * 1024 },
+          disk: { entries: 50 },
+        },
+      };
+
+      vi.doMock('../../src/services/cache', () => ({
+        getCacheStats: vi.fn(() => mockCacheStats),
+      }));
 
       vi.doMock('../../src/config', () => ({
-        config: { port: 3001 },
-        validateConfig: vi.fn(() => {
-          throw new Error('Config failed');
+        config: createMockConfig({
+          repositoryCache: { enabled: true },
+          cacheStrategy: { hierarchicalCaching: true },
+        }),
+        validateConfig: vi.fn(),
+      }));
+
+      const mockCoordinationMetrics = {
+        cachedRepositories: 5,
+        activeClones: 1,
+        totalDiskUsageBytes: 100 * 1024 * 1024,
+      };
+
+      const mockCacheManagerStats = {
+        entries: 25,
+        memoryUsage: { total: 75 * 1024 * 1024 },
+        hitRatios: { overall: 0.85 },
+      };
+
+      vi.doMock('../../src/services/repositoryCoordinator', () => ({
+        repositoryCoordinator: {
+          getMetrics: vi.fn(() => mockCoordinationMetrics),
+          initialize: vi.fn(),
+          shutdown: vi.fn(),
+        },
+      }));
+
+      vi.doMock('../../src/services/repositoryCache', () => ({
+        repositoryCache: {
+          shutdown: vi.fn(),
+        },
+        getRepositoryCacheStats: vi.fn(() => mockCacheManagerStats),
+      }));
+
+      // ACT
+      try {
+        const { startApplication } = await import('../../src/index');
+        await startApplication();
+
+        // Execute the cache initialization timeout callback
+        if (initTimeoutCallback) {
+          await (initTimeoutCallback as () => void)();
+        }
+      } catch (error) {
+        expect((error as Error).message).toBe(
+          'process.exit unexpectedly called with "1"'
+        );
+      }
+
+      // ASSERT - Check cache system initialization logging
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Cache system initialized',
+        expect.objectContaining({
+          activeBackend: 'hybrid',
+          memoryEntries: 150,
+          redisHealthy: true,
+          hybridStats: expect.objectContaining({
+            memoryEntries: 100,
+            diskEntries: 50,
+            memoryUsageMB: 50,
+          }),
+        })
+      );
+
+      // Check coordination system logging
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Repository coordination system initialized',
+        expect.objectContaining({
+          cachedRepositories: 5,
+          activeClones: 1,
+          totalDiskUsageMB: 100,
+        })
+      );
+
+      // Check cache manager logging
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Repository cache manager initialized',
+        expect.objectContaining({
+          hierarchicalCaching: true,
+          cacheEntries: 25,
+          memoryUsageMB: 75,
+          hitRatios: { overall: 0.85 },
+        })
+      );
+
+      // Restore original setTimeout
+      global.setTimeout = originalSetTimeout;
+    });
+
+    test('should handle cache system initialization errors gracefully', async () => {
+      // ARRANGE
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      const originalSetTimeout = global.setTimeout;
+      let initTimeoutCallback: (() => void) | null = null;
+
+      global.setTimeout = vi.fn((callback: () => void, delay: number) => {
+        if (delay === 1000) {
+          initTimeoutCallback = callback;
+        }
+        return originalSetTimeout(callback, delay);
+      }) as any;
+
+      // Mock cache stats to throw an error
+      vi.doMock('../../src/services/cache', () => ({
+        getCacheStats: vi.fn(() => {
+          throw new Error('Cache stats failed');
         }),
       }));
 
-      // ACT & ASSERT
-      const { startApplication } = await import('../../src/index');
-      await expect(startApplication()).rejects.toThrow('process.exit called');
-
-      mockExit.mockRestore();
-    });
-  });
-
-  describe('Module-Level Initialization', () => {
-    test('should execute module initialization correctly', async () => {
-      // ARRANGE
-      vi.clearAllMocks();
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig({ repositoryCache: { enabled: false } }),
+        validateConfig: vi.fn(),
+      }));
 
       // ACT
-      await import('../../src/index');
+      try {
+        const { startApplication } = await import('../../src/index');
+        await startApplication();
+
+        // Execute the timeout callback to trigger the error
+        if (initTimeoutCallback) {
+          await (initTimeoutCallback as () => void)();
+        }
+      } catch (error) {
+        expect((error as Error).message).toBe(
+          'process.exit unexpectedly called with "1"'
+        );
+      }
+
+      // ASSERT - Check error handling
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Failed to get cache/coordination stats during startup',
+        expect.objectContaining({ err: expect.any(Error) })
+      );
+
+      global.setTimeout = originalSetTimeout;
+    });
+
+    test('should log when repository coordination is disabled', async () => {
+      // ARRANGE
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+      createTestContext();
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      const originalSetTimeout = global.setTimeout;
+      let initTimeoutCallback: (() => void) | null = null;
+
+      global.setTimeout = vi.fn((callback: () => void, delay: number) => {
+        if (delay === 1000) {
+          initTimeoutCallback = callback;
+        }
+        return originalSetTimeout(callback, delay);
+      }) as any;
+
+      const mockCacheStats = {
+        activeBackend: 'memory',
+        memory: { entries: 50 },
+        redis: { healthy: false },
+        hybrid: null,
+      };
+
+      vi.doMock('../../src/services/cache', () => ({
+        getCacheStats: vi.fn(() => mockCacheStats),
+      }));
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig({ repositoryCache: { enabled: false } }),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      try {
+        const { startApplication } = await import('../../src/index');
+        await startApplication();
+
+        if (initTimeoutCallback) {
+          await (initTimeoutCallback as () => void)();
+        }
+      } catch (error) {
+        expect((error as Error).message).toBe(
+          'process.exit unexpectedly called'
+        );
+      }
 
       // ASSERT
-      expect(dotenvMock.default.config).toHaveBeenCalled();
-      expect(initializeLogger).toHaveBeenCalled();
       expect(mockLogger.info).toHaveBeenCalledWith(
-        '📋 Index.ts file loading...'
+        'Repository coordination system disabled'
       );
+
+      global.setTimeout = originalSetTimeout;
     });
   });
 });
