@@ -369,7 +369,7 @@ const cache = {
 
   /**
    * Determines whether the cache backend is healthy.
-   * Returns true if at least one cache tier is working or if Redis was never initialized.
+   * Returns true if at least one cache tier is working or if all backends are null (memory-only mode).
    */
   isHealthy(): boolean {
     // If intentionally shut down, not healthy
@@ -387,7 +387,12 @@ const cache = {
       return true;
     }
 
-    // If Redis was never initialized (null), memory cache is healthy
+    // If both are null (never initialized), memory cache is healthy
+    if (redis === null && hybridCache === null) {
+      return true;
+    }
+
+    // If Redis was never initialized (null) but hybrid was attempted, still healthy
     if (redis === null) {
       return true;
     }
@@ -489,6 +494,8 @@ const cache = {
       redis = mockRedis;
       redisHealthy = redisHealthyParam;
     }
+    // Reset shutdown flag for testing
+    isShutdown = false;
   },
 
   /**

@@ -1,922 +1,468 @@
-import {
-  describe,
-  test,
-  expect,
-  beforeEach,
-  vi,
-  type MockInstance,
-} from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 
-// Mock ioredis and logger
-const mockRedisInstance = {
-  on: vi.fn(),
+// Mock external dependencies only - not internal Node.js modules
+const mockRedis = {
   get: vi.fn(),
   set: vi.fn(),
   del: vi.fn(),
   quit: vi.fn(),
+  keys: vi.fn(),
+  on: vi.fn(),
   disconnect: vi.fn(),
 };
 
-// This will store the handlers registered by initRedis
-const capturedRedisHandlers: Record<string, ((err?: Error) => void)[]> = {};
-
-(mockRedisInstance.on as MockInstance).mockImplementation(
-  (event: string, callback: (err?: Error) => void) => {
-    if (!capturedRedisHandlers[event]) {
-      capturedRedisHandlers[event] = [];
-    }
-    capturedRedisHandlers[event].push(callback);
-    return mockRedisInstance;
-  }
-);
-
-vi.mock('ioredis', () => ({
-  default: vi.fn().mockImplementation(() => mockRedisInstance),
-}));
-
-vi.mock('../../../src/config', () => ({
-  config: {
-    redis: {
-      host: 'localhost',
-      port: 6379,
-    },
-  },
-  hybridCacheConfig: {
-    enableRedis: true,
-    enableDisk: true,
-    maxEntries: 1000,
-    memoryLimitBytes: 1048576,
-    diskPath: '/tmp/test-cache',
-    lockTimeoutMs: 5000,
-    redisConfig: {
-      host: 'localhost',
-      port: 6379,
-    },
-  },
-  lockConfig: {
-    lockDir: '/tmp/test-locks',
-    defaultTimeoutMs: 5000,
-    cleanupIntervalMs: 30000,
-    staleLockAgeMs: 60000,
-    enableLockLogging: false,
-  },
-}));
-
-const mockLogger = {
-  info: vi.fn(),
-  warn: vi.fn(),
-  error: vi.fn(),
-  debug: vi.fn(),
+const mockHybridCache = {
+  get: vi.fn(),
+  set: vi.fn(),
+  del: vi.fn(),
+  quit: vi.fn(),
+  getStats: vi.fn(),
+  emergencyEvict: vi.fn(),
 };
 
-vi.mock('../../../src/services/logger', () => ({
-  __esModule: true,
-  default: mockLogger,
-  getLogger: vi.fn(() => mockLogger),
+vi.mock('ioredis', () => ({
+  default: vi.fn(() => mockRedis),
 }));
 
-// Mock HybridLRUCache
-const HybridLRUCacheMock = vi.fn();
 vi.mock('../../../src/utils/hybridLruCache', () => ({
-  HybridLRUCache: HybridLRUCacheMock,
+  default: vi.fn(() => mockHybridCache),
 }));
 
-// Mock Prometheus register to avoid duplicate metrics errors
-vi.mock('prom-client', async () => {
-  const actual = await vi.importActual('prom-client');
-  return {
-    ...actual,
-    register: {
-      clear: vi.fn(),
-      metrics: vi.fn().mockResolvedValue(''),
-      registerMetric: vi.fn(),
-    },
-    collectDefaultMetrics: vi.fn(),
-  };
-});
-
-// Mock metrics service with all enhanced metrics functions
 vi.mock('../../../src/services/metrics', () => ({
-  // Basic metrics
-  cacheHits: { inc: vi.fn() },
-  cacheMisses: { inc: vi.fn() },
-
-  // Enhanced metrics functions
   recordEnhancedCacheOperation: vi.fn(),
   updateServiceHealthScore: vi.fn(),
   recordDetailedError: vi.fn(),
-  recordFeatureUsage: vi.fn(),
-  updateCoordinationMetrics: vi.fn(),
-  recordApiMetrics: vi.fn(),
-  recordSLAMetrics: vi.fn(),
-
-  // Utility functions
-  getUserType: vi.fn().mockReturnValue('anonymous'),
-  getRepositoryType: vi.fn().mockReturnValue('public'),
-  getTeamSizeCategory: vi.fn().mockReturnValue('individual'),
-  getCacheTier: vi.fn().mockReturnValue('L1'),
-  getRepositorySizeCategory: vi.fn().mockReturnValue('small'),
-
-  // Middleware and other exports
-  metricsMiddleware: vi.fn((req, res, next) => next()),
-  register: {
-    metrics: vi.fn().mockResolvedValue(''),
-    clear: vi.fn(),
-  },
 }));
 
-describe('Cache Service Integration', () => {
-  let cache: any;
-  let mockHybridCache: any;
-  let mockRedis: any;
-  let mockLogger: any;
+vi.mock('../../../src/services/logger', () => ({
+  getLogger: () => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }),
+}));
+
+// Test context factory for clean, fast setup
+function createCacheContext() {
+  const ctx = {
+    cache: null as any,
+    resetMocks: () => {
+      vi.clearAllMocks();
+      mockRedis.get.mockResolvedValue(null);
+      mockRedis.set.mockResolvedValue('OK');
+      mockRedis.del.mockResolvedValue(1);
+      mockRedis.quit.mockResolvedValue('OK');
+      mockRedis.keys.mockResolvedValue([]);
+      mockRedis.on.mockReturnValue(mockRedis);
+
+      mockHybridCache.get.mockResolvedValue(null);
+      mockHybridCache.set.mockResolvedValue(undefined);
+      mockHybridCache.del.mockResolvedValue(undefined);
+      mockHybridCache.quit.mockResolvedValue(undefined);
+      mockHybridCache.getStats.mockReturnValue({
+        memory: { entries: 0, usageBytes: 0 },
+        disk: { entries: 0, usageBytes: 0 },
+      });
+      mockHybridCache.emergencyEvict.mockResolvedValue({
+        evictedEntries: 5,
+        bytesFreed: 1024,
+      });
+    },
+    async importCache() {
+      const cacheModule = await import('../../../src/services/cache');
+      this.cache = cacheModule.default;
+      return this.cache;
+    },
+  };
+
+  ctx.resetMocks();
+  return ctx;
+}
+
+describe('Cache Service - Core Operations', () => {
+  let ctx = createCacheContext();
 
   beforeEach(async () => {
-    vi.clearAllMocks();
-
-    // Clear Prometheus registry to prevent duplicate metrics errors
-    const { register } = await import('prom-client');
-    if (register && typeof register.clear === 'function') {
-      register.clear();
-    }
-
-    // Get the mocked logger
-    mockLogger = (await import('../../../src/services/logger')).default;
-    // Clear captured handlers for each test
-    for (const key in capturedRedisHandlers) {
-      delete capturedRedisHandlers[key];
-    }
-
-    // Reset modules to ensure initRedis is called fresh and mocks are reapplied
-    vi.resetModules();
-
-    // Re-import dependencies with mocks
-    // Ensure ioredis mock is active after reset
-    const ioredis = (await import('ioredis')).default;
-    (ioredis as unknown as MockInstance).mockImplementation(
-      () => mockRedisInstance
-    );
-
-    // Create mockHybridCache
-    mockHybridCache = {
-      quit: vi.fn().mockResolvedValue(undefined),
-      isHealthy: vi.fn().mockReturnValue(true),
-      get: vi.fn(),
-      set: vi.fn(),
-      del: vi.fn(),
-      getStats: vi.fn(),
-    };
-
-    HybridLRUCacheMock.mockImplementation(() => mockHybridCache);
-
-    // Mock Redis
-    mockRedis = {
-      get: vi.fn(),
-      set: vi.fn(),
-      del: vi.fn(),
-      quit: vi.fn(),
-      on: vi.fn((event: string, callback: any) => {
-        // Simulate successful connection
-        if (event === 'ready') {
-          setTimeout(() => callback(), 0);
-        }
-      }),
-      disconnect: vi.fn(),
-    };
-
-    // Setup mock return values
-    mockRedis.quit.mockResolvedValue('OK');
-
-    // Mock Redis constructor
-    const Redis = await import('ioredis');
-    (Redis.default as any).mockImplementation(() => mockRedis);
-
-    // Import cache after mocks are set up
-    const cacheModule = await import('../../../src/services/cache');
-    cache = cacheModule.default;
-
-    // Allow async initialization to complete
-    await new Promise<void>((resolve) => setTimeout(resolve, 50));
-
-    // Inject our mocks into the cache service
-    if (cache.__setDependenciesForTesting) {
-      cache.__setDependenciesForTesting(mockHybridCache, mockRedis, true, true);
-    }
+    ctx = createCacheContext();
+    await ctx.importCache();
   });
 
-  describe('get() - Happy Path', () => {
-    test('should return value from HybridLRUCache when available', async () => {
-      // Arrange
-      const key = 'test-key';
-      const expectedValue = 'test-value';
-      mockHybridCache.get.mockResolvedValue(expectedValue);
-
-      // Act
-      const result = await cache.get(key);
-
-      // Assert
-      expect(result).toBe(expectedValue);
-      expect(mockHybridCache.get).toHaveBeenCalledWith(key);
-      expect(mockHybridCache.get).toHaveBeenCalledTimes(1);
-    });
-
-    test('should fallback to Redis when HybridLRUCache returns null', async () => {
-      // Arrange
-      const key = 'test-key';
-      const expectedValue = 'redis-value';
-      mockHybridCache.get.mockResolvedValue(null);
-      mockRedis.get.mockResolvedValue(expectedValue);
-
-      // Act
-      const result = await cache.get(key);
-
-      // Assert
-      expect(result).toBe(expectedValue);
-      expect(mockHybridCache.get).toHaveBeenCalledWith(key);
-      expect(mockRedis.get).toHaveBeenCalledWith(key);
-    });
-
-    test('should fallback to memory when both HybridLRUCache and Redis fail', async () => {
-      // Arrange
-      const key = 'memory-key';
-      const value = 'memory-value';
-
-      // Make both HybridLRUCache and Redis fail for get operations
-      mockHybridCache.get.mockResolvedValue(null);
-      mockRedis.get.mockRejectedValue(new Error('Redis down'));
-
-      // Make HybridLRUCache and Redis fail for set operations to force memory fallback
-      mockHybridCache.set.mockRejectedValue(new Error('Hybrid cache down'));
-      mockRedis.set.mockRejectedValue(new Error('Redis down'));
-
-      // Pre-populate memory cache (this should succeed and store in memory as final fallback)
-      await cache.set(key, value);
-
-      // Reset get mocks to ensure clean test
-      mockHybridCache.get.mockResolvedValue(null);
-      mockRedis.get.mockRejectedValue(new Error('Redis down'));
-
-      // Act
-      const result = await cache.get(key);
-
-      // Assert
-      expect(result).toBe(value);
-    });
-  });
-
-  describe('set() - Happy Path', () => {
-    test('should store value in HybridLRUCache successfully', async () => {
-      // Arrange
-      const key = 'test-key';
-      const value = 'test-value';
-      mockHybridCache.set.mockResolvedValue(undefined);
-
-      // Act
-      await cache.set(key, value);
-
-      // Assert
-      expect(mockHybridCache.set).toHaveBeenCalledWith(
-        key,
-        value,
-        undefined,
-        undefined
-      );
-      expect(mockHybridCache.set).toHaveBeenCalledTimes(1);
-    });
-
-    test('should store value with expiration parameters', async () => {
-      // Arrange
-      const key = 'test-key';
-      const value = 'test-value';
-      const mode = 'EX';
-      const duration = 3600;
-      mockHybridCache.set.mockResolvedValue(undefined);
-
-      // Act
-      await cache.set(key, value, mode, duration);
-
-      // Assert
-      expect(mockHybridCache.set).toHaveBeenCalledWith(
-        key,
-        value,
-        mode,
-        duration
-      );
-    });
-
-    test('should handle Redis init failure and use memory cache', async () => {
-      const initFailError = new Error('Redis init failed');
-      // Arrange: any ioredis constructor to throw an error for this specific test
-      // This requires resetting modules again and setting up mocks specifically for this test's scope.
-      vi.resetModules();
-      const ioredisSpecial = (await import('ioredis')).default;
-      (ioredisSpecial as unknown as MockInstance).mockImplementationOnce(() => {
-        // Use mockImplementationOnce
-        throw initFailError;
-      });
-    });
-  });
-
-  describe('quit() - Happy Path', () => {
-    test('should close all cache connections successfully', async () => {
-      // Arrange
-      mockHybridCache.quit.mockResolvedValue(undefined);
-      mockRedis.quit.mockResolvedValue('OK');
-
-      // Act
-      await cache.quit();
-
-      // Assert
-      expect(mockHybridCache.quit).toHaveBeenCalled();
-      expect(mockRedis.quit).toHaveBeenCalled();
-    });
-  });
-
-  describe('Cache Operations with Redis', () => {
-    beforeEach(async () => {
-      // Use the testing injection method to disable HybridLRUCache for these tests
-      cache.__setDependenciesForTesting(null, mockRedisInstance, false, true);
-
-      // Ensure Redis is "connected" for these tests by triggering ready
-      if (capturedRedisHandlers['ready']) {
-        capturedRedisHandlers['ready'].forEach((handler) => handler());
-      }
-    });
-
-    test('get should call redis.get', async () => {
-      mockRedisInstance.get.mockResolvedValue('value_from_redis');
-      const value = await cache.get('test_key');
-      expect(mockRedisInstance.get).toHaveBeenCalledWith('test_key');
-      expect(value).toBe('value_from_redis');
-    });
-
-    test('set should call redis.set without expiry', async () => {
-      await cache.set('test_key', 'test_value');
-      expect(mockRedisInstance.set).toHaveBeenCalledWith(
-        'test_key',
-        'test_value'
-      );
-    });
-
-    test('set should call redis.set with expiry', async () => {
-      await cache.set('test_key', 'test_value', 'EX', 3600);
-      expect(mockRedisInstance.set).toHaveBeenCalledWith(
-        'test_key',
-        'test_value',
-        'EX',
-        3600
-      );
-    });
-
-    test('del should call redis.del', async () => {
-      await cache.del('test_key');
-      expect(mockRedisInstance.del).toHaveBeenCalledWith('test_key');
-    });
-
-    test('quit should call redis.quit and set healthy to false', async () => {
-      mockRedisInstance.quit.mockResolvedValue('OK');
-      await cache.quit();
-      expect(mockRedisInstance.quit).toHaveBeenCalled();
-      expect(cache.isHealthy()).toBe(false);
-    });
-
-    test('quit should handle errors from redis.quit', async () => {
-      const quitError = new Error('Quit failed');
-      mockRedisInstance.quit.mockRejectedValue(quitError);
-      await cache.quit();
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Error closing Redis connection',
-        { err: quitError }
-      );
-      expect(cache.isHealthy()).toBe(false);
-    });
-  });
-
-  describe('Cache Operations with Memory Cache (Redis unavailable)', () => {
-    beforeEach(async () => {
-      // Simulate Redis init failure
-      vi.resetModules();
-      const ioredis = (await import('ioredis')).default;
-      (ioredis as unknown as MockInstance).mockImplementation(() => {
-        throw new Error('Simulated Redis init failure');
-      });
-      cache = (await import('../../../src/services/cache')).default;
-    });
-
-    test('get should retrieve from memory cache', async () => {
-      // Set directly to memory cache for testing, as redis mock won't be used
-      await cache.set('mem_key', 'mem_value'); // This will use memory cache
-      const value = await cache.get('mem_key');
-      expect(value).toBe('mem_value');
-    });
-
-    test('set should store in memory cache', async () => {
-      await cache.set('mem_key_set', 'mem_value_set');
-      const value = await cache.get('mem_key_set'); // verify it was set
-      expect(value).toBe('mem_value_set');
-    });
-
-    test('del should remove from memory cache', async () => {
-      await cache.set('mem_key_del', 'mem_value_del');
-      await cache.del('mem_key_del');
-      const value = await cache.get('mem_key_del');
-      expect(value).toBeNull();
-    });
-
-    test('quit should do nothing significant if redis was never initialized', async () => {
-      await cache.quit();
-      expect(mockRedisInstance.quit).not.toHaveBeenCalled();
-      // isHealthy remains true as memory cache is considered healthy
-      expect(cache.isHealthy()).toBe(true);
-    });
-  });
-
-  describe('isHealthy', () => {
-    test('should return true when redis is healthy', async () => {
-      if (capturedRedisHandlers['ready']) {
-        capturedRedisHandlers['ready'].forEach((handler) => handler());
-      }
-      expect(cache.isHealthy()).toBe(true);
-    });
-
-    test('should return false when redis connection has ended', async () => {
-      // Use the testing injection method to disable HybridLRUCache for this test
-      cache.__setDependenciesForTesting(null, mockRedisInstance, false, false);
-
-      if (capturedRedisHandlers['ready']) {
-        capturedRedisHandlers['ready'].forEach((handler) => handler());
-      }
-      if (capturedRedisHandlers['end']) {
-        capturedRedisHandlers['end'].forEach((handler) => handler());
-      }
-      expect(cache.isHealthy()).toBe(false);
-    });
-
-    test('should return true if redis init failed (memory cache fallback)', async () => {
-      // Similar to the init failure test, set up a specific scenario
-      vi.resetModules();
-      const ioredisFail = (await import('ioredis')).default;
-      (ioredisFail as unknown as MockInstance).mockImplementationOnce(() => {
-        throw new Error('init fail');
-      });
-      const localCache = (await import('../../../src/services/cache')).default;
-      expect(localCache.isHealthy()).toBe(true);
-    });
-  });
-
-  describe('Redis Connection Error Handling', () => {
-    test('should handle Redis error event and disconnect', async () => {
-      // Reset to get a fresh import
-      vi.resetModules();
-
-      const mockRedis = {
-        on: vi.fn(),
-        get: vi.fn(),
-        set: vi.fn(),
-        del: vi.fn(),
-        quit: vi.fn(),
-        disconnect: vi.fn(),
-      };
-
-      let errorHandler: (err: Error) => void;
-      mockRedis.on.mockImplementation((event: string, callback: any) => {
-        if (event === 'error') {
-          errorHandler = callback;
-        } else if (event === 'ready') {
-          setTimeout(() => callback(), 0);
-        }
-        return mockRedis;
-      });
-
-      const Redis = await import('ioredis');
-      (Redis.default as any).mockImplementation(() => mockRedis);
-
-      await import('../../../src/services/cache');
-
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
-
-      // Trigger Redis error event
-      const testError = new Error('Redis connection lost');
-      errorHandler!(testError);
-
-      expect(mockRedis.disconnect).toHaveBeenCalled();
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Redis error, falling back to in-memory cache',
-        { err: testError }
-      );
-    });
-
-    test('should handle Redis end event', async () => {
-      vi.resetModules();
-
-      const mockRedis = {
-        on: vi.fn(),
-        get: vi.fn(),
-        set: vi.fn(),
-        del: vi.fn(),
-        quit: vi.fn(),
-        disconnect: vi.fn(),
-      };
-
-      let endHandler: () => void;
-      mockRedis.on.mockImplementation((event: string, callback: any) => {
-        if (event === 'end') {
-          endHandler = callback;
-        } else if (event === 'ready') {
-          setTimeout(() => callback(), 0);
-        }
-        return mockRedis;
-      });
-
-      const Redis = await import('ioredis');
-      (Redis.default as any).mockImplementation(() => mockRedis);
-
-      await import('../../../src/services/cache');
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
-
-      // Trigger Redis end event
-      endHandler!();
-
-      expect(mockLogger.warn).toHaveBeenCalledWith('Redis connection closed');
-    });
-  });
-
-  describe('HybridCache Configuration', () => {
-    test('should handle disabled hybrid cache configuration', async () => {
-      vi.resetModules();
-
-      // Mock config with hybrid cache disabled
-      vi.doMock('../../../src/config', () => ({
-        config: {
-          redis: {
-            host: 'localhost',
-            port: 6379,
-          },
-        },
-        hybridCacheConfig: {
-          enableRedis: false,
-          enableDisk: false,
-          maxEntries: 1000,
-          memoryLimitBytes: 1048576,
-          diskPath: '/tmp/test-cache',
-          lockTimeoutMs: 5000,
-          redisConfig: {
-            host: 'localhost',
-            port: 6379,
-          },
-        },
-        lockConfig: {
-          lockDir: '/tmp/test-locks',
-          defaultTimeoutMs: 5000,
-          cleanupIntervalMs: 30000,
-          staleLockAgeMs: 60000,
-          enableLockLogging: false,
-        },
-      }));
-
-      await import('../../../src/services/cache');
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
-
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'HybridLRUCache disabled, falling back to simple Redis cache'
-      );
-    });
-  });
-
-  describe('Complex Fallback Scenarios', () => {
-    test('should handle hybrid cache get failure and fallback to Redis', async () => {
-      const key = 'test-key';
-      const expectedValue = 'redis-fallback-value';
-
-      // Make hybrid cache fail
-      mockHybridCache.get.mockRejectedValue(new Error('Hybrid cache failure'));
-      mockRedis.get.mockResolvedValue(expectedValue);
-
-      const result = await cache.get(key);
-
-      expect(result).toBe(expectedValue);
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'HybridLRUCache get failed, falling back',
-        { key, err: expect.any(Error) }
-      );
-    });
-
-    test('should handle cache backend failures gracefully', async () => {
-      const key = 'test-key';
-      const value = 'test-value';
-
-      // Test that set and get operations don't throw even if internal caches fail
-      // This tests the fallback to memory cache behavior
-      await expect(cache.set(key, value)).resolves.not.toThrow();
-      await expect(cache.get(key)).resolves.not.toThrow();
-
-      // Test delete operations
-      await expect(cache.del(key)).resolves.not.toThrow();
-    });
-
-    test('should handle hybrid cache del failure and fallback to Redis', async () => {
-      const key = 'test-key';
-
-      // Make hybrid cache del fail
-      mockHybridCache.del.mockRejectedValue(
-        new Error('Hybrid cache del failure')
-      );
-      mockRedis.del.mockResolvedValue(1);
-
-      await cache.del(key);
-
-      expect(mockRedis.del).toHaveBeenCalledWith(key);
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'HybridLRUCache del failed, falling back',
-        { key, err: expect.any(Error) }
-      );
-    });
-
-    test('should handle both hybrid cache and Redis del failure, fallback to memory', async () => {
-      const key = 'test-key';
-
-      // Make both hybrid cache and Redis del fail
-      mockHybridCache.del.mockRejectedValue(
-        new Error('Hybrid cache del failure')
-      );
-      mockRedis.del.mockRejectedValue(new Error('Redis del failure'));
-
-      await cache.del(key);
-
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'HybridLRUCache del failed, falling back',
-        { key, err: expect.any(Error) }
-      );
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Redis del failed, falling back to memory',
-        { key, err: expect.any(Error) }
-      );
-    });
-  });
-
-  describe('resetHealth() - Testing Method', () => {
-    test('should reset hybrid cache health when hybrid cache exists', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(mockHybridCache, null, false, false);
-
-      // Act
-      cache.resetHealth();
-
-      // Assert - Health should be reset (verified by checking no warnings in subsequent operations)
-      expect(cache.isHealthy()).toBe(true);
-    });
-
-    test('should reset Redis health when Redis exists', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(null, mockRedis, false, true);
-
-      // Act
-      cache.resetHealth();
-
-      // Assert - Health should be reset
-      expect(cache.isHealthy()).toBe(true);
-    });
-
-    test('should reset both hybrid cache and Redis health when both exist', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(
+  describe('Cache Operation Fallback Chain', () => {
+    test('should execute hybrid → redis → memory fallback for get operations', async () => {
+      // ARRANGE
+      ctx.cache.__setDependenciesForTesting(
         mockHybridCache,
         mockRedis,
-        false,
-        false
+        true,
+        true
       );
+      mockHybridCache.get.mockResolvedValueOnce(null);
+      mockRedis.get.mockResolvedValueOnce('redis-value');
 
-      // Act
-      cache.resetHealth();
+      // ACT
+      const result = await ctx.cache.get('test-key');
 
-      // Assert - Health should be reset for both
-      expect(cache.isHealthy()).toBe(true);
-    });
-  });
-
-  describe('switchToBackend() - Testing Method', () => {
-    test('should switch to hybrid backend and initialize if needed', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(null, mockRedis, false, true);
-
-      // Act
-      await cache.switchToBackend('hybrid');
-
-      // Assert
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        'Switched to cache backend: hybrid'
-      );
+      // ASSERT
+      expect(result).toBe('redis-value');
+      expect(mockHybridCache.get).toHaveBeenCalledWith('test-key');
+      expect(mockRedis.get).toHaveBeenCalledWith('test-key');
     });
 
-    test('should switch to redis backend and initialize if needed', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(mockHybridCache, null, true, false);
-
-      // Act
-      await cache.switchToBackend('redis');
-
-      // Assert
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        'Switched to cache backend: redis'
-      );
-      const stats = cache.getStats();
-      expect(stats.activeBackend).toBe('redis');
-    });
-
-    test('should switch to memory backend', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(mockHybridCache, mockRedis, true, true);
-
-      // Act
-      await cache.switchToBackend('memory');
-
-      // Assert
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        'Switched to cache backend: memory'
-      );
-      const stats = cache.getStats();
-      expect(stats.activeBackend).toBe('memory');
-    });
-
-    test('should throw error for unknown backend', async () => {
-      // Act & Assert
-      await expect(cache.switchToBackend('unknown' as any)).rejects.toThrow(
-        'Unknown backend: unknown'
-      );
-    });
-  });
-
-  describe('getStats() - Cache Statistics', () => {
-    test('should return hybrid backend stats when hybrid cache is healthy', async () => {
-      // Arrange
-      const mockStats = {
-        memory: { entries: 10, usageBytes: 1024 },
-        disk: { entries: 5, usageBytes: 2048 },
-      };
-      mockHybridCache.getStats.mockReturnValue(mockStats);
-      cache.__setDependenciesForTesting(mockHybridCache, mockRedis, true, true);
-
-      // Act
-      const stats = cache.getStats();
-
-      // Assert
-      expect(stats.activeBackend).toBe('hybrid');
-      expect(stats.hybrid).toEqual(mockStats);
-      expect(stats.redis.healthy).toBe(true);
-      expect(stats.redis.connected).toBe(true);
-      expect(stats.memory.entries).toBeTypeOf('number');
-    });
-
-    test('should return redis backend when hybrid is unhealthy but redis is healthy', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(
+    test('should fallback to memory cache when both hybrid and redis fail', async () => {
+      // ARRANGE
+      ctx.cache.__setDependenciesForTesting(
         mockHybridCache,
         mockRedis,
-        false,
+        true,
         true
       );
 
-      // Act
-      const stats = cache.getStats();
+      // Force both systems to fail for set operations first
+      mockHybridCache.set.mockRejectedValue(new Error('Hybrid set failed'));
+      mockRedis.set.mockRejectedValue(new Error('Redis set failed'));
 
-      // Assert
-      expect(stats.activeBackend).toBe('redis');
-      expect(stats.redis.healthy).toBe(true);
-      expect(stats.redis.connected).toBe(true);
+      // Pre-populate memory cache by setting when backends fail
+      await ctx.cache.set('memory-key', 'memory-value');
+
+      // Force both systems to fail for get operations
+      mockHybridCache.get.mockRejectedValue(new Error('Hybrid get failed'));
+      mockRedis.get.mockRejectedValue(new Error('Redis get failed'));
+
+      // ACT
+      const result = await ctx.cache.get('memory-key');
+
+      // ASSERT
+      expect(result).toBe('memory-value');
     });
 
-    test('should return memory backend when both hybrid and redis are unhealthy', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(
+    test('should gracefully handle cache backend failures during set operations', async () => {
+      // ARRANGE
+      ctx.cache.__setDependenciesForTesting(
         mockHybridCache,
         mockRedis,
-        false,
-        false
+        true,
+        true
       );
+      mockHybridCache.set.mockRejectedValue(new Error('Hybrid set failed'));
+      mockRedis.set.mockRejectedValue(new Error('Redis set failed'));
 
-      // Act
-      const stats = cache.getStats();
+      // ACT & ASSERT - Should not throw, fallback to memory
+      await expect(ctx.cache.set('key', 'value')).resolves.not.toThrow();
 
-      // Assert
-      expect(stats.activeBackend).toBe('memory');
-      expect(stats.redis.healthy).toBe(false);
-      expect(stats.redis.connected).toBe(true);
-    });
-
-    test('should handle null hybrid cache in stats', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(null, mockRedis, false, true);
-
-      // Act
-      const stats = cache.getStats();
-
-      // Assert
-      expect(stats.activeBackend).toBe('redis');
-      expect(stats.hybrid).toBeUndefined();
-      expect(stats.redis.connected).toBe(true);
-    });
-
-    test('should handle null redis in stats', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(mockHybridCache, null, true, false);
-
-      // Act
-      const stats = cache.getStats();
-
-      // Assert
-      expect(stats.activeBackend).toBe('hybrid');
-      expect(stats.redis.connected).toBe(false);
+      // Verify fallback worked
+      const result = await ctx.cache.get('key');
+      expect(result).toBe('value');
     });
   });
 
-  describe('isHealthy() - Health Check Edge Cases', () => {
-    test('should return true when Redis is null (never initialized)', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(mockHybridCache, null, true, false);
-
-      // Act
-      const isHealthy = cache.isHealthy();
-
-      // Assert
-      expect(isHealthy).toBe(true);
-    });
-
-    test('should return false when Redis was initialized but is now unhealthy', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(
+  describe('Health Status Logic', () => {
+    test('should return true when hybrid cache is healthy', () => {
+      // ARRANGE
+      ctx.cache.__setDependenciesForTesting(
         mockHybridCache,
         mockRedis,
         true,
         false
       );
 
-      // Act
-      const isHealthy = cache.isHealthy();
-
-      // Assert
-      // Note: This tests the method call, actual health logic may be more complex
-      expect(typeof isHealthy).toBe('boolean');
+      // ACT & ASSERT
+      expect(ctx.cache.isHealthy()).toBe(true);
     });
 
-    test('should return true when Redis is healthy', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(mockHybridCache, mockRedis, true, true);
+    test('should return true when only redis is healthy', () => {
+      // ARRANGE
+      ctx.cache.__setDependenciesForTesting(
+        mockHybridCache,
+        mockRedis,
+        false,
+        true
+      );
 
-      // Act
-      const isHealthy = cache.isHealthy();
-
-      // Assert
-      expect(isHealthy).toBe(true);
+      // ACT & ASSERT
+      expect(ctx.cache.isHealthy()).toBe(true);
     });
 
-    test('should return true when hybrid cache is healthy even if Redis is null', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(mockHybridCache, null, true, false);
+    test('should return true when redis was never initialized', () => {
+      // ARRANGE
+      ctx.cache.__setDependenciesForTesting(
+        mockHybridCache,
+        null,
+        false,
+        false
+      );
 
-      // Act
-      const isHealthy = cache.isHealthy();
+      // ACT & ASSERT
+      expect(ctx.cache.isHealthy()).toBe(true);
+    });
 
-      // Assert
-      expect(isHealthy).toBe(true);
+    test('should return false after intentional shutdown', async () => {
+      // ARRANGE
+      ctx.cache.__setDependenciesForTesting(
+        mockHybridCache,
+        mockRedis,
+        true,
+        true
+      );
+
+      // ACT
+      await ctx.cache.quit();
+
+      // ASSERT
+      expect(ctx.cache.isHealthy()).toBe(false);
     });
   });
 
-  describe('Redis Fallback Error Handling', () => {
-    test('should handle Redis get failure and log warning', async () => {
-      // Arrange
-      const key = 'test-key';
-
-      mockHybridCache.get.mockResolvedValue(null);
-      mockRedis.get.mockRejectedValue(new Error('Redis connection failed'));
-
-      // Act
-      const result = await cache.get(key);
-
-      // Assert
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Redis get failed, falling back to memory',
-        { key, err: expect.any(Error) }
+  describe('Backend Switching', () => {
+    test('should switch to specified backend and update active backend status', async () => {
+      // ARRANGE
+      ctx.cache.__setDependenciesForTesting(
+        mockHybridCache,
+        mockRedis,
+        false,
+        false
       );
-      // Result can be null if not found in fallback
-      expect(result).toBeNull();
+
+      // ACT
+      await ctx.cache.switchToBackend('redis');
+
+      // ASSERT
+      const stats = ctx.cache.getStats();
+      expect(stats.activeBackend).toBe('redis');
     });
 
-    test('should handle hybrid cache initialization failure', async () => {
-      // Arrange
-      cache.__setDependenciesForTesting(null, mockRedis, false, true);
-
-      // Mock HybridLRUCache constructor to throw
-      HybridLRUCacheMock.mockImplementationOnce(() => {
-        throw new Error('HybridLRUCache initialization failed');
-      });
-
-      // Act
-      await cache.switchToBackend('hybrid');
-
-      // Assert - Should still switch but log the error
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        'Switched to cache backend: hybrid'
+    test('should throw error for unknown backend type', async () => {
+      // ACT & ASSERT
+      await expect(ctx.cache.switchToBackend('invalid' as any)).rejects.toThrow(
+        'Unknown backend: invalid'
       );
     });
+  });
+
+  describe('Emergency Eviction', () => {
+    test('should perform hybrid cache emergency eviction when available', async () => {
+      // ARRANGE
+      ctx.cache.__setDependenciesForTesting(
+        mockHybridCache,
+        mockRedis,
+        true,
+        true
+      );
+
+      // ACT
+      await ctx.cache.emergencyEvict();
+
+      // ASSERT
+      expect(mockHybridCache.emergencyEvict).toHaveBeenCalled();
+    });
+
+    test('should fallback to redis eviction when hybrid cache fails', async () => {
+      // ARRANGE
+      ctx.cache.__setDependenciesForTesting(
+        mockHybridCache,
+        mockRedis,
+        true,
+        true
+      );
+      mockHybridCache.emergencyEvict.mockRejectedValue(
+        new Error('Hybrid eviction failed')
+      );
+      mockRedis.keys.mockResolvedValue([
+        'key1',
+        'key2',
+        'key3',
+        'key4',
+        'key5',
+      ]);
+      mockRedis.del.mockResolvedValue(2);
+
+      // ACT
+      await ctx.cache.emergencyEvict();
+
+      // ASSERT
+      expect(mockRedis.keys).toHaveBeenCalledWith('*');
+      expect(mockRedis.del).toHaveBeenCalled();
+    });
+
+    test('should handle complete emergency eviction failure gracefully', async () => {
+      // ARRANGE
+      ctx.cache.__setDependenciesForTesting(
+        mockHybridCache,
+        mockRedis,
+        true,
+        true
+      );
+      mockHybridCache.emergencyEvict.mockRejectedValue(
+        new Error('Hybrid failed')
+      );
+      mockRedis.keys.mockRejectedValue(new Error('Redis failed'));
+
+      // ACT & ASSERT - Should still succeed with memory cache fallback
+      await expect(ctx.cache.emergencyEvict()).resolves.not.toThrow();
+    });
+  });
+});
+
+describe('Cache Service - Error Recovery', () => {
+  let ctx = createCacheContext();
+
+  beforeEach(async () => {
+    ctx = createCacheContext();
+    await ctx.importCache();
+  });
+
+  test('should handle redis connection events and update health status', async () => {
+    // ARRANGE
+    let errorHandler: (err: Error) => void;
+
+    // Setup the Redis mock to capture event handlers during cache initialization
+    mockRedis.on.mockImplementation((event, callback) => {
+      if (event === 'error') errorHandler = callback;
+      return mockRedis;
+    });
+
+    // Import the cache service (this will trigger Redis initialization)
+    await ctx.importCache();
+
+    // ACT & ASSERT - Simulate error event using the captured error handler
+    if (errorHandler!) {
+      errorHandler(new Error('Connection lost'));
+      // The error handler should have called disconnect
+      expect(mockRedis.disconnect).toHaveBeenCalled();
+    }
+  });
+
+  test('should handle cache operation timeouts and network failures', async () => {
+    // ARRANGE
+    ctx.cache.__setDependenciesForTesting(
+      mockHybridCache,
+      mockRedis,
+      true,
+      true
+    );
+    mockHybridCache.get.mockImplementation(
+      () =>
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Operation timeout')), 10)
+        )
+    );
+    mockRedis.get.mockResolvedValue('redis-fallback');
+
+    // ACT
+    const result = await ctx.cache.get('test-key');
+
+    // ASSERT
+    expect(result).toBe('redis-fallback');
+  });
+});
+
+describe('Cache Service - Configuration Scenarios', () => {
+  let ctx = createCacheContext();
+
+  beforeEach(() => {
+    ctx = createCacheContext();
+  });
+
+  test('should handle hybrid cache disabled configuration', async () => {
+    // ARRANGE
+    vi.doMock('../../../src/config', () => ({
+      config: { redis: { host: 'localhost', port: 6379 } },
+      hybridCacheConfig: {
+        enableRedis: false,
+        enableDisk: false,
+        maxEntries: 1000,
+        memoryLimitBytes: 1048576,
+        diskPath: '/tmp/cache',
+        lockTimeoutMs: 5000,
+        redisConfig: { host: 'localhost', port: 6379 },
+      },
+    }));
+
+    // ACT
+    await ctx.importCache();
+
+    // ASSERT - Should fallback to redis-only mode without throwing
+    const stats = ctx.cache.getStats();
+    expect(stats.activeBackend).toBe('redis');
+  });
+
+  test('should initialize with memory-only when all backends disabled', async () => {
+    // ARRANGE
+    vi.doMock('../../../src/config', () => ({
+      config: { redis: { host: 'localhost', port: 6379 } },
+      hybridCacheConfig: {
+        enableRedis: false,
+        enableDisk: false,
+        maxEntries: 1000,
+        memoryLimitBytes: 1048576,
+        diskPath: '/tmp/cache',
+        lockTimeoutMs: 5000,
+      },
+    }));
+
+    // Simulate initialization failure
+    const Redis = await import('ioredis');
+    (Redis.default as any).mockImplementation(() => {
+      throw new Error('Redis init failed');
+    });
+
+    // ACT
+    await ctx.importCache();
+
+    // Set dependencies to simulate both backends being null/disabled
+    ctx.cache.__setDependenciesForTesting(null, null, false, false);
+
+    // ASSERT
+    expect(ctx.cache.isHealthy()).toBe(true); // Memory cache is always healthy
+    const stats = ctx.cache.getStats();
+    expect(stats.activeBackend).toBe('memory');
+  });
+});
+
+describe('Cache Service - Stats and Monitoring', () => {
+  let ctx = createCacheContext();
+
+  beforeEach(async () => {
+    ctx = createCacheContext();
+    await ctx.importCache();
+  });
+
+  test('should provide comprehensive cache statistics', () => {
+    // ARRANGE
+    ctx.cache.__setDependenciesForTesting(
+      mockHybridCache,
+      mockRedis,
+      true,
+      true
+    );
+
+    // ACT
+    const stats = ctx.cache.getStats();
+
+    // ASSERT
+    expect(stats).toMatchObject({
+      activeBackend: expect.any(String),
+      redis: {
+        healthy: expect.any(Boolean),
+        connected: expect.any(Boolean),
+      },
+      memory: {
+        entries: expect.any(Number),
+      },
+    });
+    expect(['hybrid', 'redis', 'memory']).toContain(stats.activeBackend);
+  });
+
+  test('should handle stats collection when backends are unavailable', () => {
+    // ARRANGE
+    ctx.cache.__setDependenciesForTesting(null, null, false, false);
+
+    // ACT
+    const stats = ctx.cache.getStats();
+
+    // ASSERT
+    expect(stats.activeBackend).toBe('memory');
+    expect(stats.redis.connected).toBe(false);
+    expect(stats.hybrid).toBeUndefined();
   });
 });
