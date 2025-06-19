@@ -169,7 +169,7 @@ async function monitorPerformance() {
 }
 
 // Main execution
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   (async () => {
     await benchmarkPerformance();
     await monitorPerformance();
