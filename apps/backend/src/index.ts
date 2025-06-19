@@ -486,7 +486,7 @@ export async function startApplication() {
 }
 
 // Only start the application if this file is run directly (not imported in tests)
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   // Start the application with error handling
   logger.info('📋 About to call startApplication()...');
   startApplication()
