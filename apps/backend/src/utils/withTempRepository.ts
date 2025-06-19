@@ -21,6 +21,15 @@ import {
 const logger = getLogger();
 
 /**
+ * Helper to safely access streaming config with defaults
+ */
+const getStreamingConfig = () => ({
+  enabled: config.streaming?.enabled ?? true,
+  commitThreshold: config.streaming?.commitThreshold ?? 50000,
+  batchSize: config.streaming?.batchSize ?? 1000,
+});
+
+/**
  * ENHANCED: Helper that uses shared repositories to prevent duplicate clones
  *
  * NEW FEATURES:
@@ -62,8 +71,8 @@ export async function withTempRepository<T>(
 
   const operationType = options?.operationType || 'generic';
   const allowCoalescing = options?.allowCoalescing ?? true;
-  const shouldCollectMetrics =
-    !options?.skipMetrics && config.streaming.enabled;
+  const streamingConfig = getStreamingConfig();
+  const shouldCollectMetrics = !options?.skipMetrics && streamingConfig.enabled;
 
   let streamingMetricsStarted = false;
   let repositoryCommitCount = 0;
@@ -79,7 +88,7 @@ export async function withTempRepository<T>(
         // STREAMING METRICS: Check if this will be a large repository operation
         if (
           shouldCollectMetrics &&
-          repositoryCommitCount > config.streaming.commitThreshold
+          repositoryCommitCount > streamingConfig.commitThreshold
         ) {
           recordStreamingStart(repositoryCommitCount);
           streamingMetricsStarted = true;
@@ -106,7 +115,7 @@ export async function withTempRepository<T>(
               repositoryCommitCount,
               operationDuration,
               repositoryCommitCount, // Assuming full processing
-              Math.ceil(repositoryCommitCount / config.streaming.batchSize),
+              Math.ceil(repositoryCommitCount / streamingConfig.batchSize),
               0.6, // Higher cache hit rate expected with coordination
               process.memoryUsage().heapUsed / 1024 / 1024
             );
@@ -173,8 +182,8 @@ export async function withTempRepositoryStreaming<T>(
   }
 
   const operationType = options?.operationType || 'streaming';
-  const shouldCollectMetrics =
-    !options?.skipMetrics && config.streaming.enabled;
+  const streamingConfig = getStreamingConfig();
+  const shouldCollectMetrics = !options?.skipMetrics && streamingConfig.enabled;
   const operationStartTime = Date.now();
 
   return coordinatedOperation(
@@ -186,7 +195,7 @@ export async function withTempRepositoryStreaming<T>(
 
         if (
           shouldCollectMetrics &&
-          repositoryCommitCount > config.streaming.commitThreshold
+          repositoryCommitCount > streamingConfig.commitThreshold
         ) {
           recordStreamingStart(repositoryCommitCount);
 
@@ -195,7 +204,7 @@ export async function withTempRepositoryStreaming<T>(
             operationType,
             commitCount: repositoryCommitCount,
             category: handle.sizeCategory,
-            streamingThreshold: config.streaming.commitThreshold,
+            streamingThreshold: streamingConfig.commitThreshold,
             isShared: handle.isShared,
             refCount: handle.refCount,
           });
@@ -211,7 +220,7 @@ export async function withTempRepositoryStreaming<T>(
           // Record successful completion
           if (
             shouldCollectMetrics &&
-            repositoryCommitCount > config.streaming.commitThreshold
+            repositoryCommitCount > streamingConfig.commitThreshold
           ) {
             const operationDuration = Date.now() - operationStartTime;
 
@@ -241,7 +250,7 @@ export async function withTempRepositoryStreaming<T>(
           // Record error metrics
           if (
             shouldCollectMetrics &&
-            repositoryCommitCount > config.streaming.commitThreshold
+            repositoryCommitCount > streamingConfig.commitThreshold
           ) {
             const errorType =
               error instanceof Error ? error.constructor.name : 'UnknownError';
@@ -278,8 +287,8 @@ export async function getRepositoryInfo(repoUrl: string): Promise<{
     async () => {
       return withSharedRepository(repoUrl, async (handle: RepositoryHandle) => {
         const shouldUseStreaming =
-          config.streaming.enabled &&
-          handle.commitCount > config.streaming.commitThreshold;
+          getStreamingConfig().enabled &&
+          handle.commitCount > getStreamingConfig().commitThreshold;
 
         // Simple heuristic for estimated processing time
         const estimatedTimePerCommit = shouldUseStreaming ? 0.0005 : 0.001; // Faster with coordination
@@ -378,10 +387,10 @@ async function withTempRepositoryLegacy<T>(
 
       // STREAMING METRICS: Check if this will be a large repository operation
       try {
-        if (!options?.skipMetrics && config.streaming.enabled) {
+        if (!options?.skipMetrics && getStreamingConfig().enabled) {
           repositoryCommitCount = await gitService.getCommitCount(tempDir);
           const shouldUseStreaming =
-            repositoryCommitCount > config.streaming.commitThreshold;
+            repositoryCommitCount > getStreamingConfig().commitThreshold;
 
           if (shouldUseStreaming) {
             recordStreamingStart(repositoryCommitCount);
@@ -470,7 +479,7 @@ async function withTempRepositoryStreamingLegacy<T>(
 
         if (
           shouldCollectMetrics &&
-          repositoryCommitCount > config.streaming.commitThreshold
+          repositoryCommitCount > getStreamingConfig().commitThreshold
         ) {
           recordStreamingStart(repositoryCommitCount);
 
@@ -478,7 +487,7 @@ async function withTempRepositoryStreamingLegacy<T>(
             repoUrl,
             commitCount: repositoryCommitCount,
             category: getRepositorySizeCategory(repositoryCommitCount),
-            streamingThreshold: config.streaming.commitThreshold,
+            streamingThreshold: getStreamingConfig().commitThreshold,
           });
         }
       } catch (countError) {
@@ -498,7 +507,7 @@ async function withTempRepositoryStreamingLegacy<T>(
       // Record successful completion
       if (
         shouldCollectMetrics &&
-        repositoryCommitCount > config.streaming.commitThreshold
+        repositoryCommitCount > getStreamingConfig().commitThreshold
       ) {
         const operationDuration = Date.now() - operationStartTime;
 
@@ -524,7 +533,7 @@ async function withTempRepositoryStreamingLegacy<T>(
     // Record error metrics
     if (
       shouldCollectMetrics &&
-      repositoryCommitCount > config.streaming.commitThreshold
+      repositoryCommitCount > getStreamingConfig().commitThreshold
     ) {
       const errorType =
         error instanceof Error ? error.constructor.name : 'UnknownError';
@@ -556,8 +565,8 @@ async function getRepositoryInfoLegacy(repoUrl: string): Promise<{
     async (tempDir) => {
       const commitCount = await gitService.getCommitCount(tempDir);
       const shouldUseStreaming =
-        config.streaming.enabled &&
-        commitCount > config.streaming.commitThreshold;
+        getStreamingConfig().enabled &&
+        commitCount > getStreamingConfig().commitThreshold;
 
       // Simple heuristic for estimated processing time
       const estimatedTimePerCommit = shouldUseStreaming ? 0.001 : 0.002;
