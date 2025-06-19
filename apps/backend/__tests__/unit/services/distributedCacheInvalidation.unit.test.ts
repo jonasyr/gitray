@@ -47,9 +47,20 @@ vi.mock('../../../src/services/metrics', () => ({
 describe('DistributedCacheInvalidation', () => {
   let invalidationService: DistributedCacheInvalidation;
   let mockHandler: ReturnType<typeof vi.fn>;
+  let mockDateNow: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Ensure clean timer state
+    vi.useRealTimers();
+
+    // Mock Date.now for predictable processId generation
+    mockDateNow = vi.fn(() => 1234567890000);
+    vi.stubGlobal('Date', {
+      ...Date,
+      now: mockDateNow,
+    });
+
     mockHandler = vi.fn().mockResolvedValue(undefined);
 
     // Reset Redis mock behavior
@@ -63,6 +74,9 @@ describe('DistributedCacheInvalidation', () => {
     if (invalidationService) {
       await invalidationService.shutdown();
     }
+    // Restore timers and global mocks
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   describe('Constructor and Initialization', () => {
@@ -203,10 +217,11 @@ describe('DistributedCacheInvalidation', () => {
         (call) => call[0] === 'message'
       )![1];
 
+      // Use the same mocked timestamp for consistency
       const ownMessage = JSON.stringify({
         pattern: 'repo:*',
-        timestamp: Date.now(),
-        processId: `${process.pid}-${Date.now()}`, // Will match current process
+        timestamp: mockDateNow(),
+        processId: `${process.pid}-${mockDateNow()}`, // Will match current process
         metadata: { repoUrl: 'test/repo' },
       });
 
