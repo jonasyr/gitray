@@ -555,7 +555,7 @@ class RepositoryCoordinator {
       withKeyLock(`repo-shutdown:${repoUrl}`, async () => {
         const handle = this.sharedHandles.get(repoUrl);
         if (handle) {
-          await this.cleanupHandle(handle);
+          await this.cleanupRepositoryHandle(repoUrl, handle);
         }
       }).catch((err) => {
         logger.error('Failed to cleanup repository during shutdown', {
