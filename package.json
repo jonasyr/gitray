@@ -49,6 +49,7 @@
     "**/*.{md,markdown}": [
       "markdownlint-cli2 --fix"
     ],
+    "!prompts/**/*.{md,markdown}": [],
     "**/*.{json,yml,yaml}": [
       "prettier --write"
     ]

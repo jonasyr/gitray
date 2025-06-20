@@ -35,3 +35,7 @@ gitignore: true
 # 4) Lint all markdown files recursively
 globs:
   - '**/*.{md,markdown}'
+
+# 5) Ignore patterns - exclude prompts folder
+ignores:
+  - 'prompts/**/*.{md,markdown}'
