@@ -324,3 +324,10 @@ logs/
 apps/backend/cache/
 apps/backend/locks/
 apps/backend/logs/
+
+# Script-generated log files (from start.sh)
+.backend.log
+.frontend.log
+.gitray.log
+.shared-types.log
+*.pid
