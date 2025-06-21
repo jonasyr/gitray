@@ -65,33 +65,46 @@ router.post(
 
     try {
       const cacheKey = `commits:${repoUrl}`;
-      const cached = await redis.get(cacheKey);
+      let cached = null;
+      let commits = null;
 
-      if (cached) {
-        const commits = JSON.parse(cached);
-        // Record enhanced cache operation and feature usage
-        recordEnhancedCacheOperation(
-          'commits',
-          true,
-          req,
-          repoUrl,
-          commits.length
-        );
-        recordFeatureUsage('repository_commits', userType, true, 'api_call');
-        recordDataFreshness(
-          'commits',
-          0,
-          'hybrid',
-          getRepositorySizeCategory(commits.length)
-        );
+      // Try to get from cache, but handle cache failures gracefully
+      try {
+        cached = await redis.get(cacheKey);
+        if (cached) {
+          commits = JSON.parse(cached);
+          // Record enhanced cache operation and feature usage
+          recordEnhancedCacheOperation(
+            'commits',
+            true,
+            req,
+            repoUrl,
+            commits.length
+          );
+          recordFeatureUsage('repository_commits', userType, true, 'api_call');
+          recordDataFreshness(
+            'commits',
+            0,
+            'hybrid',
+            getRepositorySizeCategory(commits.length)
+          );
 
-        res.status(HTTP_STATUS.OK).json({ commits });
-        return;
+          res.status(HTTP_STATUS.OK).json({ commits });
+          return;
+        }
+      } catch (cacheError) {
+        // Cache operation failed, continue to fetch from repository
+        console.warn(
+          'Cache get operation failed:',
+          (cacheError as Error).message
+        );
       }
 
-      const commits = await withTempRepository(repoUrl, (tempDir) =>
-        gitService.getCommits(tempDir)
-      );
+      if (!commits) {
+        commits = await withTempRepository(repoUrl, (tempDir) =>
+          gitService.getCommits(tempDir)
+        );
+      }
 
       // Record cache miss and successful operation
       recordEnhancedCacheOperation(
@@ -99,16 +112,27 @@ router.post(
         false,
         req,
         repoUrl,
-        commits.length
+        commits ? commits.length : 0
       );
       recordFeatureUsage('repository_commits', userType, true, 'api_call');
 
-      await redis.set(
-        cacheKey,
-        JSON.stringify(commits),
-        'EX',
-        TIME.HOUR / 1000
-      );
+      // Try to cache the result, but don't fail if cache operation fails
+      if (commits) {
+        try {
+          await redis.set(
+            cacheKey,
+            JSON.stringify(commits),
+            'EX',
+            TIME.HOUR / 1000
+          );
+        } catch (cacheError) {
+          console.warn(
+            'Cache set operation failed:',
+            (cacheError as Error).message
+          );
+        }
+      }
+
       res.status(HTTP_STATUS.OK).json({ commits });
       return;
     } catch (error) {
@@ -132,37 +156,61 @@ router.post(
 
     try {
       const cacheKey = `heatmap:${repoUrl}:${JSON.stringify(filterOptions)}`;
-      const cached = await redis.get(cacheKey);
+      let cached = null;
+      let heatmapData = null;
 
-      if (cached) {
-        const heatmapData = JSON.parse(cached);
-        // Record enhanced cache hit and feature usage
-        recordEnhancedCacheOperation('heatmap', true, req, repoUrl);
-        recordFeatureUsage('heatmap_view', userType, true, 'api_call');
-        recordDataFreshness('heatmap', 0, 'hybrid');
+      // Try to get from cache, but handle cache failures gracefully
+      try {
+        cached = await redis.get(cacheKey);
+        if (cached) {
+          heatmapData = JSON.parse(cached);
+          // Record enhanced cache hit and feature usage
+          recordEnhancedCacheOperation('heatmap', true, req, repoUrl);
+          recordFeatureUsage('heatmap_view', userType, true, 'api_call');
+          recordDataFreshness('heatmap', 0, 'hybrid');
 
-        res.status(HTTP_STATUS.OK).json({ heatmapData });
-        return;
+          res.status(HTTP_STATUS.OK).json({ heatmapData });
+          return;
+        }
+      } catch (cacheError) {
+        // Cache operation failed, continue to fetch from repository
+        console.warn(
+          'Cache get operation failed:',
+          (cacheError as Error).message
+        );
       }
 
-      const heatmapData = await withTempRepository(repoUrl, async (tempDir) => {
-        const commits = await gitService.getCommits(tempDir);
-        return gitService.aggregateCommitsByTime(
-          commits,
-          filterOptions as CommitFilterOptions
-        );
-      });
+      if (!heatmapData) {
+        heatmapData = await withTempRepository(repoUrl, async (tempDir) => {
+          const commits = await gitService.getCommits(tempDir);
+          return gitService.aggregateCommitsByTime(
+            commits,
+            filterOptions as CommitFilterOptions
+          );
+        });
+      }
 
       // Record cache miss and successful operation
       recordEnhancedCacheOperation('heatmap', false, req, repoUrl);
       recordFeatureUsage('heatmap_view', userType, true, 'api_call');
 
-      await redis.set(
-        cacheKey,
-        JSON.stringify(heatmapData),
-        'EX',
-        TIME.HOUR / 1000
-      );
+      // Try to cache the result, but don't fail if cache operation fails
+      if (heatmapData) {
+        try {
+          await redis.set(
+            cacheKey,
+            JSON.stringify(heatmapData),
+            'EX',
+            TIME.HOUR / 1000
+          );
+        } catch (cacheError) {
+          console.warn(
+            'Cache set operation failed:',
+            (cacheError as Error).message
+          );
+        }
+      }
+
       res.status(HTTP_STATUS.OK).json({ heatmapData });
       return;
     } catch (error) {
@@ -187,32 +235,53 @@ router.post(
     try {
       const commitsKey = `commits:${repoUrl}`;
       const heatmapKey = `heatmap:${repoUrl}:${JSON.stringify(filterOptions)}`;
-      const cachedCommits = await redis.get(commitsKey);
-      const cachedHeatmap = await redis.get(heatmapKey);
+      let cachedCommits = null;
+      let cachedHeatmap = null;
+
+      // Try to get from cache, but handle cache failures gracefully
+      try {
+        cachedCommits = await redis.get(commitsKey);
+        cachedHeatmap = await redis.get(heatmapKey);
+      } catch (cacheError) {
+        // Cache operation failed, continue to fetch from repository
+        console.warn(
+          'Cache get operation failed:',
+          (cacheError as Error).message
+        );
+      }
 
       if (cachedCommits && cachedHeatmap) {
-        const commits = JSON.parse(cachedCommits);
-        const heatmapData = JSON.parse(cachedHeatmap);
+        let commits, heatmapData;
+        try {
+          commits = JSON.parse(cachedCommits);
+          heatmapData = JSON.parse(cachedHeatmap);
 
-        // Record enhanced cache operations for both data types
-        recordEnhancedCacheOperation(
-          'commits',
-          true,
-          req,
-          repoUrl,
-          commits.length
-        );
-        recordEnhancedCacheOperation('heatmap', true, req, repoUrl);
-        recordFeatureUsage('full_data_view', userType, true, 'api_call');
-        recordDataFreshness(
-          'combined',
-          0,
-          'hybrid',
-          getRepositorySizeCategory(commits.length)
-        );
+          // Record enhanced cache operations for both data types
+          recordEnhancedCacheOperation(
+            'commits',
+            true,
+            req,
+            repoUrl,
+            commits.length
+          );
+          recordEnhancedCacheOperation('heatmap', true, req, repoUrl);
+          recordFeatureUsage('full_data_view', userType, true, 'api_call');
+          recordDataFreshness(
+            'combined',
+            0,
+            'hybrid',
+            getRepositorySizeCategory(commits.length)
+          );
 
-        res.status(HTTP_STATUS.OK).json({ commits, heatmapData });
-        return;
+          res.status(HTTP_STATUS.OK).json({ commits, heatmapData });
+          return;
+        } catch (parseError) {
+          // Corrupted cache data, continue to fetch from repository
+          console.warn(
+            'Cache data parsing failed:',
+            (parseError as Error).message
+          );
+        }
       }
 
       const { commits, heatmapData } = await withTempRepository(
@@ -233,23 +302,44 @@ router.post(
         false,
         req,
         repoUrl,
-        commits.length
+        commits ? commits.length : 0
       );
       recordEnhancedCacheOperation('heatmap', false, req, repoUrl);
       recordFeatureUsage('full_data_view', userType, true, 'api_call');
 
-      await redis.set(
-        commitsKey,
-        JSON.stringify(commits),
-        'EX',
-        TIME.HOUR / 1000
-      );
-      await redis.set(
-        heatmapKey,
-        JSON.stringify(heatmapData),
-        'EX',
-        TIME.HOUR / 1000
-      );
+      // Try to cache the results, but don't fail if cache operations fail
+      if (commits) {
+        try {
+          await redis.set(
+            commitsKey,
+            JSON.stringify(commits),
+            'EX',
+            TIME.HOUR / 1000
+          );
+        } catch (cacheError) {
+          console.warn(
+            'Cache set operation failed for commits:',
+            (cacheError as Error).message
+          );
+        }
+      }
+
+      if (heatmapData) {
+        try {
+          await redis.set(
+            heatmapKey,
+            JSON.stringify(heatmapData),
+            'EX',
+            TIME.HOUR / 1000
+          );
+        } catch (cacheError) {
+          console.warn(
+            'Cache set operation failed for heatmap:',
+            (cacheError as Error).message
+          );
+        }
+      }
+
       res.status(HTTP_STATUS.OK).json({ commits, heatmapData });
       return;
     } catch (error) {
