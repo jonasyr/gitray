@@ -58,10 +58,11 @@ const handleValidationErrors = (
       path: req.path,
     });
 
-    // Return the expected error format
+    // Return the expected error format with errors array
     res.status(HTTP_STATUS.BAD_REQUEST).json({
       error: 'Validation failed',
       code: 'VALIDATION_ERROR',
+      errors: errors.array(),
     });
     return;
   }
@@ -691,7 +692,7 @@ router.post(
 
       // Set streaming response headers
       res.writeHead(200, {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-ndjson',
         'Transfer-Encoding': 'chunked',
         'X-Streaming-Mode': 'enabled',
         'X-Repository-Size': repoInfo.sizeCategory,
