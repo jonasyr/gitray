@@ -656,4 +656,377 @@ describe('Lock Manager Unit Tests', () => {
       expect(finalMetrics.timeouts).toBe(initialMetrics.timeouts + 1);
     });
   });
+
+  describe('Directory Creation Error Handling', () => {
+    beforeEach(async () => {
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          retryDelayMs: 10,
+          enableLockLogging: false,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      lockManager = module;
+    });
+
+    test('should propagate directory creation errors', async () => {
+      // ARRANGE
+      const dirError = new Error('Permission denied to create directory');
+      (dirError as any).code = 'EACCES';
+      mockFs.mkdir.mockRejectedValue(dirError);
+
+      const testFn = vi.fn();
+
+      // ACT & ASSERT
+      await expect(lockManager.withKeyLock('test-key', testFn)).rejects.toThrow(
+        'Permission denied to create directory'
+      );
+      expect(testFn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Lock Metadata Writing Error Handling', () => {
+    beforeEach(async () => {
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          retryDelayMs: 10,
+          enableLockLogging: false,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      lockManager = module;
+    });
+
+    test('should handle writeFile failure during lock acquisition', async () => {
+      // ARRANGE
+      const writeError = new Error('Disk full');
+      mockFileHandle.writeFile.mockRejectedValue(writeError);
+
+      const testFn = vi.fn();
+
+      // ACT & ASSERT
+      await expect(lockManager.withKeyLock('test-key', testFn)).rejects.toThrow(
+        'Disk full'
+      );
+      expect(testFn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Non-ENOENT Stale Lock Check Errors', () => {
+    beforeEach(async () => {
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 1000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          retryDelayMs: 10,
+          enableLockLogging: true,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      lockManager = module;
+    });
+
+    test('should handle permission errors when checking stale locks', async () => {
+      // ARRANGE
+      const existsError = new Error('File exists');
+      (existsError as any).code = 'EEXIST';
+
+      const permissionError = new Error('Permission denied');
+      (permissionError as any).code = 'EACCES';
+
+      mockFs.open.mockRejectedValueOnce(existsError);
+      mockFs.stat.mockRejectedValueOnce(permissionError);
+      mockFs.open.mockRejectedValue(existsError); // Continue failing for timeout
+
+      const testFn = vi.fn();
+
+      // ACT & ASSERT
+      await expect(
+        lockManager.withKeyLock('test-key', testFn, 50)
+      ).rejects.toThrow(/Lock timeout/);
+
+      expect(mockFs.stat).toHaveBeenCalled();
+    });
+  });
+
+  describe('Cleanup Scheduler Integration', () => {
+    beforeEach(async () => {
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          retryDelayMs: 10,
+          enableLockLogging: true,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      lockManager = module;
+    });
+
+    test('should handle cleanup through stale lock detection during acquisition', async () => {
+      // ARRANGE
+      const existsError = new Error('File exists');
+      (existsError as any).code = 'EEXIST';
+
+      const oldTime = Date.now() - 60000; // 60 seconds ago
+
+      // First attempt fails with EEXIST, triggers stale check
+      mockFs.open.mockRejectedValueOnce(existsError);
+      mockFs.stat.mockResolvedValueOnce({ mtimeMs: oldTime } as Stats);
+      mockFs.unlink.mockResolvedValueOnce(undefined);
+      mockFs.open.mockResolvedValueOnce(mockFileHandle);
+
+      const testFn = vi.fn().mockResolvedValue('success');
+      const initialMetrics = lockManager.getLockMetrics();
+
+      // ACT
+      await lockManager.withKeyLock('cleanup-test', testFn);
+
+      // ASSERT
+      const finalMetrics = lockManager.getLockMetrics();
+      expect(finalMetrics.staleCleaned).toBe(initialMetrics.staleCleaned + 1);
+      expect(mockFs.unlink).toHaveBeenCalled();
+    });
+
+    test('should gracefully handle stat errors during stale detection', async () => {
+      // ARRANGE
+      const existsError = new Error('File exists');
+      (existsError as any).code = 'EEXIST';
+
+      const statError = new Error('Permission denied');
+      (statError as any).code = 'EACCES';
+
+      mockFs.open.mockRejectedValueOnce(existsError);
+      mockFs.stat.mockRejectedValueOnce(statError);
+      mockFs.open.mockRejectedValue(existsError); // Continue failing for timeout
+
+      const testFn = vi.fn();
+
+      // ACT & ASSERT
+      await expect(
+        lockManager.withKeyLock('stat-error-test', testFn, 50)
+      ).rejects.toThrow(/Lock timeout/);
+
+      expect(mockFs.stat).toHaveBeenCalled();
+    });
+  });
+
+  describe('Shutdown Functionality', () => {
+    test('should clear cleanup interval and perform final cleanup on shutdown', async () => {
+      // ARRANGE
+      process.env.NODE_ENV = 'production'; // Enable scheduler
+      const mockClearInterval = vi.spyOn(global, 'clearInterval');
+
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          retryDelayMs: 10,
+          enableLockLogging: true,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+
+      // Setup cleanup expectation
+      mockFs.readdir.mockResolvedValue([]);
+
+      // ACT
+      await module.shutdownLockManager();
+
+      // ASSERT
+      expect(mockClearInterval).toHaveBeenCalled();
+      expect(mockFs.readdir).toHaveBeenCalled(); // Final cleanup called
+
+      mockClearInterval.mockRestore();
+    });
+
+    test('should handle shutdown gracefully when no cleanup interval exists', async () => {
+      // ARRANGE
+      process.env.NODE_ENV = 'test'; // No scheduler started
+
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          retryDelayMs: 10,
+          enableLockLogging: false,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      mockFs.readdir.mockResolvedValue([]);
+
+      // ACT & ASSERT - Should not throw
+      await expect(module.shutdownLockManager()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('Active Locks Tracking Edge Cases', () => {
+    beforeEach(async () => {
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          retryDelayMs: 10,
+          enableLockLogging: true,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      lockManager = module;
+    });
+
+    test('should track lock metadata correctly in getActiveLocks', async () => {
+      // ARRANGE
+      let lockInfo: any = null;
+      mockFileHandle.writeFile.mockImplementation((data: string) => {
+        lockInfo = JSON.parse(data);
+        return Promise.resolve();
+      });
+
+      const testFn = vi.fn().mockImplementation(async () => {
+        // Check active locks while holding the lock
+        const activeLocks = lockManager.getActiveLocks();
+        expect(activeLocks).toHaveLength(1);
+        expect(activeLocks[0].key).toBe('metadata-test');
+        expect(activeLocks[0].pid).toBe(process.pid);
+        expect(activeLocks[0].hostname).toBeDefined();
+        return 'success';
+      });
+
+      // ACT
+      await lockManager.withKeyLock('metadata-test', testFn);
+
+      // ASSERT
+      expect(lockInfo).toBeDefined();
+      expect(lockInfo.key).toBe('metadata-test');
+      expect(lockInfo.pid).toBe(process.pid);
+
+      // After release, no active locks
+      const finalActiveLocks = lockManager.getActiveLocks();
+      expect(finalActiveLocks).toHaveLength(0);
+    });
+  });
+
+  describe('Metrics Calculation Edge Cases', () => {
+    beforeEach(async () => {
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          retryDelayMs: 10,
+          enableLockLogging: false,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      lockManager = module;
+    });
+
+    test('should track stale lock cleanup count correctly', async () => {
+      // ARRANGE
+      const existsError = new Error('File exists');
+      (existsError as any).code = 'EEXIST';
+
+      const oldTime = Date.now() - 60000; // 60 seconds ago
+
+      mockFs.open.mockRejectedValueOnce(existsError);
+      mockFs.stat.mockResolvedValueOnce({ mtimeMs: oldTime } as Stats);
+      mockFs.unlink.mockResolvedValueOnce(undefined);
+      mockFs.open.mockResolvedValueOnce(mockFileHandle);
+
+      const initialMetrics = lockManager.getLockMetrics();
+      const testFn = vi.fn().mockResolvedValue('success');
+
+      // ACT
+      await lockManager.withKeyLock('stale-metric-test', testFn);
+
+      // ASSERT
+      const finalMetrics = lockManager.getLockMetrics();
+      expect(finalMetrics.staleCleaned).toBe(initialMetrics.staleCleaned + 1);
+    });
+
+    test('should maintain currentLocks count accurately with multiple operations', async () => {
+      // ARRANGE
+      const testFn = vi.fn().mockImplementation(async () => {
+        const metrics = lockManager.getLockMetrics();
+        expect(metrics.currentLocks).toBeGreaterThanOrEqual(1);
+
+        // Simulate some work
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        return 'success';
+      });
+
+      // ACT - Execute locks sequentially since they use different keys
+      await lockManager.withKeyLock('sequential-1', testFn);
+      await lockManager.withKeyLock('sequential-2', testFn);
+
+      // ASSERT
+      const finalMetrics = lockManager.getLockMetrics();
+      expect(finalMetrics.currentLocks).toBe(0);
+      expect(finalMetrics.acquisitions).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('Configuration Edge Cases', () => {
+    test('should handle encoded lock keys properly', async () => {
+      // ARRANGE
+      process.env.NODE_ENV = 'test';
+      vi.doMock('../../../src/config', () => ({
+        lockConfig: {
+          lockDir: '/tmp/test-locks',
+          defaultTimeoutMs: 5000,
+          cleanupIntervalMs: 10000,
+          staleLockAgeMs: 30000,
+          retryDelayMs: 10,
+          enableLockLogging: false,
+        },
+      }));
+
+      const module = await import('../../../src/utils/lockManager');
+      const testFn = vi.fn().mockResolvedValue('success');
+
+      // ACT - Use a key with special characters that need encoding
+      const specialKey = 'repo/with spaces & symbols!';
+      await module.withKeyLock(specialKey, testFn);
+
+      // ASSERT
+      expect(mockFs.open).toHaveBeenCalledWith(
+        expect.stringContaining(encodeURIComponent(specialKey)),
+        'wx'
+      );
+    });
+  });
 });
