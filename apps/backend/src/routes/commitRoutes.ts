@@ -674,6 +674,18 @@ router.post(
     const { repoUrl, batchSize, maxCommits, resumeFromSha } = req.body;
 
     try {
+      // Check if streaming is enabled
+      if (!config.streaming.enabled) {
+        logger.warn('Streaming request rejected - streaming is disabled', {
+          repoUrl,
+        });
+        res.status(HTTP_STATUS.SERVICE_UNAVAILABLE).json({
+          error: 'Streaming is disabled in the current configuration',
+          code: 'STREAMING_DISABLED',
+        });
+        return;
+      }
+
       // Get repository info first (may use cached data)
       const repoInfo = await getRepositoryInfo(repoUrl);
 
