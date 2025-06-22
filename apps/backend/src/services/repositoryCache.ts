@@ -1468,7 +1468,7 @@ export class RepositoryCacheManager {
       if (failed > 0) {
         const failedOperations = results
           .filter((r) => r.status === 'rejected')
-          .map((r) => (r as PromiseRejectedResult).reason);
+          .map((r) => r.reason);
 
         logger.error('Failed to invalidate repository cache locally', {
           repoUrl,
@@ -1628,7 +1628,7 @@ export class RepositoryCacheManager {
     if (failed > 0) {
       const errors = results
         .filter((r) => r.status === 'rejected')
-        .map((r) => (r as PromiseRejectedResult).reason);
+        .map((r) => r.reason);
 
       logger.error('Error during RepositoryCacheManager shutdown', {
         error: errors[0]?.message ?? 'Shutdown failed',

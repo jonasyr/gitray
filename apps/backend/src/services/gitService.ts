@@ -710,10 +710,7 @@ class GitService {
             {
               userImpact: 'blocking',
               recoveryAction: 'retry',
-              repoType:
-                repoType === 'unknown'
-                  ? undefined
-                  : (repoType as 'public' | 'private'),
+              repoType: repoType === 'unknown' ? undefined : repoType,
               severity: 'critical',
             }
           );
