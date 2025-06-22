@@ -222,11 +222,9 @@ class RepositoryCoordinator {
   private startMetricsUpdater(): void {
     // Update coordination metrics every 30 seconds
     setInterval(() => {
-      try {
-        updateCoordinationMetrics();
-      } catch (error) {
+      updateCoordinationMetrics().catch((error) => {
         logger.warn('Failed to update coordination metrics', { error });
-      }
+      });
     }, 30000);
   }
 
