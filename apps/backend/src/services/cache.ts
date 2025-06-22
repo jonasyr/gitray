@@ -482,7 +482,7 @@ const cache = {
    */
   __setDependenciesForTesting(
     mockHybridCache?: HybridLRUCache<string> | null,
-    mockRedis?: any | null,
+    mockRedis?: Redis | null,
     hybridHealthy = true,
     redisHealthyParam = true
   ): void {

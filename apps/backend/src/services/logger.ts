@@ -75,7 +75,8 @@ export const initializeLogger = () => {
   // Helper function to parse file size to bytes
   const parseFileSize = (size: string): number => {
     const units = { b: 1, k: 1024, m: 1024 * 1024, g: 1024 * 1024 * 1024 };
-    const match = size.toLowerCase().match(/^(\d+)([bkmg]?)$/);
+    const regex = /^(\d+)([bkmg]?)$/;
+    const match = regex.exec(size.toLowerCase());
     if (!match) return 10 * 1024 * 1024; // Default 10MB
     const [, num, unit] = match;
     return parseInt(num) * (units[unit as keyof typeof units] || 1);
