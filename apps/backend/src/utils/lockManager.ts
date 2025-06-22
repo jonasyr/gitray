@@ -426,7 +426,9 @@ export async function withOrderedLocks<T>(
   }
 
   // Remove duplicates and sort locks to ensure consistent ordering and prevent deadlocks
-  const uniqueSortedLocks = [...new Set(locks)].sort();
+  const uniqueSortedLocks = [...new Set(locks)].sort((a, b) =>
+    a.localeCompare(b)
+  );
 
   if (lockConfig.enableLockLogging) {
     logger.debug('Acquiring ordered locks', {
