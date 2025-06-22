@@ -227,11 +227,10 @@ export class HybridLRUCache<V> {
           }
 
           // Sort by modification time (oldest first) for proper LRU tracking
-          validEntries
-            .sort((a, b) => a.mtime - b.mtime)
-            .forEach(({ key, filePath }) => {
-              this.disk.set(key, filePath);
-            });
+          const sortedEntries = validEntries.sort((a, b) => a.mtime - b.mtime);
+          sortedEntries.forEach(({ key, filePath }) => {
+            this.disk.set(key, filePath);
+          });
 
           logger.debug('Disk index loaded successfully', {
             totalFiles: files.length,
