@@ -23,6 +23,7 @@ const logger = getLogger();
  * 3. Provides fallback to simple Redis cache if hybrid cache fails
  * 4. Adds proper error handling and graceful degradation
  * 5. Maintains all existing logging and health checking behavior
+ * 6. REFACTORED: Reduced cognitive complexity by extracting cache strategies
  */
 
 // Connection to the Redis instance, falls back to `null` when unavailable
@@ -121,70 +122,184 @@ initRedis();
 void initHybridCache();
 
 /**
+ * Attempts to retrieve value from HybridLRUCache
+ */
+async function tryHybridCacheGet(key: string): Promise<string | null> {
+  if (!hybridCache || !hybridCacheHealthy) {
+    return null;
+  }
+
+  try {
+    const result = await hybridCache.get(key);
+    if (result !== null) {
+      recordEnhancedCacheOperation('get', true, undefined, key);
+      return result;
+    }
+    return null;
+  } catch (err) {
+    logger.warn('HybridLRUCache get failed, falling back', { key, err });
+    hybridCacheHealthy = false;
+    recordDetailedError(
+      'cache',
+      err instanceof Error ? err : new Error(String(err)),
+      {
+        userImpact: 'degraded',
+        recoveryAction: 'fallback',
+        severity: 'warning',
+      }
+    );
+    return null;
+  }
+}
+
+/**
+ * Attempts to retrieve value from Redis
+ */
+async function tryRedisGet(key: string): Promise<string | null> {
+  if (!redis || !redisHealthy) {
+    return null;
+  }
+
+  try {
+    const result = await redis.get(key);
+    if (result !== null) {
+      recordEnhancedCacheOperation('get', true, undefined, key);
+      return result;
+    }
+    return null;
+  } catch (err) {
+    logger.warn('Redis get failed, falling back to memory', { key, err });
+    redisHealthy = false;
+    recordDetailedError(
+      'cache',
+      err instanceof Error ? err : new Error(String(err)),
+      {
+        userImpact: 'degraded',
+        recoveryAction: 'fallback',
+        severity: 'warning',
+      }
+    );
+    return null;
+  }
+}
+
+/**
+ * Retrieves value from memory cache
+ */
+function tryMemoryCacheGet(key: string): string | null {
+  return memoryCache.get(key) ?? null;
+}
+
+/**
+ * Attempts to set value in HybridLRUCache
+ */
+async function tryHybridCacheSet(
+  key: string,
+  value: string,
+  mode?: 'EX' | 'PX',
+  duration?: number
+): Promise<boolean> {
+  if (!hybridCache || !hybridCacheHealthy) {
+    return false;
+  }
+
+  try {
+    await hybridCache.set(key, value, mode, duration);
+    recordEnhancedCacheOperation('set', true, undefined, key);
+    return true;
+  } catch (err) {
+    logger.warn('HybridLRUCache set failed, falling back', { key, err });
+    hybridCacheHealthy = false;
+    recordDetailedError(
+      'cache',
+      err instanceof Error ? err : new Error(String(err)),
+      {
+        userImpact: 'degraded',
+        recoveryAction: 'fallback',
+        severity: 'warning',
+      }
+    );
+    return false;
+  }
+}
+
+/**
+ * Attempts to set value in Redis
+ */
+async function tryRedisSet(
+  key: string,
+  value: string,
+  mode?: 'EX' | 'PX',
+  duration?: number
+): Promise<boolean> {
+  if (!redis || !redisHealthy) {
+    return false;
+  }
+
+  try {
+    if (mode && duration !== undefined) {
+      await (redis as any).set(key, value, mode, duration);
+    } else {
+      await redis.set(key, value);
+    }
+
+    // Also store in memory as backup
+    memoryCache.set(key, value);
+    recordEnhancedCacheOperation('set', true, undefined, key);
+    return true;
+  } catch (err) {
+    logger.warn('Redis set failed, falling back to memory', { key, err });
+    redisHealthy = false;
+    recordDetailedError(
+      'cache',
+      err instanceof Error ? err : new Error(String(err)),
+      {
+        userImpact: 'degraded',
+        recoveryAction: 'fallback',
+        severity: 'warning',
+      }
+    );
+    return false;
+  }
+}
+
+/**
+ * Sets value in memory cache (always succeeds)
+ */
+function setInMemoryCache(key: string, value: string): void {
+  memoryCache.set(key, value);
+  recordEnhancedCacheOperation('set', true, undefined, key);
+}
+
+/**
  * Cache interface that maintains backward compatibility
  */
 const cache = {
   /**
    * Retrieves a value from the cache.
    * Priority: HybridLRUCache -> Redis -> Memory
+   * REFACTORED: Reduced cognitive complexity by extracting cache strategies
    */
   async get(key: string): Promise<string | null> {
     const startTime = Date.now();
     let cacheHit = false;
+    let result: string | null = null;
 
     try {
-      // Try HybridLRUCache first
-      if (hybridCache && hybridCacheHealthy) {
-        try {
-          const result = await hybridCache.get(key);
-          if (result !== null) {
-            cacheHit = true;
-            recordEnhancedCacheOperation('get', true, undefined, key);
-            return result;
-          }
-        } catch (err) {
-          logger.warn('HybridLRUCache get failed, falling back', { key, err });
-          hybridCacheHealthy = false;
-          recordDetailedError(
-            'cache',
-            err instanceof Error ? err : new Error(String(err)),
-            {
-              userImpact: 'degraded',
-              recoveryAction: 'fallback',
-              severity: 'warning',
-            }
-          );
-          // Fall through to Redis
-        }
+      // Try cache strategies in order of preference
+      result = await tryHybridCacheGet(key);
+      if (result !== null) {
+        cacheHit = true;
+        return result;
       }
 
-      // Fall back to original Redis implementation
-      if (redis && redisHealthy) {
-        try {
-          const result = await redis.get(key);
-          if (result !== null) {
-            cacheHit = true;
-            recordEnhancedCacheOperation('get', true, undefined, key);
-            return result;
-          }
-        } catch (err) {
-          logger.warn('Redis get failed, falling back to memory', { key, err });
-          redisHealthy = false;
-          recordDetailedError(
-            'cache',
-            err instanceof Error ? err : new Error(String(err)),
-            {
-              userImpact: 'degraded',
-              recoveryAction: 'fallback',
-              severity: 'warning',
-            }
-          );
-          // Fall through to memory
-        }
+      result = await tryRedisGet(key);
+      if (result !== null) {
+        cacheHit = true;
+        return result;
       }
 
-      // Final fallback to memory cache
-      const result = memoryCache.get(key) ?? null;
+      result = tryMemoryCacheGet(key);
       if (result !== null) {
         cacheHit = true;
       }
@@ -205,6 +320,7 @@ const cache = {
   /**
    * Stores a value in the cache.
    * Maintains exact API compatibility: set(key, value, mode?, duration?)
+   * REFACTORED: Reduced cognitive complexity by extracting cache strategies
    */
   async set(
     key: string,
@@ -216,63 +332,20 @@ const cache = {
     let success = false;
 
     try {
-      // Try HybridLRUCache first
-      if (hybridCache && hybridCacheHealthy) {
-        try {
-          await hybridCache.set(key, value, mode, duration);
-          success = true;
-          recordEnhancedCacheOperation('set', true, undefined, key);
-          return; // Success - don't try other methods
-        } catch (err) {
-          logger.warn('HybridLRUCache set failed, falling back', { key, err });
-          hybridCacheHealthy = false;
-          recordDetailedError(
-            'cache',
-            err instanceof Error ? err : new Error(String(err)),
-            {
-              userImpact: 'degraded',
-              recoveryAction: 'fallback',
-              severity: 'warning',
-            }
-          );
-          // Fall through to Redis
-        }
+      // Try cache strategies in order of preference
+      success = await tryHybridCacheSet(key, value, mode, duration);
+      if (success) {
+        return;
       }
 
-      // Fall back to original Redis implementation
-      if (redis && redisHealthy) {
-        try {
-          if (mode && duration !== undefined) {
-            await (redis as any).set(key, value, mode, duration);
-          } else {
-            await redis.set(key, value);
-          }
-
-          // Also store in memory as backup
-          memoryCache.set(key, value);
-          success = true;
-          recordEnhancedCacheOperation('set', true, undefined, key);
-          return;
-        } catch (err) {
-          logger.warn('Redis set failed, falling back to memory', { key, err });
-          redisHealthy = false;
-          recordDetailedError(
-            'cache',
-            err instanceof Error ? err : new Error(String(err)),
-            {
-              userImpact: 'degraded',
-              recoveryAction: 'fallback',
-              severity: 'warning',
-            }
-          );
-          // Fall through to memory
-        }
+      success = await tryRedisSet(key, value, mode, duration);
+      if (success) {
+        return;
       }
 
       // Final fallback to memory cache
-      memoryCache.set(key, value);
+      setInMemoryCache(key, value);
       success = true;
-      recordEnhancedCacheOperation('set', true, undefined, key);
     } finally {
       // Update service health
       const responseTime = (Date.now() - startTime) / 1000;
