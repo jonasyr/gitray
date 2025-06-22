@@ -1149,14 +1149,16 @@ export function recordCacheTransaction(
   cacheTier: 'raw' | 'filtered' | 'aggregated' | 'all',
   operationCount: number = 1
 ): void {
-  const operationCountRange =
-    operationCount === 1
-      ? '1'
-      : operationCount <= 5
-        ? '2-5'
-        : operationCount <= 10
-          ? '6-10'
-          : '10+';
+  let operationCountRange: string;
+  if (operationCount === 1) {
+    operationCountRange = '1';
+  } else if (operationCount <= 5) {
+    operationCountRange = '2-5';
+  } else if (operationCount <= 10) {
+    operationCountRange = '6-10';
+  } else {
+    operationCountRange = '10+';
+  }
 
   cacheTransactions.inc({
     outcome,
@@ -1174,14 +1176,16 @@ export function recordTransactionRollback(
   operationType: 'set' | 'delete' | 'update',
   retryCount: number = 0
 ): void {
-  const retryRange =
-    retryCount === 0
-      ? '0'
-      : retryCount <= 2
-        ? '1-2'
-        : retryCount <= 5
-          ? '3-5'
-          : '5+';
+  let retryRange: string;
+  if (retryCount === 0) {
+    retryRange = '0';
+  } else if (retryCount <= 2) {
+    retryRange = '1-2';
+  } else if (retryCount <= 5) {
+    retryRange = '3-5';
+  } else {
+    retryRange = '5+';
+  }
 
   transactionRollbacks.inc({
     rollback_outcome: outcome,
@@ -1200,23 +1204,27 @@ export function recordRollbackDuration(
   operationCount: number,
   retryAttempts: number
 ): void {
-  const operationCountRange =
-    operationCount === 1
-      ? '1'
-      : operationCount <= 5
-        ? '2-5'
-        : operationCount <= 10
-          ? '6-10'
-          : '10+';
+  let operationCountRange: string;
+  if (operationCount === 1) {
+    operationCountRange = '1';
+  } else if (operationCount <= 5) {
+    operationCountRange = '2-5';
+  } else if (operationCount <= 10) {
+    operationCountRange = '6-10';
+  } else {
+    operationCountRange = '10+';
+  }
 
-  const retryRange =
-    retryAttempts === 0
-      ? '0'
-      : retryAttempts <= 2
-        ? '1-2'
-        : retryAttempts <= 5
-          ? '3-5'
-          : '5+';
+  let retryRange: string;
+  if (retryAttempts === 0) {
+    retryRange = '0';
+  } else if (retryAttempts <= 2) {
+    retryRange = '1-2';
+  } else if (retryAttempts <= 5) {
+    retryRange = '3-5';
+  } else {
+    retryRange = '5+';
+  }
 
   rollbackDuration.observe(
     {
@@ -1236,8 +1244,14 @@ export function recordRollbackVerification(
   verificationResult: 'success' | 'failed',
   attemptNumber: number
 ): void {
-  const attemptRange =
-    attemptNumber === 1 ? '1' : attemptNumber <= 3 ? '2-3' : '3+';
+  let attemptRange: string;
+  if (attemptNumber === 1) {
+    attemptRange = '1';
+  } else if (attemptNumber <= 3) {
+    attemptRange = '2-3';
+  } else {
+    attemptRange = '3+';
+  }
 
   rollbackVerification.inc({
     cache_tier: cacheTier,
@@ -1254,14 +1268,16 @@ export function recordCriticalRollbackFailure(
   failedOperationsCount: number,
   severity: 'high' | 'critical' = 'critical'
 ): void {
-  const failureCountRange =
-    failedOperationsCount === 1
-      ? '1'
-      : failedOperationsCount <= 3
-        ? '2-3'
-        : failedOperationsCount <= 5
-          ? '4-5'
-          : '5+';
+  let failureCountRange: string;
+  if (failedOperationsCount === 1) {
+    failureCountRange = '1';
+  } else if (failedOperationsCount <= 3) {
+    failureCountRange = '2-3';
+  } else if (failedOperationsCount <= 5) {
+    failureCountRange = '4-5';
+  } else {
+    failureCountRange = '5+';
+  }
 
   criticalRollbackFailures.inc({
     transaction_type: transactionType,
