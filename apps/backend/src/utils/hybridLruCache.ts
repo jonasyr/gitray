@@ -1215,92 +1215,194 @@ export class HybridLRUCache<V> {
       await withKeyLock(
         'disk-index-repair',
         async () => {
-          const actualFiles = new Set<string>();
-          const indexedFiles = new Map<string, string>();
+          const actualFiles = await this.getActualDiskFiles();
+          if (!actualFiles) return;
 
-          // Get actual files on disk
-          try {
-            const files = await fs.readdir(this.options.diskPath);
-            for (const file of files) {
-              const filePath = path.join(this.options.diskPath, file);
-              try {
-                const stat = await fs.lstat(filePath);
-                if (stat.isFile()) {
-                  actualFiles.add(file);
-                }
-              } catch {
-                // Skip files we can't stat
-              }
-            }
-          } catch (err) {
-            logger.warn('Failed to read disk cache directory for validation', {
-              err,
-            });
-            return;
-          }
+          const indexedFiles = this.getIndexedFiles();
+          const { orphanedFiles, missingFiles } = this.findIndexInconsistencies(
+            actualFiles,
+            indexedFiles
+          );
 
-          // Get indexed files
-          for (const [key, filePath] of this.disk.entries()) {
-            const fileName = path.basename(filePath);
-            indexedFiles.set(fileName, key);
-          }
-
-          // Find inconsistencies
-          const orphanedFiles: string[] = [];
-          const missingFiles: string[] = [];
-
-          // Check for files in directory but not in index
-          for (const file of actualFiles) {
-            if (!indexedFiles.has(file)) {
-              orphanedFiles.push(file);
-            }
-          }
-
-          // Check for files in index but not in directory
-          for (const [fileName, key] of indexedFiles.entries()) {
-            if (!actualFiles.has(fileName)) {
-              missingFiles.push(key);
-            }
-          }
-
-          // Repair: Remove missing files from index
-          for (const key of missingFiles) {
-            this.disk.delete(key);
-            logger.debug('Removed missing file from disk index', { key });
-          }
-
-          // Repair: Add orphaned files to index (if they're valid cache files)
-          for (const file of orphanedFiles) {
-            try {
-              const key = decodeURIComponent(file);
-              const filePath = path.join(this.options.diskPath, file);
-
-              // Validate the file contains valid JSON
-              const data = await fs.readFile(filePath, 'utf-8');
-              JSON.parse(data); // Will throw if invalid
-
-              this.disk.set(key, filePath);
-              logger.debug('Added orphaned file to disk index', { key, file });
-            } catch {
-              // Invalid cache file - consider removing it
-              logger.debug('Found invalid cache file, leaving orphaned', {
-                file,
-              });
-            }
-          }
-
-          if (orphanedFiles.length > 0 || missingFiles.length > 0) {
-            logger.info('Disk index validation completed', {
-              orphanedFiles: orphanedFiles.length,
-              missingFiles: missingFiles.length,
-              totalIndexEntries: this.disk.size,
-            });
-          }
+          await this.repairIndexInconsistencies(orphanedFiles, missingFiles);
+          this.logValidationResults(orphanedFiles, missingFiles);
         },
         this.lockTimeoutMs
       );
     } catch (err) {
       logger.warn('Failed to validate disk index', { err });
+    }
+  }
+
+  /**
+   * Gets all actual files from disk
+   */
+  private async getActualDiskFiles(): Promise<Set<string> | null> {
+    const actualFiles = new Set<string>();
+
+    try {
+      const files = await fs.readdir(this.options.diskPath);
+      await this.collectValidFiles(files, actualFiles);
+      return actualFiles;
+    } catch (err) {
+      logger.warn('Failed to read disk cache directory for validation', {
+        err,
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Collects valid files from the disk directory
+   */
+  private async collectValidFiles(
+    files: string[],
+    actualFiles: Set<string>
+  ): Promise<void> {
+    for (const file of files) {
+      const filePath = path.join(this.options.diskPath, file);
+      if (await this.isValidFile(filePath)) {
+        actualFiles.add(file);
+      }
+    }
+  }
+
+  /**
+   * Checks if a file path is valid and accessible
+   */
+  private async isValidFile(filePath: string): Promise<boolean> {
+    try {
+      const stat = await fs.lstat(filePath);
+      return stat.isFile();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Gets all files currently indexed in memory
+   */
+  private getIndexedFiles(): Map<string, string> {
+    const indexedFiles = new Map<string, string>();
+
+    for (const [key, filePath] of this.disk.entries()) {
+      const fileName = path.basename(filePath);
+      indexedFiles.set(fileName, key);
+    }
+
+    return indexedFiles;
+  }
+
+  /**
+   * Finds inconsistencies between actual files and indexed files
+   */
+  private findIndexInconsistencies(
+    actualFiles: Set<string>,
+    indexedFiles: Map<string, string>
+  ): { orphanedFiles: string[]; missingFiles: string[] } {
+    const orphanedFiles = this.findOrphanedFiles(actualFiles, indexedFiles);
+    const missingFiles = this.findMissingFiles(actualFiles, indexedFiles);
+
+    return { orphanedFiles, missingFiles };
+  }
+
+  /**
+   * Finds files that exist on disk but not in index
+   */
+  private findOrphanedFiles(
+    actualFiles: Set<string>,
+    indexedFiles: Map<string, string>
+  ): string[] {
+    return Array.from(actualFiles).filter((file) => !indexedFiles.has(file));
+  }
+
+  /**
+   * Finds files that are indexed but don't exist on disk
+   */
+  private findMissingFiles(
+    actualFiles: Set<string>,
+    indexedFiles: Map<string, string>
+  ): string[] {
+    const missingFiles: string[] = [];
+
+    for (const [fileName, key] of indexedFiles.entries()) {
+      if (!actualFiles.has(fileName)) {
+        missingFiles.push(key);
+      }
+    }
+
+    return missingFiles;
+  }
+
+  /**
+   * Repairs index inconsistencies by removing missing files and adding orphaned files
+   */
+  private async repairIndexInconsistencies(
+    orphanedFiles: string[],
+    missingFiles: string[]
+  ): Promise<void> {
+    this.removeMissingFilesFromIndex(missingFiles);
+    await this.addOrphanedFilesToIndex(orphanedFiles);
+  }
+
+  /**
+   * Removes missing files from the disk index
+   */
+  private removeMissingFilesFromIndex(missingFiles: string[]): void {
+    for (const key of missingFiles) {
+      this.disk.delete(key);
+      logger.debug('Removed missing file from disk index', { key });
+    }
+  }
+
+  /**
+   * Adds valid orphaned files back to the index
+   */
+  private async addOrphanedFilesToIndex(
+    orphanedFiles: string[]
+  ): Promise<void> {
+    for (const file of orphanedFiles) {
+      await this.processOrphanedFile(file);
+    }
+  }
+
+  /**
+   * Processes a single orphaned file, validating and adding it to index if valid
+   */
+  private async processOrphanedFile(file: string): Promise<void> {
+    try {
+      const key = decodeURIComponent(file);
+      const filePath = path.join(this.options.diskPath, file);
+
+      await this.validateCacheFile(filePath);
+      this.disk.set(key, filePath);
+      logger.debug('Added orphaned file to disk index', { key, file });
+    } catch {
+      logger.debug('Found invalid cache file, leaving orphaned', { file });
+    }
+  }
+
+  /**
+   * Validates that a cache file contains valid JSON
+   */
+  private async validateCacheFile(filePath: string): Promise<void> {
+    const data = await fs.readFile(filePath, 'utf-8');
+    JSON.parse(data); // Will throw if invalid
+  }
+
+  /**
+   * Logs the results of the validation process
+   */
+  private logValidationResults(
+    orphanedFiles: string[],
+    missingFiles: string[]
+  ): void {
+    if (orphanedFiles.length > 0 || missingFiles.length > 0) {
+      logger.info('Disk index validation completed', {
+        orphanedFiles: orphanedFiles.length,
+        missingFiles: missingFiles.length,
+        totalIndexEntries: this.disk.size,
+      });
     }
   }
 
