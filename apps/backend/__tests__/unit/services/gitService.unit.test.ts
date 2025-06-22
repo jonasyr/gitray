@@ -876,11 +876,12 @@ describe('GitService Optimized Unit Tests', () => {
       // Act
       const result = await gitService.aggregateCommitsByTime(sampleCommits);
 
+      // Find the day that has both commits (2 commit count)
+      const dayWithBothCommits = result.data.find((d) => d.commitCount === 2);
+
       // Assert
-      const todayData = result.data.find(
-        (d) => d.periodStart === today.toISOString().split('T')[0]
-      );
-      expect(todayData?.authors).toEqual(
+      expect(dayWithBothCommits).toBeDefined();
+      expect(dayWithBothCommits?.authors).toEqual(
         expect.arrayContaining(['Alice', 'Bob'])
       );
     });

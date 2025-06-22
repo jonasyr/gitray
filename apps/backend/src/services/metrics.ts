@@ -18,7 +18,7 @@ collectDefaultMetrics({ register });
  * Helper to categorize user types from request headers
  */
 export function getUserType(req: Request): 'api' | 'ui' | 'admin' | 'unknown' {
-  if (!req || !req.headers) return 'unknown';
+  if (!req?.headers) return 'unknown';
 
   const userAgent = req.headers['user-agent']?.toLowerCase() ?? '';
   const apiKey = req.headers['x-api-key'];
@@ -1637,6 +1637,8 @@ export const updateAllEnhancedMetrics = async () => {
     updateEnhancedCacheMetrics(),
     updateCoordinationMetrics(),
     updateSystemResourceMetrics(),
-    updateMemoryPressureMetrics(), // CRITICAL: Memory pressure metrics
   ]);
+
+  // Update memory pressure metrics synchronously since it doesn't return a Promise
+  updateMemoryPressureMetrics();
 };

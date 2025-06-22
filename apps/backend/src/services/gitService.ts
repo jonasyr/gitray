@@ -789,7 +789,6 @@ class GitService {
     });
     return buckets;
   }
-
   private tallyCommits(
     commits: Commit[],
     buckets: Map<string, CommitAggregation>
