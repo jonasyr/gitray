@@ -212,7 +212,7 @@ export const config = {
 
     // Base directory for shared repository storage
     basePath:
-      process.env.REPO_CACHE_BASE_PATH ||
+      process.env.REPO_CACHE_BASE_PATH ??
       path.join(os.tmpdir(), 'gitray-shared-repos'),
   },
 

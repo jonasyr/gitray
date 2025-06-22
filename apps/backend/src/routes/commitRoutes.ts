@@ -403,8 +403,8 @@ router.get(
           ...heatmapData.metadata,
           filterOptions: filters,
           streamingUsed:
-            forceStreaming || (repositoryInfo?.shouldUseStreaming ?? false),
-          repositorySize: repositoryInfo?.sizeCategory || 'unknown',
+            forceStreaming ?? repositoryInfo?.shouldUseStreaming ?? false,
+          repositorySize: repositoryInfo?.sizeCategory ?? 'unknown',
           cacheStrategy: 'unified_hierarchical',
           processingTime: Date.now() - startTime,
           coordinationMetrics: config.repositoryCache?.enabled
@@ -447,7 +447,7 @@ router.get(
         repoUrl,
         filters,
         dataPoints: heatmapData.data.length,
-        totalCommits: heatmapData.metadata?.totalCommits || 0,
+        totalCommits: heatmapData.metadata?.totalCommits ?? 0,
         repositorySize: repositoryInfo?.sizeCategory,
         processingTime: Date.now() - startTime,
         hitRatio: cacheStats.hitRatios.overall,
@@ -715,8 +715,8 @@ router.post(
           data: {
             totalCommits: repoInfo.commitCount,
             streamingOptions: {
-              batchSize: batchSize || config.streaming.batchSize,
-              maxCommits: maxCommits || repoInfo.commitCount,
+              batchSize: batchSize ?? config.streaming.batchSize,
+              maxCommits: maxCommits ?? repoInfo.commitCount,
               resumeFromSha,
             },
             repository: {
@@ -726,7 +726,7 @@ router.post(
               coordinationEnabled: config.repositoryCache?.enabled,
             },
             estimatedBatches: Math.ceil(
-              repoInfo.commitCount / (batchSize || config.streaming.batchSize)
+              repoInfo.commitCount / (batchSize ?? config.streaming.batchSize)
             ),
           },
         }) + '\n'
@@ -734,8 +734,8 @@ router.post(
 
       // Use coordination-aware streaming (implementation would use shared repositories)
       const streamingOptions = {
-        batchSize: batchSize || config.streaming.batchSize,
-        maxCommits: maxCommits || repoInfo.commitCount,
+        batchSize: batchSize ?? config.streaming.batchSize,
+        maxCommits: maxCommits ?? repoInfo.commitCount,
         ...(resumeFromSha && { startFromCommit: resumeFromSha }),
       };
 

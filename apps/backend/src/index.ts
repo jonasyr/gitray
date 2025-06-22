@@ -68,7 +68,7 @@ export async function validateStartupEnvironment() {
   const requiredDirs = [
     config.locks.lockDir,
     config.hybridCache.diskPath,
-    process.env.LOG_DIR || './logs',
+    process.env.LOG_DIR ?? './logs',
   ];
 
   for (const dir of requiredDirs) {
@@ -308,7 +308,7 @@ export async function startApplication() {
         });
       } else {
         logger.error(
-          `❌ SERVER STARTUP ERROR: ${error.code || 'Unknown error'}`,
+          `❌ SERVER STARTUP ERROR: ${error.code ?? 'Unknown error'}`,
           {
             error: error.message,
             stack: error.stack,

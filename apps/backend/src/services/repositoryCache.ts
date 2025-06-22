@@ -1472,7 +1472,7 @@ export class RepositoryCacheManager {
 
         logger.error('Failed to invalidate repository cache locally', {
           repoUrl,
-          error: failedOperations[0]?.message || 'Cache deletion failed',
+          error: failedOperations[0]?.message ?? 'Cache deletion failed',
           failedCount: failed,
           totalOperations: operations.length,
         });
@@ -1631,7 +1631,7 @@ export class RepositoryCacheManager {
         .map((r) => (r as PromiseRejectedResult).reason);
 
       logger.error('Error during RepositoryCacheManager shutdown', {
-        error: errors[0]?.message || 'Shutdown failed',
+        error: errors[0]?.message ?? 'Shutdown failed',
         failedShutdowns: failed,
       });
     }

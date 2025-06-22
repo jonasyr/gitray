@@ -11,7 +11,7 @@ let logger: winston.Logger;
 // Initialize logger function (call after dotenv.config())
 export const initializeLogger = () => {
   // Ensure logs directory exists
-  const logDir = process.env.LOG_DIR || './logs';
+  const logDir = process.env.LOG_DIR ?? './logs';
   if (!fs.existsSync(logDir)) {
     fs.mkdirSync(logDir, { recursive: true });
   }
@@ -66,7 +66,7 @@ export const initializeLogger = () => {
   if (process.env.LOG_ENABLE_CONSOLE !== 'false') {
     transports.push(
       new winston.transports.Console({
-        level: process.env.LOG_CONSOLE_LEVEL || 'info',
+        level: process.env.LOG_CONSOLE_LEVEL ?? 'info',
         format: consoleFormat,
       })
     );
@@ -83,9 +83,9 @@ export const initializeLogger = () => {
 
   // File transports (if enabled)
   if (process.env.LOG_TO_FILE === 'true') {
-    const maxSize = parseFileSize(process.env.LOG_FILE_MAX_SIZE || '10m');
-    const maxFiles = parseInt(process.env.LOG_FILE_MAX_FILES || '10');
-    const datePattern = process.env.LOG_DATE_PATTERN || 'YYYY-MM-DD';
+    const maxSize = parseFileSize(process.env.LOG_FILE_MAX_SIZE ?? '10m');
+    const maxFiles = parseInt(process.env.LOG_FILE_MAX_FILES ?? '10');
+    const datePattern = process.env.LOG_DATE_PATTERN ?? 'YYYY-MM-DD';
 
     // Combined log file (all levels) - using DailyRotateFile
     if (process.env.LOG_ENABLE_COMBINED_FILE !== 'false') {
@@ -146,11 +146,11 @@ export const initializeLogger = () => {
   }
 
   logger = winston.createLogger({
-    level: process.env.LOG_LEVEL || 'info',
+    level: process.env.LOG_LEVEL ?? 'info',
     defaultMeta: {
       service: 'gitray-backend',
       pid: process.pid,
-      hostname: process.env.HOSTNAME || 'unknown',
+      hostname: process.env.HOSTNAME ?? 'unknown',
     },
     transports,
     // Handle uncaught exceptions and unhandled rejections
@@ -176,10 +176,10 @@ export const initializeLogger = () => {
 
   // Log startup information
   logger.info('Logger initialized', {
-    logLevel: process.env.LOG_LEVEL || 'info',
+    logLevel: process.env.LOG_LEVEL ?? 'info',
     logToFile: process.env.LOG_TO_FILE === 'true',
     logDir: process.env.LOG_TO_FILE === 'true' ? logDir : 'disabled',
-    nodeEnv: process.env.NODE_ENV || 'development',
+    nodeEnv: process.env.NODE_ENV ?? 'development',
   });
 
   return logger;
@@ -188,15 +188,15 @@ export const initializeLogger = () => {
 // Add request-specific logger factory
 export const createRequestLogger = (req: Request) => {
   const requestId =
-    req.headers['x-request-id'] ||
-    req.headers['x-correlation-id'] ||
+    req.headers['x-request-id'] ??
+    req.headers['x-correlation-id'] ??
     Math.random().toString(36).substring(2, 15);
 
   return logger.child({
     requestId,
     method: req.method,
     path: req.path,
-    ip: req.ip || req.socket.remoteAddress,
+    ip: req.ip ?? req.socket.remoteAddress,
     userAgent: req.headers['user-agent'],
   });
 };
