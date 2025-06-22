@@ -1413,6 +1413,8 @@ export const updateEnhancedCacheMetrics = async () => {
         user_behavior: 'normal',
         data_type: 'mixed',
       },
+      // TODO: Replace with real access frequency data when implementing cache pattern detection
+      // This Math.random() is safe for metrics placeholder data (not security-sensitive)
       Math.random() * 100 // Placeholder - would be real access frequency
     );
   } catch (err) {

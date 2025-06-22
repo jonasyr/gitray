@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { randomBytes } from 'crypto';
 import Redis, { RedisOptions } from 'ioredis';
 import { getLogger } from '../services/logger';
 import { withKeyLock } from './lockManager';
@@ -455,7 +456,8 @@ export class HybridLRUCache<V> {
           this.options.diskPath,
           encodeURIComponent(key)
         );
-        const tempFilePath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).substring(2)}`;
+        // Use cryptographically secure random for temp file names to prevent prediction attacks
+        const tempFilePath = `${filePath}.tmp.${Date.now()}.${randomBytes(6).toString('hex')}`;
 
         let tempStat: any;
 

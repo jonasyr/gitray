@@ -1,6 +1,7 @@
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import { Request } from 'express';
+import { randomBytes } from 'crypto';
 import path from 'path';
 import fs from 'fs';
 
@@ -191,7 +192,7 @@ export const createRequestLogger = (req: Request) => {
   const requestId =
     req.headers['x-request-id'] ??
     req.headers['x-correlation-id'] ??
-    Math.random().toString(36).substring(2, 15);
+    randomBytes(5).toString('hex');
 
   return logger.child({
     requestId,

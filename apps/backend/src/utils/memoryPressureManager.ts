@@ -500,6 +500,8 @@ class MemoryPressureManager {
     // Proactive GC
     if (global.gc && typeof global.gc === 'function') {
       // Only trigger GC occasionally during warning state
+      // SAFE: Math.random() used for performance optimization (probabilistic GC triggering)
+      // This prevents deterministic GC patterns and load balancing across instances
       if (Math.random() < 0.1) {
         // 10% chance per check
         global.gc();
