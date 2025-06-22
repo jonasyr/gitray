@@ -7,6 +7,8 @@ import {
   updateServiceHealthScore,
   recordDetailedError,
 } from './metrics';
+import path from 'path';
+import os from 'os';
 
 const logger = getLogger();
 
@@ -459,7 +461,7 @@ const cache = {
           const minimalOptions = {
             maxEntries: 100,
             memoryLimitBytes: 1024 * 1024, // 1MB
-            diskPath: '/tmp/test-cache',
+            diskPath: path.join(os.tmpdir(), 'gitray-test-cache'),
             lockTimeoutMs: 1000,
           };
           hybridCache = new HybridLRUCache<string>(minimalOptions);
