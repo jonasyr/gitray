@@ -200,6 +200,7 @@ describe('HybridLRUCache - COVERAGE OPTIMIZED', () => {
       lockTimeoutMs: 1000,
       redisConfig: { host: 'localhost', port: 6379 },
     });
+    await cache.initialize();
     // Reduced from 10ms to 1ms - still allows async setup but faster
     await new Promise((resolve) => setTimeout(resolve, 1));
   });
@@ -366,6 +367,7 @@ describe('HybridLRUCache - COVERAGE OPTIMIZED', () => {
         memoryLimitBytes: 1024,
         diskPath: '/race-test',
       });
+      await newCache.initialize();
 
       await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -555,6 +557,7 @@ describe('HybridLRUCache - COVERAGE OPTIMIZED', () => {
         diskPath: '/test-cache-repair',
         lockTimeoutMs: 1000,
       });
+      await testCache.initialize();
 
       // Wait for initialization
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -624,6 +627,7 @@ describe('HybridLRUCache - COVERAGE OPTIMIZED', () => {
         memoryLimitBytes: 1024,
         diskPath: '/memory-only',
       });
+      await memoryOnlyCache.initialize();
 
       // ACT & ASSERT
       expect(memoryOnlyCache.isHealthy()).toBe(true);
@@ -659,6 +663,7 @@ describe('HybridLRUCache - COVERAGE OPTIMIZED', () => {
         diskPath: '/isolated-test',
         lockTimeoutMs: 1000,
       });
+      await isolatedCache.initialize();
 
       const corruptedKey = 'isolated-corrupted-key';
       (isolatedCache as any).disk.set(corruptedKey, '/isolated-test/corrupted');
@@ -814,6 +819,7 @@ describe('HybridLRUCache - Performance Critical Paths', () => {
       memoryLimitBytes: 10240,
       diskPath: '/perf-test',
     });
+    await cache.initialize();
 
     // ACT
     const start = performance.now();
@@ -841,6 +847,7 @@ describe('HybridLRUCache - Coverage Edge Cases', () => {
       lockTimeoutMs: 1000,
       redisConfig: { host: 'localhost', port: 6379 },
     });
+    await cache.initialize();
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
 
@@ -890,16 +897,15 @@ describe('HybridLRUCache - Coverage Edge Cases', () => {
     // ARRANGE
     ctx.mockFs.mkdir.mockRejectedValueOnce(new Error('Disk init failed'));
 
-    // ACT & ASSERT - Constructor should not throw, but log error
-    expect(
-      () =>
-        new HybridLRUCache<string>({
-          maxEntries: 3,
-          memoryLimitBytes: 300,
-          diskPath: '/invalid-path',
-        })
-    ).not.toThrow();
+    // ACT & ASSERT - Constructor should not throw, but initialize should handle errors gracefully
+    const cache = new HybridLRUCache<string>({
+      maxEntries: 3,
+      memoryLimitBytes: 300,
+      diskPath: '/invalid-path',
+    });
 
+    // The initialization error should be logged when initialize() is called
+    await cache.initialize();
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(global.mockLogger.error).toHaveBeenCalledWith(
@@ -918,6 +924,7 @@ describe('HybridLRUCache - Coverage Edge Cases', () => {
       memoryLimitBytes: 300,
       diskPath: '/test-validation',
     });
+    await testCache.initialize();
 
     // Wait for cache to initialize
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -1176,6 +1183,7 @@ describe('HybridLRUCache - Coverage Edge Cases', () => {
       memoryLimitBytes: 300,
       diskPath: '/test-prod-cache',
     });
+    await prodCache.initialize();
 
     await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -1234,6 +1242,7 @@ describe('HybridLRUCache - Coverage Edge Cases', () => {
       memoryLimitBytes: 300,
       diskPath: '/test-no-redis',
     });
+    await cacheWithoutRedis.initialize();
 
     // ACT
     await cacheWithoutRedis.set('test-key', 'test-value');
@@ -1276,6 +1285,7 @@ describe('HybridLRUCache - Coverage Gap Tests', () => {
       lockTimeoutMs: 1000,
       redisConfig: { host: 'localhost', port: 6379 },
     });
+    await cache.initialize();
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
 

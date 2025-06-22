@@ -18,6 +18,7 @@ const mockHybridCache = {
   quit: vi.fn(),
   getStats: vi.fn(),
   emergencyEvict: vi.fn(),
+  initialize: vi.fn().mockResolvedValue(undefined),
 };
 
 vi.mock('ioredis', () => ({

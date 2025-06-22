@@ -75,7 +75,7 @@ function initRedis(): void {
 /**
  * NEW: Initialize HybridLRUCache
  */
-function initHybridCache(): void {
+async function initHybridCache(): Promise<void> {
   try {
     if (!hybridCacheConfig.enableRedis && !hybridCacheConfig.enableDisk) {
       logger.warn(
@@ -95,6 +95,7 @@ function initHybridCache(): void {
     };
 
     hybridCache = new HybridLRUCache<string>(options);
+    await hybridCache.initialize();
     hybridCacheHealthy = true;
 
     logger.info('HybridLRUCache initialized', {
@@ -115,7 +116,7 @@ function initHybridCache(): void {
 
 // Initialize both cache systems
 initRedis();
-initHybridCache();
+void initHybridCache();
 
 /**
  * Cache interface that maintains backward compatibility
@@ -450,7 +451,19 @@ const cache = {
     switch (backend) {
       case 'hybrid':
         if (!hybridCache) {
-          initHybridCache();
+          await initHybridCache();
+        }
+        // For testing/debugging: if initHybridCache didn't create a cache due to config,
+        // but we're explicitly switching to hybrid, create a minimal cache
+        if (!hybridCache) {
+          const minimalOptions = {
+            maxEntries: 100,
+            memoryLimitBytes: 1024 * 1024, // 1MB
+            diskPath: '/tmp/test-cache',
+            lockTimeoutMs: 1000,
+          };
+          hybridCache = new HybridLRUCache<string>(minimalOptions);
+          await hybridCache.initialize();
         }
         hybridCacheHealthy = true;
         redisHealthy = false;

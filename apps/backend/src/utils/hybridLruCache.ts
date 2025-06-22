@@ -68,12 +68,24 @@ export class HybridLRUCache<V> {
   private disk = new Map<string, string>();
   private lockTimeoutMs: number;
   private serializationPool: SerializationPool;
+  private isInitialized = false;
 
   constructor(private options: HybridLRUCacheOptions) {
     this.lockTimeoutMs = options.lockTimeoutMs || 120000;
     this.serializationPool = new SerializationPool();
     this.initRedis(options.redisConfig);
-    void this.initializeDiskCache();
+  }
+
+  /**
+   * Initialize the cache asynchronously. Must be called after construction.
+   * This method is separated from the constructor to avoid async operations in constructors.
+   */
+  public async initialize(): Promise<void> {
+    if (this.isInitialized) {
+      return;
+    }
+    await this.initializeDiskCache();
+    this.isInitialized = true;
   }
 
   private initRedis(redisConfig?: RedisOptions): void {

@@ -336,6 +336,18 @@ export class RepositoryCacheManager {
   }
 
   /**
+   * Initialize all cache tiers asynchronously.
+   * This method must be called after construction to complete initialization.
+   */
+  public async initialize(): Promise<void> {
+    await Promise.all([
+      this.rawCommitsCache.initialize(),
+      this.filteredCommitsCache.initialize(),
+      this.aggregatedDataCache.initialize(),
+    ]);
+  }
+
+  /**
    * Creates a new cache transaction for atomic multi-tier operations.
    *
    * Transactions ensure that cache updates across multiple tiers either all succeed
@@ -2117,6 +2129,11 @@ export class RepositoryCacheManager {
  * Provides centralized caching for all Git repository operations in the application.
  */
 export const repositoryCache = new RepositoryCacheManager();
+
+// Initialize the repository cache asynchronously
+void repositoryCache.initialize().catch((err) => {
+  logger.error('Failed to initialize repository cache', { err });
+});
 
 /**
  * High-level helper functions for easy cache integration.
