@@ -1693,7 +1693,10 @@ export class RepositoryCacheManager {
 
   /** Generates stable 8-character hash for filter option objects */
   private hashObject(obj: any): string {
-    const str = JSON.stringify(obj, Object.keys(obj).sort());
+    const str = JSON.stringify(
+      obj,
+      Object.keys(obj).sort((a, b) => a.localeCompare(b))
+    );
     // SAFE: MD5 used for cache key generation only (not security-sensitive)
     // Performance is prioritized over cryptographic strength for cache keys
     return crypto.createHash('md5').update(str).digest('hex').slice(0, 8);
