@@ -138,86 +138,22 @@ class MemoryPressureManager {
     }
 
     // Calculate fresh memory stats
-    const totalMemory = os.totalmem();
-    const freeMemory = os.freemem();
-    const usedMemory = totalMemory - freeMemory;
-    const systemUsagePercentage = usedMemory / totalMemory;
-
-    const processMemory = process.memoryUsage();
-    const processUsagePercentage = processMemory.rss / totalMemory;
-
-    // Hysteresis to prevent oscillation (2% buffer when stepping down)
-    const hysteresis = 0.02;
-
-    // Determine pressure level with hysteresis
-    let pressureLevel: 'normal' | 'warning' | 'critical' | 'emergency' =
-      'normal';
-    let action = 'none';
-
-    // Step up thresholds (no hysteresis)
-    if (systemUsagePercentage >= this.config.emergencyThreshold) {
-      pressureLevel = 'emergency';
-      action = 'emergency_eviction + throttling + circuit_breaker';
-    } else if (
-      systemUsagePercentage >= this.config.criticalThreshold ||
-      processUsagePercentage >= this.config.processCriticalThreshold
-    ) {
-      pressureLevel = 'critical';
-      action = 'throttling + circuit_breaker + gc';
-    } else if (
-      systemUsagePercentage >= this.config.warningThreshold ||
-      processUsagePercentage >= this.config.processWarningThreshold
-    ) {
-      pressureLevel = 'warning';
-      action = 'monitoring + gc';
-    }
-
-    // Apply hysteresis when stepping down to prevent oscillation
-    if (
-      this.lastPressureLevel === 'emergency' &&
-      pressureLevel === 'critical'
-    ) {
-      // Only step down from emergency if significantly below threshold
-      if (systemUsagePercentage > this.config.emergencyThreshold - hysteresis) {
-        pressureLevel = 'emergency';
-        action = 'emergency_eviction + throttling + circuit_breaker';
-      }
-    } else if (
-      this.lastPressureLevel === 'critical' &&
-      pressureLevel === 'warning'
-    ) {
-      // Only step down from critical if significantly below threshold
-      if (systemUsagePercentage > this.config.criticalThreshold - hysteresis) {
-        pressureLevel = 'critical';
-        action = 'throttling + circuit_breaker + gc';
-      }
-    } else if (
-      this.lastPressureLevel === 'warning' &&
-      pressureLevel === 'normal'
-    ) {
-      // Only step down from warning if significantly below threshold
-      if (systemUsagePercentage > this.config.warningThreshold - hysteresis) {
-        pressureLevel = 'warning';
-        action = 'monitoring + gc';
-      }
-    }
-
-    // Update last pressure level for next hysteresis calculation
-    this.lastPressureLevel = pressureLevel;
+    const memoryInfo = this.calculateMemoryInfo();
+    const pressureInfo = this.determinePressureLevel(memoryInfo);
 
     const stats: MemoryPressureStats = {
       system: {
-        totalBytes: totalMemory,
-        freeBytes: freeMemory,
-        usedBytes: usedMemory,
-        usagePercentage: systemUsagePercentage,
+        totalBytes: memoryInfo.totalMemory,
+        freeBytes: memoryInfo.freeMemory,
+        usedBytes: memoryInfo.usedMemory,
+        usagePercentage: memoryInfo.systemUsagePercentage,
       },
-      process: processMemory,
+      process: memoryInfo.processMemory,
       pressure: {
-        level: pressureLevel,
-        systemThreshold: systemUsagePercentage,
-        processThreshold: processUsagePercentage,
-        action,
+        level: pressureInfo.level,
+        systemThreshold: memoryInfo.systemUsagePercentage,
+        processThreshold: memoryInfo.processUsagePercentage,
+        action: pressureInfo.action,
       },
     };
 
@@ -231,6 +167,194 @@ class MemoryPressureManager {
     }
 
     return stats;
+  }
+
+  /**
+   * Calculate basic memory information
+   */
+  private calculateMemoryInfo() {
+    const totalMemory = os.totalmem();
+    const freeMemory = os.freemem();
+    const usedMemory = totalMemory - freeMemory;
+    const systemUsagePercentage = usedMemory / totalMemory;
+    const processMemory = process.memoryUsage();
+    const processUsagePercentage = processMemory.rss / totalMemory;
+
+    return {
+      totalMemory,
+      freeMemory,
+      usedMemory,
+      systemUsagePercentage,
+      processMemory,
+      processUsagePercentage,
+    };
+  }
+
+  /**
+   * Determine pressure level with hysteresis to prevent oscillation
+   */
+  private determinePressureLevel(memoryInfo: {
+    systemUsagePercentage: number;
+    processUsagePercentage: number;
+  }) {
+    const { systemUsagePercentage, processUsagePercentage } = memoryInfo;
+
+    // Determine base pressure level (step up thresholds with no hysteresis)
+    const basePressure = this.getBasePressureLevel(
+      systemUsagePercentage,
+      processUsagePercentage
+    );
+
+    // Apply hysteresis when stepping down to prevent oscillation
+    const finalPressure = this.applyHysteresis(
+      basePressure,
+      systemUsagePercentage
+    );
+
+    // Update last pressure level for next hysteresis calculation
+    this.lastPressureLevel = finalPressure.level;
+
+    return finalPressure;
+  }
+
+  /**
+   * Get base pressure level without hysteresis
+   */
+  private getBasePressureLevel(
+    systemUsagePercentage: number,
+    processUsagePercentage: number
+  ) {
+    if (systemUsagePercentage >= this.config.emergencyThreshold) {
+      return {
+        level: 'emergency' as const,
+        action: 'emergency_eviction + throttling + circuit_breaker',
+      };
+    }
+
+    if (
+      systemUsagePercentage >= this.config.criticalThreshold ||
+      processUsagePercentage >= this.config.processCriticalThreshold
+    ) {
+      return {
+        level: 'critical' as const,
+        action: 'throttling + circuit_breaker + gc',
+      };
+    }
+
+    if (
+      systemUsagePercentage >= this.config.warningThreshold ||
+      processUsagePercentage >= this.config.processWarningThreshold
+    ) {
+      return {
+        level: 'warning' as const,
+        action: 'monitoring + gc',
+      };
+    }
+
+    return {
+      level: 'normal' as const,
+      action: 'none',
+    };
+  }
+
+  /**
+   * Apply hysteresis to prevent pressure level oscillation
+   */
+  private applyHysteresis(
+    basePressure: {
+      level: 'normal' | 'warning' | 'critical' | 'emergency';
+      action: string;
+    },
+    systemUsagePercentage: number
+  ) {
+    const hysteresis = 0.02; // 2% buffer when stepping down
+
+    // Check if we should apply hysteresis to prevent stepping down too quickly
+    if (
+      this.shouldApplyEmergencyHysteresis(
+        basePressure,
+        systemUsagePercentage,
+        hysteresis
+      )
+    ) {
+      return {
+        level: 'emergency' as const,
+        action: 'emergency_eviction + throttling + circuit_breaker',
+      };
+    }
+
+    if (
+      this.shouldApplyCriticalHysteresis(
+        basePressure,
+        systemUsagePercentage,
+        hysteresis
+      )
+    ) {
+      return {
+        level: 'critical' as const,
+        action: 'throttling + circuit_breaker + gc',
+      };
+    }
+
+    if (
+      this.shouldApplyWarningHysteresis(
+        basePressure,
+        systemUsagePercentage,
+        hysteresis
+      )
+    ) {
+      return {
+        level: 'warning' as const,
+        action: 'monitoring + gc',
+      };
+    }
+
+    return basePressure;
+  }
+
+  /**
+   * Check if emergency hysteresis should be applied
+   */
+  private shouldApplyEmergencyHysteresis(
+    basePressure: { level: string },
+    systemUsagePercentage: number,
+    hysteresis: number
+  ): boolean {
+    return (
+      this.lastPressureLevel === 'emergency' &&
+      basePressure.level === 'critical' &&
+      systemUsagePercentage > this.config.emergencyThreshold - hysteresis
+    );
+  }
+
+  /**
+   * Check if critical hysteresis should be applied
+   */
+  private shouldApplyCriticalHysteresis(
+    basePressure: { level: string },
+    systemUsagePercentage: number,
+    hysteresis: number
+  ): boolean {
+    return (
+      this.lastPressureLevel === 'critical' &&
+      basePressure.level === 'warning' &&
+      systemUsagePercentage > this.config.criticalThreshold - hysteresis
+    );
+  }
+
+  /**
+   * Check if warning hysteresis should be applied
+   */
+  private shouldApplyWarningHysteresis(
+    basePressure: { level: string },
+    systemUsagePercentage: number,
+    hysteresis: number
+  ): boolean {
+    return (
+      this.lastPressureLevel === 'warning' &&
+      basePressure.level === 'normal' &&
+      systemUsagePercentage > this.config.warningThreshold - hysteresis
+    );
   }
 
   /**
