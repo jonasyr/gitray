@@ -80,7 +80,7 @@ export const config = {
 
     // Path for on-disk cache storage
     diskPath:
-      process.env.CACHE_ONDISK_PATH || path.join(os.tmpdir(), 'gitray-cache'),
+      process.env.CACHE_ONDISK_PATH ?? path.join(os.tmpdir(), 'gitray-cache'),
 
     // Lock timeout in milliseconds for concurrent operations
     lockTimeoutMs: parseEnvNumber(process.env.CACHE_LOCK_TIMEOUT_MS, 120000),
@@ -101,11 +101,11 @@ export const config = {
 
     // Redis-specific options for hybrid cache
     redisConfig: {
-      host: process.env.REDIS_HOST || 'localhost',
+      host: process.env.REDIS_HOST ?? 'localhost',
       port: parseEnvNumber(process.env.REDIS_PORT, 6379),
       password: process.env.REDIS_PASSWORD,
       db: parseEnvNumber(process.env.REDIS_CACHE_DB, 1), // Separate DB for cache
-      keyPrefix: process.env.CACHE_REDIS_PREFIX || 'gitray:cache:',
+      keyPrefix: process.env.CACHE_REDIS_PREFIX ?? 'gitray:cache:',
       maxRetriesPerRequest: 1,
       enableOfflineQueue: false,
       connectTimeout: parseEnvNumber(process.env.REDIS_CONNECT_TIMEOUT, 10000),
@@ -118,7 +118,7 @@ export const config = {
    */
   locks: {
     // Directory for file-based locks
-    lockDir: process.env.LOCK_DIR || path.join(os.tmpdir(), 'gitray-locks'),
+    lockDir: process.env.LOCK_DIR ?? path.join(os.tmpdir(), 'gitray-locks'),
 
     // Default timeout for lock acquisition
     defaultTimeoutMs: parseEnvNumber(process.env.CACHE_LOCK_TIMEOUT_MS, 120000),
@@ -167,7 +167,7 @@ export const config = {
     enableLockLogging: parseEnvBoolean(process.env.DEBUG_LOCK_LOGGING, false),
 
     // Log level for the application
-    logLevel: process.env.LOG_LEVEL || 'info',
+    logLevel: process.env.LOG_LEVEL ?? 'info',
 
     // Enable metrics collection
     enableMetrics: parseEnvBoolean(process.env.ENABLE_METRICS, true),

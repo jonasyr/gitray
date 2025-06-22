@@ -765,7 +765,7 @@ export class RepositoryCacheManager {
     if (originalValue !== null) {
       const rollbackOp: RollbackOperation = {
         execute: async () => {
-          await cache.set(key, originalValue as T, 'EX', originalTtl || 3600);
+          await cache.set(key, originalValue as T, 'EX', originalTtl ?? 3600);
         },
         verify: async () => {
           try {
@@ -1140,7 +1140,7 @@ export class RepositoryCacheManager {
 
         logger.debug('Filtered commits cached with transaction', {
           repoUrl,
-          originalCount: rawCommits?.length || 0,
+          originalCount: rawCommits?.length ?? 0,
           filteredCount: filteredCommits.length,
           filters: options,
           ttl,
@@ -1316,7 +1316,7 @@ export class RepositoryCacheManager {
           repoUrl,
           filters: filterOptions,
           dataPoints: aggregatedData.data.length,
-          totalCommits: aggregatedData.metadata?.totalCommits || 0,
+          totalCommits: aggregatedData.metadata?.totalCommits ?? 0,
           ttl,
           transactionId: transaction.id,
         });
@@ -1392,7 +1392,7 @@ export class RepositoryCacheManager {
           repoUrl,
           reason: 'repository_update',
           keysCount: (
-            this.cacheKeyPatterns.get(this.hashUrl(repoUrl)) || new Set()
+            this.cacheKeyPatterns.get(this.hashUrl(repoUrl)) ?? new Set()
           ).size,
         });
       } catch (err) {
@@ -1416,7 +1416,7 @@ export class RepositoryCacheManager {
       });
 
       const repoHash = this.hashUrl(repoUrl);
-      const keysToInvalidate = this.cacheKeyPatterns.get(repoHash) || new Set();
+      const keysToInvalidate = this.cacheKeyPatterns.get(repoHash) ?? new Set();
 
       const operations: Promise<void>[] = [];
 
@@ -1664,7 +1664,7 @@ export class RepositoryCacheManager {
     repoUrl: string,
     filterOptions?: CommitFilterOptions
   ): string {
-    const filterHash = this.hashObject(filterOptions || {});
+    const filterHash = this.hashObject(filterOptions ?? {});
     const key = `aggregated_data:${this.hashUrl(repoUrl)}:${filterHash}`;
     this.trackCacheKey(key);
     return key;
@@ -2057,7 +2057,7 @@ export class RepositoryCacheManager {
 
       logger.debug('Filtered commits cached with transaction', {
         repoUrl,
-        originalCount: rawCommits?.length || 0,
+        originalCount: rawCommits?.length ?? 0,
         filteredCount: filteredCommits.length,
         filters: options,
         ttl,

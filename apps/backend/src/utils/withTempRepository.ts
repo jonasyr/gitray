@@ -69,7 +69,7 @@ export async function withTempRepository<T>(
     return withTempRepositoryLegacy(repoUrl, callback, options);
   }
 
-  const operationType = options?.operationType || 'generic';
+  const operationType = options?.operationType ?? 'generic';
   const allowCoalescing = options?.allowCoalescing ?? true;
   const streamingConfig = getStreamingConfig();
   const shouldCollectMetrics = !options?.skipMetrics && streamingConfig.enabled;
@@ -181,7 +181,7 @@ export async function withTempRepositoryStreaming<T>(
     return withTempRepositoryStreamingLegacy(repoUrl, callback, options);
   }
 
-  const operationType = options?.operationType || 'streaming';
+  const operationType = options?.operationType ?? 'streaming';
   const streamingConfig = getStreamingConfig();
   const shouldCollectMetrics = !options?.skipMetrics && streamingConfig.enabled;
   const operationStartTime = Date.now();
@@ -230,7 +230,7 @@ export async function withTempRepositoryStreaming<T>(
               repositoryCommitCount,
               Math.ceil(
                 repositoryCommitCount /
-                  (options?.streamingOptions?.batchSize ||
+                  (options?.streamingOptions?.batchSize ??
                     config.streaming.batchSize)
               ),
               0.7, // Even higher cache hit rate expected for coordinated streaming
@@ -474,7 +474,7 @@ async function withTempRepositoryStreamingLegacy<T>(
       // Get commit count for metrics and callback
       try {
         repositoryCommitCount =
-          options?.estimatedCommits ||
+          options?.estimatedCommits ??
           (await gitService.getCommitCount(tempDir));
 
         if (

@@ -186,7 +186,7 @@ class GitService {
     const localGit: SimpleGit = simpleGit(localRepoPath);
     const metrics: StreamingMetrics = {
       totalCommits: 0,
-      processedCommits: options.resumeState?.processedCount || 0,
+      processedCommits: options.resumeState?.processedCount ?? 0,
       batchesProcessed: 0,
       averageBatchTime: 0,
       memoryUsageMB: 0,
@@ -201,9 +201,9 @@ class GitService {
       // Record streaming start
       recordStreamingStart(metrics.totalCommits);
 
-      let currentSkip = options.resumeState?.processedCount || 0;
-      const batchSize = options.batchSize || config.streaming.batchSize;
-      const maxCommits = options.maxCommits || metrics.totalCommits;
+      let currentSkip = options.resumeState?.processedCount ?? 0;
+      const batchSize = options.batchSize ?? config.streaming.batchSize;
+      const maxCommits = options.maxCommits ?? metrics.totalCommits;
 
       logger.info(`Memory-aware streaming configuration`, {
         totalCommits: metrics.totalCommits,
