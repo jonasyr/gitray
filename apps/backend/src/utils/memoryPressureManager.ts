@@ -247,7 +247,7 @@ class MemoryPressureManager {
   ): Promise<T> {
     const stats = this.getMemoryStats();
     const skipBreaker = options?.skipCircuitBreaker || false;
-    const priority = options?.priority || 'normal';
+    const priority = options?.priority ?? 'normal';
 
     // Circuit breaker logic (with caching for performance)
     if (!skipBreaker && this.config.enableCircuitBreaker) {
@@ -325,7 +325,7 @@ class MemoryPressureManager {
     }
 
     const stats = this.getMemoryStats();
-    const priority = requestInfo.priority || 'normal';
+    const priority = requestInfo.priority ?? 'normal';
 
     // Emergency: Block all low priority requests
     if (stats.pressure.level === 'emergency') {

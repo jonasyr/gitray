@@ -20,7 +20,7 @@ collectDefaultMetrics({ register });
 export function getUserType(req: Request): 'api' | 'ui' | 'admin' | 'unknown' {
   if (!req || !req.headers) return 'unknown';
 
-  const userAgent = req.headers['user-agent']?.toLowerCase() || '';
+  const userAgent = req.headers['user-agent']?.toLowerCase() ?? '';
   const apiKey = req.headers['x-api-key'];
   const authHeader = req.headers.authorization;
 
@@ -878,10 +878,10 @@ export function recordDetailedError(
   detailedErrors.inc({
     component,
     error_category: errorCategory,
-    error_severity: context.severity || 'warning',
-    user_impact: context.userImpact || 'degraded',
-    recovery_action: context.recoveryAction || 'retry',
-    repo_type: context.repoType || 'unknown',
+    error_severity: context.severity ?? 'warning',
+    user_impact: context.userImpact ?? 'degraded',
+    recovery_action: context.recoveryAction ?? 'retry',
+    repo_type: context.repoType ?? 'unknown',
     tenant_id: 'default', // Could be enhanced for multi-tenant
   });
 }
@@ -1320,17 +1320,17 @@ export const metricsMiddleware = (
 
   res.on('finish', () => {
     const duration = (Date.now() - start) / 1000;
-    const route = req.route?.path || req.path || 'unknown';
+    const route = req.route?.path ?? req.path ?? 'unknown';
     const userType = getUserType(req);
     const cacheStatus =
-      (res.getHeader && (res.getHeader('X-Cache-Status') as string)) ||
+      (res.getHeader && (res.getHeader('X-Cache-Status') as string)) ??
       'unknown';
 
     // Enhanced HTTP metrics with additional context
     httpRequestsTotal.inc({
-      method: req.method || 'UNKNOWN',
+      method: req.method ?? 'UNKNOWN',
       route,
-      status_code: res.statusCode || 500,
+      status_code: res.statusCode ?? 500,
       user_type: userType,
       cache_status: cacheStatus,
     });
@@ -1340,9 +1340,9 @@ export const metricsMiddleware = (
       duration < 2 ? 'met' : duration < 5 ? 'degraded' : 'violated';
     httpRequestDuration.observe(
       {
-        method: req.method || 'UNKNOWN',
+        method: req.method ?? 'UNKNOWN',
         route,
-        status_code: res.statusCode || 500,
+        status_code: res.statusCode ?? 500,
         user_type: userType,
         sla_tier: slaStatus,
       },
@@ -1354,7 +1354,7 @@ export const metricsMiddleware = (
 
     // Update service health score
     updateServiceHealthScore('api', {
-      errorRate: (res.statusCode || 500) >= 400 ? 1 : 0,
+      errorRate: (res.statusCode ?? 500) >= 400 ? 1 : 0,
       responseTime: duration,
     });
   });

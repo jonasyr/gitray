@@ -530,7 +530,7 @@ export function handleServerError(error: NodeJS.ErrnoException) {
       solution: `Check your network configuration and DNS settings`,
     });
   } else {
-    logger.error(`❌ SERVER STARTUP ERROR: ${error.code || 'Unknown error'}`, {
+    logger.error(`❌ SERVER STARTUP ERROR: ${error.code ?? 'Unknown error'}`, {
       error: error.message,
       stack: error.stack,
       solution: `Check the error details above and server configuration`,

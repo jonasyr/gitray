@@ -46,7 +46,7 @@ const errorHandler: ErrorRequestHandler = (
   });
 
   // Record failed feature usage
-  const feature = req.path.split('/')[2] || 'unknown'; // Extract feature from path
+  const feature = req.path.split('/')[2] ?? 'unknown'; // Extract feature from path
   recordFeatureUsage(feature, userType, false, 'api_call');
 
   if (err instanceof GitrayError) {

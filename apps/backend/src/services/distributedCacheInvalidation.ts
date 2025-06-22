@@ -335,11 +335,9 @@ let distributedCacheInvalidation: DistributedCacheInvalidation | null = null;
 export function getDistributedCacheInvalidation(
   redisConfig?: any
 ): DistributedCacheInvalidation {
-  if (!distributedCacheInvalidation) {
-    distributedCacheInvalidation = new DistributedCacheInvalidation(
-      redisConfig
-    );
-  }
+  distributedCacheInvalidation ??= new DistributedCacheInvalidation(
+    redisConfig
+  );
   return distributedCacheInvalidation;
 }
 

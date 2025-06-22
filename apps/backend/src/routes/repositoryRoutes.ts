@@ -100,11 +100,9 @@ router.post(
         );
       }
 
-      if (!commits) {
-        commits = await withTempRepository(repoUrl, (tempDir) =>
-          gitService.getCommits(tempDir)
-        );
-      }
+      commits ??= await withTempRepository(repoUrl, (tempDir) =>
+        gitService.getCommits(tempDir)
+      );
 
       // Record cache miss and successful operation
       recordEnhancedCacheOperation(
@@ -180,15 +178,13 @@ router.post(
         );
       }
 
-      if (!heatmapData) {
-        heatmapData = await withTempRepository(repoUrl, async (tempDir) => {
-          const commits = await gitService.getCommits(tempDir);
-          return gitService.aggregateCommitsByTime(
-            commits,
-            filterOptions as CommitFilterOptions
-          );
-        });
-      }
+      heatmapData ??= await withTempRepository(repoUrl, async (tempDir) => {
+        const commits = await gitService.getCommits(tempDir);
+        return gitService.aggregateCommitsByTime(
+          commits,
+          filterOptions as CommitFilterOptions
+        );
+      });
 
       // Record cache miss and successful operation
       recordEnhancedCacheOperation('heatmap', false, req, repoUrl);
