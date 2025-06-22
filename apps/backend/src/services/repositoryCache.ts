@@ -425,7 +425,9 @@ export class RepositoryCacheManager {
 
     try {
       // Execute rollback operations in reverse order to maintain consistency
-      for (const rollbackOp of transaction.rollbackOperations.reverse()) {
+      const reversedRollbackOperations =
+        transaction.rollbackOperations.reverse();
+      for (const rollbackOp of reversedRollbackOperations) {
         let attempts = 0;
         let operationSucceeded = false;
         const operationStartTime = Date.now();
