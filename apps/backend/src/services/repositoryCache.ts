@@ -797,9 +797,9 @@ export class RepositoryCacheManager {
    */
   private trackCacheKey(key: string): void {
     // Extract repository URL hash from standardized key pattern
-    const match = key.match(
-      /^(?:raw_commits|filtered_commits|aggregated_data):([a-f0-9]+)/
-    );
+    const regex =
+      /^(?:raw_commits|filtered_commits|aggregated_data):([a-f0-9]+)/;
+    const match = regex.exec(key);
     if (match) {
       const repoHash = match[1];
       if (!this.cacheKeyPatterns.has(repoHash)) {

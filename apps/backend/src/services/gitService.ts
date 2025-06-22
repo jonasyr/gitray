@@ -331,14 +331,14 @@ class GitService {
           recordStreamingBatch(
             batch.length,
             batchTime,
-            cached ? true : false,
+            !!cached,
             metrics.totalCommits
           );
 
           // Record enhanced cache operation
           recordEnhancedCacheOperation(
             'batch_cache',
-            cached ? true : false,
+            !!cached,
             undefined,
             localRepoPath,
             metrics.totalCommits
