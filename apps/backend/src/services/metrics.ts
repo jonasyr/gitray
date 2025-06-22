@@ -1336,7 +1336,7 @@ export const metricsMiddleware = (
 
   res.on('finish', () => {
     const duration = (Date.now() - start) / 1000;
-    const route = req.route?.path ?? req.path ?? 'unknown';
+    const route = req.route?.path || req.path || 'unknown';
     const userType = getUserType(req);
     const cacheStatus =
       (res.getHeader && (res.getHeader('X-Cache-Status') as string)) ??
@@ -1352,8 +1352,14 @@ export const metricsMiddleware = (
     });
 
     // Enhanced duration tracking with SLA context
-    const slaStatus =
-      duration < 2 ? 'met' : duration < 5 ? 'degraded' : 'violated';
+    let slaStatus: 'met' | 'degraded' | 'violated';
+    if (duration < 2) {
+      slaStatus = 'met';
+    } else if (duration < 5) {
+      slaStatus = 'degraded';
+    } else {
+      slaStatus = 'violated';
+    }
     httpRequestDuration.observe(
       {
         method: req.method ?? 'UNKNOWN',
@@ -1413,14 +1419,16 @@ export const updateEnhancedCacheMetrics = async () => {
 
     // Update cache access patterns (placeholder - would be enhanced with real pattern detection)
     const currentHour = new Date().getHours();
-    const timeOfDay =
-      currentHour < 6
-        ? 'night'
-        : currentHour < 12
-          ? 'morning'
-          : currentHour < 18
-            ? 'afternoon'
-            : 'evening';
+    let timeOfDay: string;
+    if (currentHour < 6) {
+      timeOfDay = 'night';
+    } else if (currentHour < 12) {
+      timeOfDay = 'morning';
+    } else if (currentHour < 18) {
+      timeOfDay = 'afternoon';
+    } else {
+      timeOfDay = 'evening';
+    }
 
     cacheAccessPatterns.observe(
       {
@@ -1457,15 +1465,19 @@ export const updateCoordinationMetrics = async () => {
     const maxRepos = 50; // From config
     const utilizationPercentage = (metrics.cachedRepositories / maxRepos) * 100;
 
+    let thresholdLevel: 'critical' | 'warning' | 'normal';
+    if (utilizationPercentage > 90) {
+      thresholdLevel = 'critical';
+    } else if (utilizationPercentage > 75) {
+      thresholdLevel = 'warning';
+    } else {
+      thresholdLevel = 'normal';
+    }
+
     capacityWarnings.set(
       {
         resource_type: 'repository_cache',
-        threshold_level:
-          utilizationPercentage > 90
-            ? 'critical'
-            : utilizationPercentage > 75
-              ? 'warning'
-              : 'normal',
+        threshold_level: thresholdLevel,
         component: 'coordinator',
         trend: 'stable', // Would be calculated from historical data
       },
