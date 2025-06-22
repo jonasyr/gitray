@@ -1648,9 +1648,9 @@ export const updateAllEnhancedMetrics = async () => {
     updateCacheMetrics(), // Existing function
     updateEnhancedCacheMetrics(),
     updateCoordinationMetrics(),
-    updateSystemResourceMetrics(),
   ]);
 
-  // Update memory pressure metrics synchronously since it doesn't return a Promise
+  // Update synchronous metrics functions that don't return Promises
+  updateSystemResourceMetrics();
   updateMemoryPressureMetrics();
 };
