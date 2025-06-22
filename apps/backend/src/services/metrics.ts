@@ -1547,59 +1547,55 @@ export const updateSystemResourceMetrics = () => {
  * Update memory pressure metrics from memory pressure manager
  */
 export function updateMemoryPressureMetrics(): void {
-  try {
-    // Use dynamic import to avoid circular dependencies
-    import('../utils/memoryPressureManager')
-      .then((memoryPressureManager) => {
-        const stats = memoryPressureManager.getMemoryStats();
-        const metrics = memoryPressureManager.getMemoryMetrics();
+  // Use dynamic import to avoid circular dependencies
+  import('../utils/memoryPressureManager')
+    .then((memoryPressureManager) => {
+      const stats = memoryPressureManager.getMemoryStats();
+      const metrics = memoryPressureManager.getMemoryMetrics();
 
-        // Update pressure level gauge
-        const levelMap: Record<string, number> = {
-          normal: 0,
-          warning: 1,
-          critical: 2,
-          emergency: 3,
-        };
-        memoryPressureLevel.set(levelMap[stats.pressure.level] || 0);
+      // Update pressure level gauge
+      const levelMap: Record<string, number> = {
+        normal: 0,
+        warning: 1,
+        critical: 2,
+        emergency: 3,
+      };
+      memoryPressureLevel.set(levelMap[stats.pressure.level] || 0);
 
-        // Update system memory usage
-        systemMemoryUsage.set(stats.system.usagePercentage * 100);
+      // Update system memory usage
+      systemMemoryUsage.set(stats.system.usagePercentage * 100);
 
-        // Update process memory usage
-        processMemoryUsage.set({ type: 'heap_used' }, stats.process.heapUsed);
-        processMemoryUsage.set({ type: 'heap_total' }, stats.process.heapTotal);
-        processMemoryUsage.set({ type: 'rss' }, stats.process.rss);
-        processMemoryUsage.set({ type: 'external' }, stats.process.external);
+      // Update process memory usage
+      processMemoryUsage.set({ type: 'heap_used' }, stats.process.heapUsed);
+      processMemoryUsage.set({ type: 'heap_total' }, stats.process.heapTotal);
+      processMemoryUsage.set({ type: 'rss' }, stats.process.rss);
+      processMemoryUsage.set({ type: 'external' }, stats.process.external);
 
-        // Update metrics counters using the metrics variable
-        memoryPressureEvents.inc({ level: 'warning' }, metrics.pressureEvents);
-        throttledRequests.inc(
-          { reason: 'memory_pressure' },
-          metrics.throttledRequests
-        );
-        emergencyEvictions.inc(metrics.emergencyEvictions);
-        gcTriggered.inc(metrics.gcTriggered);
-        processMemoryUsage.set({ type: 'heap_used' }, stats.process.heapUsed);
-        processMemoryUsage.set({ type: 'heap_total' }, stats.process.heapTotal);
-        processMemoryUsage.set({ type: 'rss' }, stats.process.rss);
-        processMemoryUsage.set({ type: 'external' }, stats.process.external);
+      // Update metrics counters using the metrics variable
+      memoryPressureEvents.inc({ level: 'warning' }, metrics.pressureEvents);
+      throttledRequests.inc(
+        { reason: 'memory_pressure' },
+        metrics.throttledRequests
+      );
+      emergencyEvictions.inc(metrics.emergencyEvictions);
+      gcTriggered.inc(metrics.gcTriggered);
+      processMemoryUsage.set({ type: 'heap_used' }, stats.process.heapUsed);
+      processMemoryUsage.set({ type: 'heap_total' }, stats.process.heapTotal);
+      processMemoryUsage.set({ type: 'rss' }, stats.process.rss);
+      processMemoryUsage.set({ type: 'external' }, stats.process.external);
 
-        // Update circuit breaker state
-        const cbStateMap: Record<string, number> = {
-          normal: 0,
-          warning: 0,
-          critical: 1,
-          emergency: 2,
-        };
-        memoryCircuitBreakerState.set(cbStateMap[stats.pressure.level] || 0);
-      })
-      .catch((error) => {
-        console.warn('Failed to import memory pressure manager', { error });
-      });
-  } catch (error) {
-    console.warn('Failed to update memory pressure metrics', { error });
-  }
+      // Update circuit breaker state
+      const cbStateMap: Record<string, number> = {
+        normal: 0,
+        warning: 0,
+        critical: 1,
+        emergency: 2,
+      };
+      memoryCircuitBreakerState.set(cbStateMap[stats.pressure.level] || 0);
+    })
+    .catch((error) => {
+      console.warn('Failed to update memory pressure metrics', { error });
+    });
 }
 
 /**
