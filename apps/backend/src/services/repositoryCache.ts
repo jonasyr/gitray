@@ -1827,7 +1827,29 @@ export class RepositoryCacheManager {
 
     let filtered = commits;
 
-    // Apply author-based filtering (supports both name and email matching)
+    // Apply filters in sequence
+    filtered = this.applyAuthorFilters(filtered, options);
+    filtered = this.applyDateRangeFilters(filtered, options);
+    filtered = this.applyPaginationFilters(filtered, options);
+
+    return filtered;
+  }
+
+  /**
+   * Applies author-based filtering to commits.
+   * Supports both single author and multiple authors filtering.
+   *
+   * @param commits - Commits to filter
+   * @param options - Filter options containing author criteria
+   * @returns Filtered commits array
+   */
+  private applyAuthorFilters(
+    commits: Commit[],
+    options?: CommitCacheOptions
+  ): Commit[] {
+    let filtered = commits;
+
+    // Apply single author filter (name or email matching)
     if (options?.author) {
       filtered = filtered.filter(
         (c) =>
@@ -1836,6 +1858,7 @@ export class RepositoryCacheManager {
       );
     }
 
+    // Apply multiple authors filter
     if (options?.authors?.length) {
       filtered = filtered.filter((c) =>
         options.authors!.some(
@@ -1845,43 +1868,92 @@ export class RepositoryCacheManager {
       );
     }
 
-    // Apply date range filtering with robust date parsing
+    return filtered;
+  }
+
+  /**
+   * Applies date range filtering to commits.
+   * Handles both fromDate and toDate with robust date parsing.
+   *
+   * @param commits - Commits to filter
+   * @param options - Filter options containing date criteria
+   * @returns Filtered commits array
+   */
+  private applyDateRangeFilters(
+    commits: Commit[],
+    options?: CommitCacheOptions
+  ): Commit[] {
+    let filtered = commits;
+
+    // Apply fromDate filter
     if (options?.fromDate) {
-      try {
-        const fromDate = new Date(options.fromDate);
-        if (!isNaN(fromDate.getTime())) {
-          filtered = filtered.filter((c) => new Date(c.date) >= fromDate);
-        }
-      } catch {
-        logger.warn('Invalid fromDate filter, ignoring', {
-          fromDate: options.fromDate,
-        });
+      const fromDate = this.parseFilterDate(options.fromDate, 'fromDate');
+      if (fromDate) {
+        filtered = filtered.filter((c) => new Date(c.date) >= fromDate);
       }
     }
 
+    // Apply toDate filter
     if (options?.toDate) {
-      try {
-        const toDate = new Date(options.toDate);
-        if (!isNaN(toDate.getTime())) {
-          filtered = filtered.filter((c) => new Date(c.date) <= toDate);
-        }
-      } catch {
-        logger.warn('Invalid toDate filter, ignoring', {
-          toDate: options.toDate,
-        });
+      const toDate = this.parseFilterDate(options.toDate, 'toDate');
+      if (toDate) {
+        filtered = filtered.filter((c) => new Date(c.date) <= toDate);
       }
     }
 
-    // Apply pagination controls
+    return filtered;
+  }
+
+  /**
+   * Applies pagination filters (skip and limit) to commits.
+   *
+   * @param commits - Commits to paginate
+   * @param options - Filter options containing pagination criteria
+   * @returns Paginated commits array
+   */
+  private applyPaginationFilters(
+    commits: Commit[],
+    options?: CommitCacheOptions
+  ): Commit[] {
+    let filtered = commits;
+
+    // Apply skip (offset) pagination
     if (options?.skip !== undefined) {
       filtered = filtered.slice(options.skip);
     }
 
+    // Apply limit pagination
     if (options?.limit !== undefined) {
       filtered = filtered.slice(0, options.limit);
     }
 
     return filtered;
+  }
+
+  /**
+   * Parses and validates a date string for filtering.
+   * Returns null if the date is invalid, with appropriate logging.
+   *
+   * @param dateString - Date string to parse
+   * @param filterType - Type of filter for logging purposes
+   * @returns Parsed Date object or null if invalid
+   */
+  private parseFilterDate(dateString: string, filterType: string): Date | null {
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        logger.warn(`Invalid ${filterType} filter, ignoring`, {
+          [filterType]: dateString,
+        });
+        return null;
+      }
+      return date;
+    } catch {
+      logger.warn(`Invalid ${filterType} filter, ignoring`, {
+        [filterType]: dateString,
+      });
+      return null;
+    }
   }
 
   /** Calculates cache hit ratio for performance monitoring */
