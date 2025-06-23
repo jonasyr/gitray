@@ -353,271 +353,375 @@ export const config = {
 };
 
 /**
- * ENHANCED: Configuration validation with new settings
+ * Validation result interface
  */
-export function validateConfig(): void {
-  const warnings: string[] = [];
-  const errors: string[] = [];
+interface ValidationResult {
+  warnings: string[];
+  errors: string[];
+}
 
-  // Validate hybrid cache configuration
+/**
+ * Helper function to add validation error
+ */
+function addError(result: ValidationResult, message: string): void {
+  result.errors.push(message);
+}
+
+/**
+ * Helper function to add validation warning
+ */
+function addWarning(result: ValidationResult, message: string): void {
+  result.warnings.push(message);
+}
+
+/**
+ * Helper function to validate range
+ */
+function validateRange(
+  value: number,
+  min: number,
+  max: number,
+  name: string,
+  result: ValidationResult
+): void {
+  if (value < min || value > max) {
+    addError(result, `${name} must be between ${min} and ${max}`);
+  }
+}
+
+/**
+ * Helper function to validate percentage (0-100)
+ */
+function validatePercentage(
+  value: number,
+  name: string,
+  result: ValidationResult
+): void {
+  validateRange(value, 0, 100, name, result);
+}
+
+/**
+ * Validate hybrid cache configuration
+ */
+function validateHybridCache(result: ValidationResult): void {
   if (config.hybridCache.maxEntries <= 0) {
-    errors.push('CACHE_MAX_ENTRIES must be greater than 0');
+    addError(result, 'CACHE_MAX_ENTRIES must be greater than 0');
   }
 
   if (config.hybridCache.memoryLimitBytes <= 0) {
-    errors.push('CACHE_MEMORY_LIMIT_GB must be greater than 0');
+    addError(result, 'CACHE_MEMORY_LIMIT_GB must be greater than 0');
   }
 
   if (config.hybridCache.lockTimeoutMs <= 0) {
-    errors.push('CACHE_LOCK_TIMEOUT_MS must be greater than 0');
-  }
-
-  // Validate Redis configuration
-  if (config.redis.port <= 0 || config.redis.port > 65535) {
-    errors.push('REDIS_PORT must be between 1 and 65535');
-  }
-
-  // Validate Git configuration
-  if (config.git.maxConcurrentProcesses <= 0) {
-    errors.push('GIT_MAX_CONCURRENT_PROCESSES must be greater than 0');
-  }
-
-  if (config.git.maxConcurrentProcesses > 20) {
-    warnings.push(
-      'GIT_MAX_CONCURRENT_PROCESSES is very high (>20), may overwhelm system resources'
-    );
-  }
-
-  if (config.git.cloneDepth <= 0) {
-    errors.push('GIT_CLONE_DEPTH must be greater than 0');
-  }
-
-  if (config.git.cloneDepth < 10) {
-    warnings.push(
-      'GIT_CLONE_DEPTH is very low (<10), may miss important commit history'
-    );
-  }
-
-  // Validate repository cache configuration
-  if (config.repositoryCache.enabled) {
-    if (config.repositoryCache.maxRepositories <= 0) {
-      errors.push('REPO_CACHE_MAX_REPOSITORIES must be greater than 0');
-    }
-
-    if (config.repositoryCache.maxAgeHours <= 0) {
-      errors.push('REPO_CACHE_MAX_AGE_HOURS must be greater than 0');
-    }
-
-    if (config.repositoryCache.diskLimitBytes < 100 * 1024 * 1024) {
-      // 100MB minimum
-      warnings.push(
-        'REPO_CACHE_DISK_LIMIT_GB is very low (<100MB), may cause frequent evictions'
-      );
-    }
-
-    if (config.repositoryCache.diskLimitBytes > 50 * 1024 ** 3) {
-      // 50GB
-      warnings.push(
-        'REPO_CACHE_DISK_LIMIT_GB is very high (>50GB), ensure sufficient disk space'
-      );
-    }
-  }
-
-  // Validate operation coordination
-  if (config.operationCoordination.enabled) {
-    if (config.operationCoordination.operationTimeoutMs < 30000) {
-      // 30 seconds minimum
-      warnings.push(
-        'REPO_OPERATION_TIMEOUT_MS is very low (<30s), may cause premature timeouts'
-      );
-    }
-
-    if (config.operationCoordination.maxConcurrentOpsPerRepo <= 0) {
-      errors.push('REPO_MAX_CONCURRENT_OPS must be greater than 0');
-    }
-  }
-
-  // Validate cache strategy
-  if (
-    config.cacheStrategy.memoryPressureThreshold <= 0 ||
-    config.cacheStrategy.memoryPressureThreshold >= 1
-  ) {
-    errors.push('CACHE_MEMORY_PRESSURE_THRESHOLD must be between 0 and 100');
-  }
-
-  if (
-    config.cacheStrategy.emergencyEvictionPercent <= 0 ||
-    config.cacheStrategy.emergencyEvictionPercent >= 1
-  ) {
-    errors.push('CACHE_EMERGENCY_EVICTION_PERCENT must be between 0 and 100');
-  }
-
-  // Performance warnings for cache strategy
-  if (config.cacheStrategy.cacheKeys.rawCommitsTTL < 300) {
-    // 5 minutes
-    warnings.push(
-      'CACHE_RAW_COMMITS_TTL_SECONDS is very low (<5min), may cause excessive recomputation'
-    );
-  }
-
-  if (config.cacheStrategy.cacheKeys.rawCommitsTTL > 86400) {
-    // 24 hours
-    warnings.push(
-      'CACHE_RAW_COMMITS_TTL_SECONDS is very high (>24h), may use excessive storage'
-    );
-  }
-
-  // Compatibility warnings
-  if (config.repositoryCache.enabled && !config.hybridCache.enableDisk) {
-    warnings.push(
-      'Repository cache is enabled but hybrid cache disk is disabled - may reduce effectiveness'
-    );
-  }
-
-  if (config.operationCoordination.enabled && !config.repositoryCache.enabled) {
-    warnings.push(
-      'Operation coordination is enabled but repository cache is disabled - limited benefits'
-    );
+    addError(result, 'CACHE_LOCK_TIMEOUT_MS must be greater than 0');
   }
 
   // Performance warnings
   if (config.hybridCache.memoryLimitBytes > 4 * 1024 ** 3) {
-    // 4GB
-    warnings.push(
+    addWarning(
+      result,
       'CACHE_MEMORY_LIMIT_GB is very high (>4GB), ensure sufficient system memory'
     );
   }
 
   if (config.hybridCache.maxEntries > 100000) {
-    warnings.push(
+    addWarning(
+      result,
       'CACHE_MAX_ENTRIES is very high (>100k), may impact performance'
     );
   }
+}
 
-  // Validate memory pressure configuration
-  if (
-    config.memoryPressure.warningThreshold <= 0 ||
-    config.memoryPressure.warningThreshold >= 1
-  ) {
-    errors.push('MEMORY_WARNING_THRESHOLD must be between 0 and 100');
+/**
+ * Validate Redis configuration
+ */
+function validateRedis(result: ValidationResult): void {
+  validateRange(config.redis.port, 1, 65535, 'REDIS_PORT', result);
+}
+
+/**
+ * Validate Git configuration
+ */
+function validateGit(result: ValidationResult): void {
+  if (config.git.maxConcurrentProcesses <= 0) {
+    addError(result, 'GIT_MAX_CONCURRENT_PROCESSES must be greater than 0');
   }
 
-  if (
-    config.memoryPressure.criticalThreshold <= 0 ||
-    config.memoryPressure.criticalThreshold >= 1
-  ) {
-    errors.push('MEMORY_CRITICAL_THRESHOLD must be between 0 and 100');
+  if (config.git.maxConcurrentProcesses > 20) {
+    addWarning(
+      result,
+      'GIT_MAX_CONCURRENT_PROCESSES is very high (>20), may overwhelm system resources'
+    );
   }
 
-  if (
-    config.memoryPressure.emergencyThreshold <= 0 ||
-    config.memoryPressure.emergencyThreshold >= 1
-  ) {
-    errors.push('MEMORY_EMERGENCY_THRESHOLD must be between 0 and 100');
+  if (config.git.cloneDepth <= 0) {
+    addError(result, 'GIT_CLONE_DEPTH must be greater than 0');
   }
 
-  if (
-    config.memoryPressure.warningThreshold >=
-    config.memoryPressure.criticalThreshold
-  ) {
-    errors.push(
+  if (config.git.cloneDepth < 10) {
+    addWarning(
+      result,
+      'GIT_CLONE_DEPTH is very low (<10), may miss important commit history'
+    );
+  }
+}
+
+/**
+ * Validate repository cache configuration
+ */
+function validateRepositoryCache(result: ValidationResult): void {
+  if (!config.repositoryCache.enabled) return;
+
+  if (config.repositoryCache.maxRepositories <= 0) {
+    addError(result, 'REPO_CACHE_MAX_REPOSITORIES must be greater than 0');
+  }
+
+  if (config.repositoryCache.maxAgeHours <= 0) {
+    addError(result, 'REPO_CACHE_MAX_AGE_HOURS must be greater than 0');
+  }
+
+  const minDiskSize = 100 * 1024 * 1024; // 100MB
+  const maxDiskSize = 50 * 1024 ** 3; // 50GB
+
+  if (config.repositoryCache.diskLimitBytes < minDiskSize) {
+    addWarning(
+      result,
+      'REPO_CACHE_DISK_LIMIT_GB is very low (<100MB), may cause frequent evictions'
+    );
+  }
+
+  if (config.repositoryCache.diskLimitBytes > maxDiskSize) {
+    addWarning(
+      result,
+      'REPO_CACHE_DISK_LIMIT_GB is very high (>50GB), ensure sufficient disk space'
+    );
+  }
+}
+
+/**
+ * Validate operation coordination configuration
+ */
+function validateOperationCoordination(result: ValidationResult): void {
+  if (!config.operationCoordination.enabled) return;
+
+  if (config.operationCoordination.operationTimeoutMs < 30000) {
+    addWarning(
+      result,
+      'REPO_OPERATION_TIMEOUT_MS is very low (<30s), may cause premature timeouts'
+    );
+  }
+
+  if (config.operationCoordination.maxConcurrentOpsPerRepo <= 0) {
+    addError(result, 'REPO_MAX_CONCURRENT_OPS must be greater than 0');
+  }
+}
+
+/**
+ * Validate cache strategy configuration
+ */
+function validateCacheStrategy(result: ValidationResult): void {
+  validatePercentage(
+    config.cacheStrategy.memoryPressureThreshold * 100,
+    'CACHE_MEMORY_PRESSURE_THRESHOLD',
+    result
+  );
+
+  validatePercentage(
+    config.cacheStrategy.emergencyEvictionPercent * 100,
+    'CACHE_EMERGENCY_EVICTION_PERCENT',
+    result
+  );
+
+  const { rawCommitsTTL } = config.cacheStrategy.cacheKeys;
+
+  if (rawCommitsTTL < 300) {
+    addWarning(
+      result,
+      'CACHE_RAW_COMMITS_TTL_SECONDS is very low (<5min), may cause excessive recomputation'
+    );
+  }
+
+  if (rawCommitsTTL > 86400) {
+    addWarning(
+      result,
+      'CACHE_RAW_COMMITS_TTL_SECONDS is very high (>24h), may use excessive storage'
+    );
+  }
+}
+
+/**
+ * Validate memory pressure configuration
+ */
+function validateMemoryPressure(result: ValidationResult): void {
+  const { warningThreshold, criticalThreshold, emergencyThreshold } =
+    config.memoryPressure;
+
+  validatePercentage(
+    warningThreshold * 100,
+    'MEMORY_WARNING_THRESHOLD',
+    result
+  );
+  validatePercentage(
+    criticalThreshold * 100,
+    'MEMORY_CRITICAL_THRESHOLD',
+    result
+  );
+  validatePercentage(
+    emergencyThreshold * 100,
+    'MEMORY_EMERGENCY_THRESHOLD',
+    result
+  );
+
+  if (warningThreshold >= criticalThreshold) {
+    addError(
+      result,
       'MEMORY_WARNING_THRESHOLD must be less than MEMORY_CRITICAL_THRESHOLD'
     );
   }
 
-  if (
-    config.memoryPressure.criticalThreshold >=
-    config.memoryPressure.emergencyThreshold
-  ) {
-    errors.push(
+  if (criticalThreshold >= emergencyThreshold) {
+    addError(
+      result,
       'MEMORY_CRITICAL_THRESHOLD must be less than MEMORY_EMERGENCY_THRESHOLD'
     );
   }
 
   if (config.memoryPressure.checkIntervalMs < 1000) {
-    warnings.push(
+    addWarning(
+      result,
       'MEMORY_CHECK_INTERVAL_MS is very low (<1s), may impact performance'
     );
   }
 
-  // Performance warnings for memory pressure
-  if (config.memoryPressure.warningThreshold > 0.9) {
-    warnings.push(
+  if (warningThreshold > 0.9) {
+    addWarning(
+      result,
       'MEMORY_WARNING_THRESHOLD is very high (>90%), may not provide enough warning time'
     );
   }
+}
 
-  // System memory availability check
+/**
+ * Validate system compatibility and performance warnings
+ */
+function validateSystemCompatibility(result: ValidationResult): void {
+  // Compatibility warnings
+  if (config.repositoryCache.enabled && !config.hybridCache.enableDisk) {
+    addWarning(
+      result,
+      'Repository cache is enabled but hybrid cache disk is disabled - may reduce effectiveness'
+    );
+  }
+
+  if (config.operationCoordination.enabled && !config.repositoryCache.enabled) {
+    addWarning(
+      result,
+      'Operation coordination is enabled but repository cache is disabled - limited benefits'
+    );
+  }
+
+  // System memory checks
   const totalMemoryGB = os.totalmem() / 1024 ** 3;
   if (totalMemoryGB < 2) {
-    warnings.push(
+    addWarning(
+      result,
       'System has less than 2GB RAM, memory pressure thresholds may need adjustment'
     );
   }
 
   if (config.hybridCache.memoryLimitBytes > os.totalmem() * 0.5) {
-    warnings.push(
+    addWarning(
+      result,
       'Cache memory limit is more than 50% of system memory, may cause memory pressure'
     );
   }
+}
 
-  // Log validation results
-  if (errors.length > 0) {
+/**
+ * Log validation results and handle errors
+ */
+function handleValidationResults(result: ValidationResult): void {
+  if (result.errors.length > 0) {
     console.error('Configuration errors found:');
-    errors.forEach((error) => console.error(`  - ${error}`));
+    result.errors.forEach((error) => console.error(`  - ${error}`));
     throw new Error('Invalid configuration detected');
   }
 
-  if (warnings.length > 0) {
+  if (result.warnings.length > 0) {
     console.warn('Configuration warnings:');
-    warnings.forEach((warning) => console.warn(`  - ${warning}`));
+    result.warnings.forEach((warning) => console.warn(`  - ${warning}`));
   }
+}
 
-  // Log current configuration in debug mode
-  if (config.debug.logLevel === 'debug') {
-    console.debug('Loaded configuration:', {
-      hybridCache: {
-        maxEntries: config.hybridCache.maxEntries,
-        memoryLimitMB: Math.round(
-          config.hybridCache.memoryLimitBytes / 1024 ** 2
-        ),
-        diskPath: config.hybridCache.diskPath,
-        lockTimeoutMs: config.hybridCache.lockTimeoutMs,
-      },
-      redis: {
-        host: config.redis.host,
-        port: config.redis.port,
-        db: config.redis.db,
-      },
-      git: {
-        maxConcurrentProcesses: config.git.maxConcurrentProcesses,
-        cloneDepth: config.git.cloneDepth,
-      },
-    });
+/**
+ * Log debug configuration information
+ */
+function logDebugConfiguration(): void {
+  if (config.debug.logLevel !== 'debug') return;
 
-    // Log current repository cache configuration in debug mode
-    console.debug('Repository cache configuration:', {
-      repositoryCache: {
-        enabled: config.repositoryCache.enabled,
-        maxRepositories: config.repositoryCache.maxRepositories,
-        maxAgeHours: config.repositoryCache.maxAgeHours,
-        diskLimitGB: Math.round(
-          config.repositoryCache.diskLimitBytes / 1024 ** 3
-        ),
-        basePath: config.repositoryCache.basePath,
-      },
-      operationCoordination: {
-        enabled: config.operationCoordination.enabled,
-        coalescingEnabled: config.operationCoordination.coalescingEnabled,
-        operationTimeoutMs: config.operationCoordination.operationTimeoutMs,
-      },
-      cacheStrategy: {
-        hierarchicalCaching: config.cacheStrategy.hierarchicalCaching,
-        memoryPressureThreshold: `${config.cacheStrategy.memoryPressureThreshold * 100}%`,
-        ttl: config.cacheStrategy.cacheKeys,
-      },
-    });
-  }
+  console.debug('Loaded configuration:', {
+    hybridCache: {
+      maxEntries: config.hybridCache.maxEntries,
+      memoryLimitMB: Math.round(
+        config.hybridCache.memoryLimitBytes / 1024 ** 2
+      ),
+      diskPath: config.hybridCache.diskPath,
+      lockTimeoutMs: config.hybridCache.lockTimeoutMs,
+    },
+    redis: {
+      host: config.redis.host,
+      port: config.redis.port,
+      db: config.redis.db,
+    },
+    git: {
+      maxConcurrentProcesses: config.git.maxConcurrentProcesses,
+      cloneDepth: config.git.cloneDepth,
+    },
+  });
+
+  console.debug('Repository cache configuration:', {
+    repositoryCache: {
+      enabled: config.repositoryCache.enabled,
+      maxRepositories: config.repositoryCache.maxRepositories,
+      maxAgeHours: config.repositoryCache.maxAgeHours,
+      diskLimitGB: Math.round(
+        config.repositoryCache.diskLimitBytes / 1024 ** 3
+      ),
+      basePath: config.repositoryCache.basePath,
+    },
+    operationCoordination: {
+      enabled: config.operationCoordination.enabled,
+      coalescingEnabled: config.operationCoordination.coalescingEnabled,
+      operationTimeoutMs: config.operationCoordination.operationTimeoutMs,
+    },
+    cacheStrategy: {
+      hierarchicalCaching: config.cacheStrategy.hierarchicalCaching,
+      memoryPressureThreshold: `${config.cacheStrategy.memoryPressureThreshold * 100}%`,
+      ttl: config.cacheStrategy.cacheKeys,
+    },
+  });
+}
+
+/**
+ * REFACTORED: Configuration validation with reduced cognitive complexity
+ * Original function split into smaller, focused validation functions
+ */
+export function validateConfig(): void {
+  const result: ValidationResult = { warnings: [], errors: [] };
+
+  // Run all validation checks
+  validateHybridCache(result);
+  validateRedis(result);
+  validateGit(result);
+  validateRepositoryCache(result);
+  validateOperationCoordination(result);
+  validateCacheStrategy(result);
+  validateMemoryPressure(result);
+  validateSystemCompatibility(result);
+
+  // Handle results and log debug info
+  handleValidationResults(result);
+  logDebugConfiguration();
 }
 
 // Export individual configurations for easy importing
