@@ -272,6 +272,149 @@ function setInMemoryCache(key: string, value: string): void {
 }
 
 /**
+ * Eviction result interface
+ */
+interface EvictionResult {
+  success: boolean;
+  evictedEntries: number;
+  bytesFreed: number;
+}
+
+/**
+ * Attempts emergency eviction using HybridLRUCache
+ */
+async function tryHybridEmergencyEvict(): Promise<EvictionResult> {
+  const result: EvictionResult = {
+    success: false,
+    evictedEntries: 0,
+    bytesFreed: 0,
+  };
+
+  if (!hybridCache || !hybridCacheHealthy) {
+    return result;
+  }
+
+  try {
+    const hybridResult = await hybridCache.emergencyEvict();
+    result.evictedEntries = hybridResult.evictedEntries || 0;
+    result.bytesFreed = hybridResult.bytesFreed || 0;
+    result.success = true;
+
+    logger.info('HybridLRUCache emergency eviction completed', {
+      evictedEntries: result.evictedEntries,
+      bytesFreed: result.bytesFreed,
+    });
+  } catch (err) {
+    logger.warn('HybridLRUCache emergency eviction failed, falling back', {
+      err,
+    });
+    hybridCacheHealthy = false;
+    recordDetailedError(
+      'cache',
+      err instanceof Error ? err : new Error(String(err)),
+      {
+        userImpact: 'degraded',
+        recoveryAction: 'fallback',
+        severity: 'warning',
+      }
+    );
+  }
+
+  return result;
+}
+
+/**
+ * Attempts emergency eviction using Redis
+ */
+async function tryRedisEmergencyEvict(): Promise<EvictionResult> {
+  const result: EvictionResult = {
+    success: false,
+    evictedEntries: 0,
+    bytesFreed: 0,
+  };
+
+  if (!redis || !redisHealthy) {
+    return result;
+  }
+
+  try {
+    const keys = await redis.keys('*');
+    const totalKeys = keys.length;
+
+    if (totalKeys === 0) {
+      return result;
+    }
+
+    // Evict 30% of keys, prioritizing older/less frequently used ones
+    const keysToEvict = Math.ceil(totalKeys * 0.3);
+    const keysForEviction = keys.slice(0, keysToEvict);
+
+    if (keysForEviction.length === 0) {
+      return result;
+    }
+
+    const deletedCount = await redis.del(...keysForEviction);
+    result.evictedEntries = deletedCount;
+
+    // Also clear corresponding memory cache entries
+    keysForEviction.forEach((key) => memoryCache.delete(key));
+
+    logger.info('Redis emergency eviction completed', {
+      totalKeys,
+      keysEvicted: deletedCount,
+      evictionPercentage: Math.round((deletedCount / totalKeys) * 100),
+    });
+
+    result.success = true;
+  } catch (err) {
+    logger.warn('Redis emergency eviction failed', { err });
+    redisHealthy = false;
+    recordDetailedError(
+      'cache',
+      err instanceof Error ? err : new Error(String(err)),
+      {
+        userImpact: 'degraded',
+        recoveryAction: 'fallback',
+        severity: 'warning',
+      }
+    );
+  }
+
+  return result;
+}
+
+/**
+ * Attempts emergency eviction using memory cache
+ */
+function tryMemoryEmergencyEvict(): EvictionResult {
+  const result: EvictionResult = {
+    success: false,
+    evictedEntries: 0,
+    bytesFreed: 0,
+  };
+
+  if (memoryCache.size === 0) {
+    return result;
+  }
+
+  const beforeSize = memoryCache.size;
+  const keysToEvict = Math.ceil(beforeSize * 0.5); // Evict 50% of memory cache
+  const memoryKeys = Array.from(memoryCache.keys()).slice(0, keysToEvict);
+
+  memoryKeys.forEach((key) => memoryCache.delete(key));
+  result.evictedEntries = memoryKeys.length;
+  result.success = true;
+
+  logger.info('Memory cache emergency eviction completed', {
+    beforeSize,
+    evictedKeys: memoryKeys.length,
+    remainingKeys: memoryCache.size,
+  });
+
+  return result;
+}
+
+/**
  * Cache interface that maintains backward compatibility
  */
 const cache = {
@@ -590,16 +733,16 @@ const cache = {
    * NEW: Emergency cache eviction for memory pressure scenarios
    * CRITICAL: This method implements selective cache eviction to free up memory
    * during high memory pressure situations
+   * REFACTORED: Reduced cognitive complexity by extracting eviction strategies
    */
   async emergencyEvict(): Promise<void> {
     const startTime = Date.now();
-    let success = false;
-    let evictedEntries = 0;
-    let bytesFreed = 0;
+    let totalEvictedEntries = 0;
+    let totalBytesFreed = 0;
+    let overallSuccess = false;
 
     try {
       const beforeStats = cache.getStats();
-
       logger.warn('Performing emergency cache eviction', {
         beforeEviction: beforeStats,
         timestamp: new Date().toISOString(),
@@ -609,97 +752,25 @@ const cache = {
       recordEnhancedCacheOperation('emergency_evict', false);
 
       // Try HybridLRUCache emergency eviction first
-      if (hybridCache && hybridCacheHealthy) {
-        try {
-          const hybridResult = await hybridCache.emergencyEvict();
-          evictedEntries += hybridResult.evictedEntries || 0;
-          bytesFreed += hybridResult.bytesFreed || 0;
+      const hybridResult = await tryHybridEmergencyEvict();
+      totalEvictedEntries += hybridResult.evictedEntries;
+      totalBytesFreed += hybridResult.bytesFreed;
+      overallSuccess = hybridResult.success;
 
-          logger.info('HybridLRUCache emergency eviction completed', {
-            evictedEntries: hybridResult.evictedEntries,
-            bytesFreed: hybridResult.bytesFreed,
-          });
-          success = true;
-        } catch (err) {
-          logger.warn(
-            'HybridLRUCache emergency eviction failed, falling back',
-            {
-              err,
-            }
-          );
-          hybridCacheHealthy = false;
-          recordDetailedError(
-            'cache',
-            err instanceof Error ? err : new Error(String(err)),
-            {
-              userImpact: 'degraded',
-              recoveryAction: 'fallback',
-              severity: 'warning',
-            }
-          );
-          // Continue to Redis fallback
-        }
+      // Try Redis emergency eviction if hybrid failed or unavailable
+      if (!overallSuccess) {
+        const redisResult = await tryRedisEmergencyEvict();
+        totalEvictedEntries += redisResult.evictedEntries;
+        totalBytesFreed += redisResult.bytesFreed;
+        overallSuccess = redisResult.success;
       }
 
-      // Redis emergency eviction (selective clearing)
-      if (redis && redisHealthy && (!hybridCache || !hybridCacheHealthy)) {
-        try {
-          // Get a sample of keys to determine eviction strategy
-          const keys = await redis.keys('*');
-          const totalKeys = keys.length;
-
-          if (totalKeys > 0) {
-            // Evict 30% of keys, prioritizing older/less frequently used ones
-            const keysToEvict = Math.ceil(totalKeys * 0.3);
-            const keysForEviction = keys.slice(0, keysToEvict);
-
-            if (keysForEviction.length > 0) {
-              const deletedCount = await redis.del(...keysForEviction);
-              evictedEntries += deletedCount;
-
-              // Also clear corresponding memory cache entries
-              keysForEviction.forEach((key) => memoryCache.delete(key));
-
-              logger.info('Redis emergency eviction completed', {
-                totalKeys,
-                keysEvicted: deletedCount,
-                evictionPercentage: Math.round(
-                  (deletedCount / totalKeys) * 100
-                ),
-              });
-              success = true;
-            }
-          }
-        } catch (err) {
-          logger.warn('Redis emergency eviction failed', { err });
-          redisHealthy = false;
-          recordDetailedError(
-            'cache',
-            err instanceof Error ? err : new Error(String(err)),
-            {
-              userImpact: 'degraded',
-              recoveryAction: 'fallback',
-              severity: 'warning',
-            }
-          );
-        }
-      }
-
-      // Memory cache emergency eviction as final fallback
-      if (memoryCache.size > 0 && (!success || !hybridCache)) {
-        const beforeSize = memoryCache.size;
-        const keysToEvict = Math.ceil(beforeSize * 0.5); // Evict 50% of memory cache
-        const memoryKeys = Array.from(memoryCache.keys()).slice(0, keysToEvict);
-
-        memoryKeys.forEach((key) => memoryCache.delete(key));
-        evictedEntries += memoryKeys.length;
-
-        logger.info('Memory cache emergency eviction completed', {
-          beforeSize,
-          evictedKeys: memoryKeys.length,
-          remainingKeys: memoryCache.size,
-        });
-        success = true;
+      // Try memory cache emergency eviction as final fallback
+      if (!overallSuccess || !hybridCache) {
+        const memoryResult = tryMemoryEmergencyEvict();
+        totalEvictedEntries += memoryResult.evictedEntries;
+        totalBytesFreed += memoryResult.bytesFreed;
+        overallSuccess = overallSuccess || memoryResult.success;
       }
 
       const afterStats = cache.getStats();
@@ -708,23 +779,23 @@ const cache = {
       logger.info('Emergency cache eviction completed', {
         beforeEviction: beforeStats,
         afterEviction: afterStats,
-        evictedEntries,
-        bytesFreed,
+        evictedEntries: totalEvictedEntries,
+        bytesFreed: totalBytesFreed,
         responseTimeSeconds: responseTime,
-        success,
+        success: overallSuccess,
       });
 
       // Update service health metrics
       updateServiceHealthScore('cache', {
-        errorRate: success ? 0 : 1,
+        errorRate: overallSuccess ? 0 : 1,
         responseTime,
         memoryUtilization:
           afterStats.memory.entries /
-          (afterStats.memory.entries + evictedEntries),
+          (afterStats.memory.entries + totalEvictedEntries),
       });
 
       // Record successful emergency eviction
-      if (success) {
+      if (overallSuccess) {
         recordEnhancedCacheOperation('emergency_evict', true);
       }
     } catch (error) {
@@ -733,8 +804,8 @@ const cache = {
       logger.error('Emergency cache eviction failed', {
         error,
         responseTimeSeconds: responseTime,
-        evictedEntries,
-        bytesFreed,
+        evictedEntries: totalEvictedEntries,
+        bytesFreed: totalBytesFreed,
       });
 
       // Record the failure in metrics
