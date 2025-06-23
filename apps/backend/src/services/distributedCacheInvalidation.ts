@@ -3,8 +3,8 @@ import { getLogger } from './logger';
 import {
   distributedCacheInvalidations,
   distributedCacheInvalidationLatency,
+  recordDetailedError,
 } from './metrics';
-import { recordDetailedError } from './metrics';
 
 const logger = getLogger();
 
