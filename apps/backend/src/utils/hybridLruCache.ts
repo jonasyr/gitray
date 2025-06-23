@@ -239,7 +239,9 @@ export class HybridLRUCache<V> {
           }
 
           // Sort by modification time (oldest first) for proper LRU tracking
-          const sortedEntries = validEntries.sort((a, b) => a.mtime - b.mtime);
+          const entriesToSort = [...validEntries];
+          entriesToSort.sort((a, b) => a.mtime - b.mtime);
+          const sortedEntries = entriesToSort;
           sortedEntries.forEach(({ key, filePath }) => {
             this.disk.set(key, filePath);
           });

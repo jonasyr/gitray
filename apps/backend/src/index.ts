@@ -105,7 +105,7 @@ export async function validateStartupEnvironment() {
 
         socket.on('error', (err) => {
           clearTimeout(timeout);
-          reject(err);
+          reject(err instanceof Error ? err : new Error(String(err)));
         });
       });
 
