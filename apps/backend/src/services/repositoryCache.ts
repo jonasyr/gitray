@@ -431,213 +431,300 @@ export class RepositoryCacheManager {
       return;
     }
 
-    const failedRollbacks: string[] = [];
-    const maxAttempts = 3;
     const startTime = Date.now();
+    const failedRollbacks: string[] = [];
 
     try {
       // Execute rollback operations in reverse order to maintain consistency
       const reversedRollbackOperations =
         transaction.rollbackOperations.reverse();
+
       for (const rollbackOp of reversedRollbackOperations) {
-        let attempts = 0;
-        let operationSucceeded = false;
-        const operationStartTime = Date.now();
+        const success = await this.executeRollbackOperationWithRetry(
+          rollbackOp,
+          transaction.id
+        );
 
-        while (attempts < maxAttempts && !operationSucceeded) {
-          try {
-            // Execute the rollback operation
-            await rollbackOp.execute();
-
-            // Verify the rollback succeeded
-            const verified = await rollbackOp.verify();
-            if (verified) {
-              operationSucceeded = true;
-
-              // Record successful rollback metrics
-              recordTransactionRollback(
-                'success',
-                rollbackOp.cacheType,
-                'set',
-                attempts
-              );
-              recordRollbackVerification(
-                rollbackOp.cacheType,
-                'success',
-                attempts + 1
-              );
-
-              logger.debug('Rollback operation succeeded', {
-                transactionId: transaction.id,
-                operation: rollbackOp.description,
-                attempts: attempts + 1,
-              });
-            } else {
-              // Record failed verification
-              recordRollbackVerification(
-                rollbackOp.cacheType,
-                'failed',
-                attempts + 1
-              );
-              throw new Error('Rollback verification failed');
-            }
-          } catch (error) {
-            attempts++;
-            const errorMessage =
-              error instanceof Error ? error.message : String(error);
-
-            if (attempts >= maxAttempts) {
-              // Max attempts reached - mark as failed
-              failedRollbacks.push(rollbackOp.description);
-
-              // Record failed rollback metrics
-              recordTransactionRollback(
-                'failed',
-                rollbackOp.cacheType,
-                'set',
-                attempts
-              );
-
-              logger.error('Rollback operation failed after retries', {
-                transactionId: transaction.id,
-                operation: rollbackOp.description,
-                cacheType: rollbackOp.cacheType,
-                key: rollbackOp.key,
-                attempts: maxAttempts,
-                error: errorMessage,
-              });
-            } else {
-              // Record retry attempt
-              recordTransactionRollback(
-                'retry',
-                rollbackOp.cacheType,
-                'set',
-                attempts
-              );
-
-              // Retry with exponential backoff
-              const backoffMs = Math.pow(2, attempts) * 100;
-              logger.warn('Rollback operation failed, retrying', {
-                transactionId: transaction.id,
-                operation: rollbackOp.description,
-                attempt: attempts,
-                maxAttempts,
-                retryInMs: backoffMs,
-                error: errorMessage,
-              });
-
-              await new Promise((resolve) => setTimeout(resolve, backoffMs));
-            }
-          }
+        if (!success) {
+          failedRollbacks.push(rollbackOp.description);
         }
-
-        // Record operation duration
-        const operationDuration = Date.now() - operationStartTime;
-        recordRollbackDuration(
-          operationDuration,
-          rollbackOp.cacheType,
-          1,
-          attempts
-        );
       }
 
-      // Check if any rollback operations failed
-      if (failedRollbacks.length > 0) {
-        // Record critical rollback failure metrics
-        recordCriticalRollbackFailure(
-          'cache_write',
-          failedRollbacks.length,
-          'critical'
-        );
-        recordCacheTransaction(
-          'failed',
-          'all',
-          transaction.rollbackOperations.length
-        );
-
-        // Critical situation - trigger manual intervention alert
-        logger.error(
-          'CRITICAL: Transaction rollback incomplete - Manual intervention required',
-          {
-            transactionId: transaction.id,
-            failedRollbacks,
-            operationsCount: transaction.rollbackOperations.length,
-            failedCount: failedRollbacks.length,
-            requiresManualIntervention: true,
-            severity: 'CRITICAL',
-          }
-        );
-
-        // Update metrics for failed rollback
-        this.metrics.transactions.failed++;
-
-        // Throw specific error with detailed information
-        throw new TransactionRollbackError(
-          `Failed to rollback operations: ${failedRollbacks.join(', ')}`,
-          transaction.id,
-          failedRollbacks
-        );
-      }
-
-      // Successful rollback - record metrics
-      const totalDuration = Date.now() - startTime;
-      recordRollbackDuration(
-        totalDuration,
-        'all' as any,
-        transaction.rollbackOperations.length,
-        0
+      await this.handleRollbackCompletion(
+        transaction,
+        failedRollbacks,
+        startTime
       );
-      recordCacheTransaction(
-        'rolled_back',
-        'all',
-        transaction.rollbackOperations.length
-      );
-
-      transaction.completed = true;
-      this.activeTransactions.delete(transaction.id);
-      this.metrics.transactions.rolledBack++;
-
-      logger.info('Cache transaction successfully rolled back', {
-        transactionId: transaction.id,
-        rollbackOperationsCount: transaction.rollbackOperations.length,
-        successfulOperations:
-          transaction.rollbackOperations.length - failedRollbacks.length,
-        totalDurationMs: totalDuration,
-      });
     } catch (error) {
-      // Handle any unexpected errors during rollback
-      if (error instanceof TransactionRollbackError) {
-        // Re-throw our specific error type
-        throw error;
-      }
-
-      // Unexpected error during rollback process
-      const totalDuration = Date.now() - startTime;
-      recordRollbackDuration(
-        totalDuration,
-        'all' as any,
-        transaction.rollbackOperations.length,
-        0
-      );
-      recordCacheTransaction(
-        'failed',
-        'all',
-        transaction.rollbackOperations.length
-      );
-
-      this.metrics.transactions.failed++;
-      logger.error('Unexpected error during transaction rollback', {
-        transactionId: transaction.id,
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        totalDurationMs: totalDuration,
-      });
-
-      throw new TransactionRollbackError(
-        `Unexpected error during transaction rollback: ${error instanceof Error ? error.message : String(error)}`,
-        transaction.id
-      );
+      await this.handleRollbackError(transaction, error, startTime);
     }
+  }
+
+  /**
+   * Executes a single rollback operation with retry logic and verification.
+   *
+   * @param rollbackOp - The rollback operation to execute
+   * @param transactionId - Transaction ID for logging
+   * @returns Promise resolving to true if operation succeeded, false otherwise
+   */
+  private async executeRollbackOperationWithRetry(
+    rollbackOp: RollbackOperation,
+    transactionId: string
+  ): Promise<boolean> {
+    const maxAttempts = 3;
+    let attempts = 0;
+    const operationStartTime = Date.now();
+
+    while (attempts < maxAttempts) {
+      try {
+        await rollbackOp.execute();
+        const verified = await rollbackOp.verify();
+
+        if (verified) {
+          this.recordSuccessfulRollbackOperation(
+            rollbackOp,
+            attempts,
+            transactionId
+          );
+          this.recordRollbackDuration(rollbackOp, operationStartTime, attempts);
+          return true;
+        } else {
+          recordRollbackVerification(
+            rollbackOp.cacheType,
+            'failed',
+            attempts + 1
+          );
+          throw new Error('Rollback verification failed');
+        }
+      } catch (error) {
+        attempts++;
+
+        if (attempts >= maxAttempts) {
+          this.recordFailedRollbackOperation(
+            rollbackOp,
+            attempts,
+            transactionId,
+            error
+          );
+          this.recordRollbackDuration(rollbackOp, operationStartTime, attempts);
+          return false;
+        } else {
+          await this.handleRetryWithBackoff(
+            rollbackOp,
+            attempts,
+            transactionId,
+            error
+          );
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Records metrics and logs for successful rollback operations.
+   */
+  private recordSuccessfulRollbackOperation(
+    rollbackOp: RollbackOperation,
+    attempts: number,
+    transactionId: string
+  ): void {
+    recordTransactionRollback('success', rollbackOp.cacheType, 'set', attempts);
+    recordRollbackVerification(rollbackOp.cacheType, 'success', attempts + 1);
+
+    logger.debug('Rollback operation succeeded', {
+      transactionId,
+      operation: rollbackOp.description,
+      attempts: attempts + 1,
+    });
+  }
+
+  /**
+   * Records metrics and logs for failed rollback operations.
+   */
+  private recordFailedRollbackOperation(
+    rollbackOp: RollbackOperation,
+    attempts: number,
+    transactionId: string,
+    error: unknown
+  ): void {
+    recordTransactionRollback('failed', rollbackOp.cacheType, 'set', attempts);
+
+    logger.error('Rollback operation failed after retries', {
+      transactionId,
+      operation: rollbackOp.description,
+      cacheType: rollbackOp.cacheType,
+      key: rollbackOp.key,
+      attempts,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  /**
+   * Handles retry logic with exponential backoff.
+   */
+  private async handleRetryWithBackoff(
+    rollbackOp: RollbackOperation,
+    attempts: number,
+    transactionId: string,
+    error: unknown
+  ): Promise<void> {
+    recordTransactionRollback('retry', rollbackOp.cacheType, 'set', attempts);
+
+    const backoffMs = Math.pow(2, attempts) * 100;
+    logger.warn('Rollback operation failed, retrying', {
+      transactionId,
+      operation: rollbackOp.description,
+      attempt: attempts,
+      maxAttempts: 3,
+      retryInMs: backoffMs,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+  }
+
+  /**
+   * Records operation duration metrics.
+   */
+  private recordRollbackDuration(
+    rollbackOp: RollbackOperation,
+    operationStartTime: number,
+    attempts: number
+  ): void {
+    const operationDuration = Date.now() - operationStartTime;
+    recordRollbackDuration(
+      operationDuration,
+      rollbackOp.cacheType,
+      1,
+      attempts
+    );
+  }
+
+  /**
+   * Handles the completion of rollback operations, either success or failure.
+   */
+  private async handleRollbackCompletion(
+    transaction: CacheTransaction,
+    failedRollbacks: string[],
+    startTime: number
+  ): Promise<void> {
+    if (failedRollbacks.length > 0) {
+      this.handleCriticalRollbackFailure(transaction, failedRollbacks);
+    } else {
+      this.handleSuccessfulRollback(transaction, startTime);
+    }
+  }
+
+  /**
+   * Handles critical rollback failures that require manual intervention.
+   */
+  private handleCriticalRollbackFailure(
+    transaction: CacheTransaction,
+    failedRollbacks: string[]
+  ): void {
+    recordCriticalRollbackFailure(
+      'cache_write',
+      failedRollbacks.length,
+      'critical'
+    );
+    recordCacheTransaction(
+      'failed',
+      'all',
+      transaction.rollbackOperations.length
+    );
+
+    logger.error(
+      'CRITICAL: Transaction rollback incomplete - Manual intervention required',
+      {
+        transactionId: transaction.id,
+        failedRollbacks,
+        operationsCount: transaction.rollbackOperations.length,
+        failedCount: failedRollbacks.length,
+        requiresManualIntervention: true,
+        severity: 'CRITICAL',
+      }
+    );
+
+    this.metrics.transactions.failed++;
+
+    throw new TransactionRollbackError(
+      `Failed to rollback operations: ${failedRollbacks.join(', ')}`,
+      transaction.id,
+      failedRollbacks
+    );
+  }
+
+  /**
+   * Handles successful rollback completion.
+   */
+  private handleSuccessfulRollback(
+    transaction: CacheTransaction,
+    startTime: number
+  ): void {
+    const totalDuration = Date.now() - startTime;
+    recordRollbackDuration(
+      totalDuration,
+      'all' as any,
+      transaction.rollbackOperations.length,
+      0
+    );
+    recordCacheTransaction(
+      'rolled_back',
+      'all',
+      transaction.rollbackOperations.length
+    );
+
+    transaction.completed = true;
+    this.activeTransactions.delete(transaction.id);
+    this.metrics.transactions.rolledBack++;
+
+    logger.info('Cache transaction successfully rolled back', {
+      transactionId: transaction.id,
+      rollbackOperationsCount: transaction.rollbackOperations.length,
+      successfulOperations: transaction.rollbackOperations.length,
+      totalDurationMs: totalDuration,
+    });
+  }
+
+  /**
+   * Handles unexpected errors during rollback operations.
+   */
+  private async handleRollbackError(
+    transaction: CacheTransaction,
+    error: unknown,
+    startTime: number
+  ): Promise<void> {
+    if (error instanceof TransactionRollbackError) {
+      throw error;
+    }
+
+    const totalDuration = Date.now() - startTime;
+    recordRollbackDuration(
+      totalDuration,
+      'all' as any,
+      transaction.rollbackOperations.length,
+      0
+    );
+    recordCacheTransaction(
+      'failed',
+      'all',
+      transaction.rollbackOperations.length
+    );
+
+    this.metrics.transactions.failed++;
+    logger.error('Unexpected error during transaction rollback', {
+      transactionId: transaction.id,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      totalDurationMs: totalDuration,
+    });
+
+    throw new TransactionRollbackError(
+      `Unexpected error during transaction rollback: ${error instanceof Error ? error.message : String(error)}`,
+      transaction.id
+    );
   }
 
   /**
