@@ -16,5 +16,9 @@
   "eslint.lintTask.enable": true,
   "files.associations": {
     "*.mjs": "javascript"
+  },
+  "sonarlint.connectedMode.project": {
+    "connectionId": "gitray-org",
+    "projectKey": "gitray-dev"
   }
 }

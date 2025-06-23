@@ -481,6 +481,33 @@ export const transactionRollbacks = new Counter({
   ] as const,
 });
 
+type RollbackOutcome = 'success' | 'failed' | 'verified' | 'retry';
+
+export function recordTransactionRollback(
+  outcome: RollbackOutcome,
+  cacheTier: 'raw' | 'filtered' | 'aggregated',
+  operationType: 'set' | 'delete' | 'update',
+  retryCount: number = 0
+): void {
+  let retryRange: string;
+  if (retryCount === 0) {
+    retryRange = '0';
+  } else if (retryCount <= 2) {
+    retryRange = '1-2';
+  } else if (retryCount <= 5) {
+    retryRange = '3-5';
+  } else {
+    retryRange = '5+';
+  }
+
+  transactionRollbacks.inc({
+    rollback_outcome: outcome,
+    cache_tier: cacheTier,
+    operation_type: operationType,
+    retry_count: retryRange,
+  });
+}
+
 /**
  * Transaction rollback duration
  */
@@ -1168,34 +1195,6 @@ export function recordCacheTransaction(
 }
 
 /**
- * Record transaction rollback operation
- */
-export function recordTransactionRollback(
-  outcome: 'success' | 'failed' | 'verified' | 'retry',
-  cacheTier: 'raw' | 'filtered' | 'aggregated',
-  operationType: 'set' | 'delete' | 'update',
-  retryCount: number = 0
-): void {
-  let retryRange: string;
-  if (retryCount === 0) {
-    retryRange = '0';
-  } else if (retryCount <= 2) {
-    retryRange = '1-2';
-  } else if (retryCount <= 5) {
-    retryRange = '3-5';
-  } else {
-    retryRange = '5+';
-  }
-
-  transactionRollbacks.inc({
-    rollback_outcome: outcome,
-    cache_tier: cacheTier,
-    operation_type: operationType,
-    retry_count: retryRange,
-  });
-}
-
-/**
  * Record rollback duration
  */
 export function recordRollbackDuration(
@@ -1336,7 +1335,7 @@ export const metricsMiddleware = (
 
   res.on('finish', () => {
     const duration = (Date.now() - start) / 1000;
-    const route = req.route?.path || req.path || 'unknown';
+    const route = req.route?.path ?? req.path ?? 'unknown';
     const userType = getUserType(req);
     const cacheStatus =
       (res.getHeader && (res.getHeader('X-Cache-Status') as string)) ??

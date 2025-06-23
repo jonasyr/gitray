@@ -572,7 +572,7 @@ class GitService {
       );
     }
 
-    return metrics!;
+    return metrics;
   }
 
   /**

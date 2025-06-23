@@ -9,6 +9,8 @@ import { HTTP_STATUS } from '@gitray/shared-types';
 
 const logger = getLogger();
 
+type MemoryPriority = 'low' | 'normal' | 'high';
+
 /**
  * CRITICAL MIDDLEWARE: Request throttling based on memory pressure
  *
@@ -18,7 +20,7 @@ const logger = getLogger();
 
 declare module 'express-serve-static-core' {
   interface Request {
-    memoryPriority?: 'low' | 'normal' | 'high';
+    memoryPriority?: MemoryPriority;
     skipMemoryThrottling?: boolean;
   }
 }
