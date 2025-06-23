@@ -73,6 +73,12 @@ export interface StreamingMetrics {
   lastBatchTime?: number;
 }
 
+interface BatchProcessingResult {
+  batch: Commit[];
+  wasCacheHit: boolean;
+  batchTime: number;
+}
+
 /**
  * ENHANCED GITSERVICE WITH STREAMING CAPABILITIES
  */
@@ -172,237 +178,243 @@ class GitService {
   }
 
   /**
-   * NEW: Streaming commit retrieval using async generator with memory-aware processing
-   * Processes commits in configurable batches with progressive caching and memory protection
+   * Initialize streaming metrics
    */
-  async *getCommitsStream(
-    localRepoPath: string,
-    options: StreamingOptions
-  ): AsyncGenerator<Commit[], StreamingMetrics, unknown> {
-    logger.info(`Starting memory-aware commit stream for: ${localRepoPath}`, {
-      options,
-    });
-
-    const localGit: SimpleGit = simpleGit(localRepoPath);
-    const metrics: StreamingMetrics = {
-      totalCommits: 0,
-      processedCommits: options.resumeState?.processedCount ?? 0,
+  private initializeStreamingMetrics(
+    totalCommits: number,
+    resumeState?: StreamingResumeState
+  ): StreamingMetrics {
+    return {
+      totalCommits,
+      processedCommits: resumeState?.processedCount ?? 0,
       batchesProcessed: 0,
       averageBatchTime: 0,
       memoryUsageMB: 0,
       cacheHitRate: 0,
       startTime: Date.now(),
     };
+  }
 
-    try {
-      // Get total count for progress tracking
-      metrics.totalCommits = await this.getCommitCount(localRepoPath);
+  /**
+   * Adjust batch size based on memory pressure
+   */
+  private adjustBatchSizeForMemoryPressure(baseBatchSize: number): number {
+    const memoryStats = getMemoryStats();
 
-      // Record streaming start
-      recordStreamingStart(metrics.totalCommits);
+    switch (memoryStats.pressure.level) {
+      case 'warning':
+        return Math.min(baseBatchSize, 500);
+      case 'critical':
+        return Math.min(baseBatchSize, 250);
+      case 'emergency':
+        return Math.min(baseBatchSize, 100);
+      default:
+        return baseBatchSize;
+    }
+  }
 
-      let currentSkip = options.resumeState?.processedCount ?? 0;
-      const batchSize = options.batchSize ?? config.streaming.batchSize;
-      const maxCommits = options.maxCommits ?? metrics.totalCommits;
+  /**
+   * Check if we should stop due to emergency memory pressure
+   */
+  private checkEmergencyMemoryPressure(
+    localRepoPath: string,
+    metrics: StreamingMetrics
+  ): void {
+    const memoryStats = getMemoryStats();
+    if (memoryStats.pressure.level === 'emergency') {
+      logger.error('Emergency memory pressure - stopping stream', {
+        localRepoPath,
+        batchesProcessed: metrics.batchesProcessed,
+        processedCommits: metrics.processedCommits,
+      });
+      throw new Error('Streaming stopped due to emergency memory pressure');
+    }
+  }
 
-      logger.info(`Memory-aware streaming configuration`, {
-        totalCommits: metrics.totalCommits,
-        initialBatchSize: batchSize,
-        maxCommits,
-        resumeFromSkip: currentSkip,
+  /**
+   * Process a single batch of commits with caching
+   */
+  private async processBatch(
+    localGit: SimpleGit,
+    localRepoPath: string,
+    currentSkip: number,
+    batchSize: number,
+    options: StreamingOptions
+  ): Promise<BatchProcessingResult> {
+    const batchStartTime = Date.now();
+    const cacheKey = `commits_batch:${localRepoPath}:${currentSkip}:${batchSize}`;
+
+    // Try cache first
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      const batch = JSON.parse(cached);
+      logger.debug(
+        `Cache hit for batch ${currentSkip}-${currentSkip + batchSize}`
+      );
+      return {
+        batch,
+        wasCacheHit: true,
+        batchTime: Date.now() - batchStartTime,
+      };
+    }
+
+    // Fetch from git
+    const batch = await this.fetchBatchFromGit(
+      localGit,
+      currentSkip,
+      batchSize,
+      options
+    );
+
+    // Cache the result
+    await redis.set(cacheKey, JSON.stringify(batch), 'EX', 3600);
+
+    logger.debug(
+      `Fetched and cached batch ${currentSkip}-${currentSkip + batchSize}`,
+      {
+        batchCommits: batch.length,
+      }
+    );
+
+    return {
+      batch,
+      wasCacheHit: false,
+      batchTime: Date.now() - batchStartTime,
+    };
+  }
+
+  /**
+   * Fetch batch from git repository
+   */
+  private async fetchBatchFromGit(
+    localGit: SimpleGit,
+    currentSkip: number,
+    batchSize: number,
+    options: StreamingOptions
+  ): Promise<Commit[]> {
+    const args = [
+      'log',
+      '--pretty=format:' + GIT_SERVICE.LOG_FORMAT,
+      `--skip=${currentSkip}`,
+      '-n',
+      String(batchSize),
+    ];
+
+    if (options.startFromCommit) {
+      args.push(options.startFromCommit);
+    }
+
+    const raw = await localGit.raw(args);
+
+    return raw
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const parts = line.split('|');
+        const [hash, date, authorName, authorEmail] = parts;
+        const message = parts.slice(4).join('|');
+
+        if (!hash || !date || !authorName || !authorEmail || !message) {
+          logger.warn('Skipping commit with missing data in batch', {
+            line,
+            currentSkip,
+          });
+          return null;
+        }
+
+        return { sha: hash, message, date, authorName, authorEmail };
+      })
+      .filter((commit): commit is Commit => commit !== null);
+  }
+
+  /**
+   * Update metrics after processing a batch
+   */
+  private updateMetricsAfterBatch(
+    metrics: StreamingMetrics,
+    batchResult: BatchProcessingResult
+  ): void {
+    metrics.batchesProcessed++;
+    metrics.processedCommits += batchResult.batch.length;
+    metrics.averageBatchTime =
+      (metrics.averageBatchTime * (metrics.batchesProcessed - 1) +
+        batchResult.batchTime) /
+      metrics.batchesProcessed;
+    metrics.lastBatchTime = batchResult.batchTime;
+    metrics.memoryUsageMB = process.memoryUsage().heapUsed / 1024 / 1024;
+
+    // Update cache hit rate
+    const totalBatches = metrics.batchesProcessed;
+    const currentHits =
+      metrics.cacheHitRate * (metrics.batchesProcessed - 1) +
+      (batchResult.wasCacheHit ? 1 : 0);
+    metrics.cacheHitRate = totalBatches > 0 ? currentHits / totalBatches : 0;
+  }
+
+  /**
+   * Save resume state for error recovery
+   */
+  private async saveResumeState(
+    localRepoPath: string,
+    batch: Commit[],
+    metrics: StreamingMetrics
+  ): Promise<void> {
+    const resumeState: StreamingResumeState = {
+      lastProcessedSha: batch[batch.length - 1]?.sha,
+      processedCount: metrics.processedCommits,
+      totalEstimatedCount: metrics.totalCommits,
+      startTime: metrics.startTime,
+    };
+
+    const resumeKey = `stream_resume:${localRepoPath}`;
+    await redis.set(resumeKey, JSON.stringify(resumeState), 'EX', 7200);
+  }
+
+  /**
+   * Log batch completion progress
+   */
+  private logBatchProgress(metrics: StreamingMetrics, batchSize: number): void {
+    logger.info(`Batch ${metrics.batchesProcessed} completed`, {
+      batchSize,
+      processedCommits: metrics.processedCommits,
+      totalCommits: metrics.totalCommits,
+      progress: `${((metrics.processedCommits / metrics.totalCommits) * 100).toFixed(1)}%`,
+      batchTime: `${metrics.lastBatchTime}ms`,
+      avgBatchTime: `${metrics.averageBatchTime.toFixed(0)}ms`,
+      memoryMB: metrics.memoryUsageMB.toFixed(1),
+    });
+  }
+
+  /**
+   * Handle memory pressure during streaming
+   */
+  private handleMemoryPressure(metrics: StreamingMetrics): void {
+    if (metrics.memoryUsageMB > 500) {
+      logger.warn('High memory usage detected during streaming', {
+        memoryMB: metrics.memoryUsageMB,
+        suggestion:
+          'Consider smaller batch sizes for memory-constrained environments',
       });
 
-      while (currentSkip < maxCommits && currentSkip < metrics.totalCommits) {
-        const batchStartTime = Date.now();
-
-        // Dynamic batch size adjustment based on memory pressure
-        const memoryStats = getMemoryStats();
-        let adjustedBatchSize = batchSize;
-
-        if (memoryStats.pressure.level === 'warning') {
-          adjustedBatchSize = Math.min(batchSize, 500);
-        } else if (memoryStats.pressure.level === 'critical') {
-          adjustedBatchSize = Math.min(batchSize, 250);
-        } else if (memoryStats.pressure.level === 'emergency') {
-          adjustedBatchSize = Math.min(batchSize, 100);
-        }
-
-        const remaining = Math.min(
-          maxCommits - currentSkip,
-          metrics.totalCommits - currentSkip
-        );
-        const currentBatchSize = Math.min(adjustedBatchSize, remaining);
-
-        logger.debug(
-          `Processing memory-aware batch: skip=${currentSkip}, size=${currentBatchSize}, pressureLevel=${memoryStats.pressure.level}`
-        );
-
-        // Emergency memory pressure check
-        if (memoryStats.pressure.level === 'emergency') {
-          logger.error('Emergency memory pressure - stopping stream', {
-            localRepoPath,
-            batchesProcessed: metrics.batchesProcessed,
-            processedCommits: metrics.processedCommits,
-          });
-          throw new Error('Streaming stopped due to emergency memory pressure');
-        }
-
-        try {
-          // Check cache first for this specific batch
-          const cacheKey = `commits_batch:${localRepoPath}:${currentSkip}:${currentBatchSize}`;
-          const cached = await redis.get(cacheKey);
-
-          let batch: Commit[];
-          if (cached) {
-            batch = JSON.parse(cached);
-            // Safely update cache hit rate
-            const totalBatches = metrics.batchesProcessed + 1;
-            const currentHits =
-              metrics.cacheHitRate * metrics.batchesProcessed + 1;
-            metrics.cacheHitRate =
-              totalBatches > 0 ? currentHits / totalBatches : 1;
-            logger.debug(
-              `Cache hit for batch ${currentSkip}-${currentSkip + currentBatchSize}`
-            );
-          } else {
-            // Fetch batch from git
-            const args = [
-              'log',
-              '--pretty=format:' + GIT_SERVICE.LOG_FORMAT,
-              `--skip=${currentSkip}`,
-              '-n',
-              String(currentBatchSize),
-            ];
-
-            if (options.startFromCommit) {
-              args.push(options.startFromCommit);
-            }
-
-            const raw = await localGit.raw(args);
-
-            batch = raw
-              .split('\n')
-              .filter(Boolean)
-              .map((line) => {
-                const parts = line.split('|');
-                const [hash, date, authorName, authorEmail] = parts;
-                const message = parts.slice(4).join('|');
-
-                if (!hash || !date || !authorName || !authorEmail || !message) {
-                  logger.warn('Skipping commit with missing data in batch', {
-                    line,
-                    currentSkip,
-                  });
-                  return null;
-                }
-
-                return { sha: hash, message, date, authorName, authorEmail };
-              })
-              .filter((commit): commit is Commit => commit !== null);
-
-            // Cache this batch for future use
-            await redis.set(cacheKey, JSON.stringify(batch), 'EX', 3600); // Cache for 1 hour
-            // Safely update cache hit rate (cache miss case)
-            const totalBatches = metrics.batchesProcessed + 1;
-            const currentHits = metrics.cacheHitRate * metrics.batchesProcessed;
-            metrics.cacheHitRate =
-              totalBatches > 0 ? currentHits / totalBatches : 0;
-
-            logger.debug(
-              `Fetched and cached batch ${currentSkip}-${currentSkip + currentBatchSize}`,
-              {
-                batchCommits: batch.length,
-              }
-            );
-          }
-
-          // Update metrics
-          const batchTime = Date.now() - batchStartTime;
-          metrics.batchesProcessed++;
-          metrics.processedCommits += batch.length;
-          metrics.averageBatchTime =
-            (metrics.averageBatchTime * (metrics.batchesProcessed - 1) +
-              batchTime) /
-            metrics.batchesProcessed;
-          metrics.lastBatchTime = batchTime;
-          metrics.memoryUsageMB = process.memoryUsage().heapUsed / 1024 / 1024;
-
-          // Record enhanced streaming batch metrics
-          recordStreamingBatch(
-            batch.length,
-            batchTime,
-            !!cached,
-            metrics.totalCommits
-          );
-
-          // Record enhanced cache operation
-          recordEnhancedCacheOperation(
-            'batch_cache',
-            !!cached,
-            undefined,
-            localRepoPath,
-            metrics.totalCommits
-          );
-
-          // Store resume state for error recovery
-          const resumeState: StreamingResumeState = {
-            lastProcessedSha: batch[batch.length - 1]?.sha,
-            processedCount: metrics.processedCommits,
-            totalEstimatedCount: metrics.totalCommits,
-            startTime: metrics.startTime,
-          };
-
-          // Cache resume state
-          const resumeKey = `stream_resume:${localRepoPath}`;
-          await redis.set(resumeKey, JSON.stringify(resumeState), 'EX', 7200); // 2 hours
-
-          logger.info(`Batch ${metrics.batchesProcessed} completed`, {
-            batchSize: batch.length,
-            processedCommits: metrics.processedCommits,
-            totalCommits: metrics.totalCommits,
-            progress: `${((metrics.processedCommits / metrics.totalCommits) * 100).toFixed(1)}%`,
-            batchTime: `${batchTime}ms`,
-            avgBatchTime: `${metrics.averageBatchTime.toFixed(0)}ms`,
-            memoryMB: metrics.memoryUsageMB.toFixed(1),
-          });
-
-          currentSkip += batch.length;
-
-          // Yield the batch along with current metrics
-          yield batch;
-
-          // Memory pressure check - if memory usage is high, suggest GC
-          if (metrics.memoryUsageMB > 500) {
-            // 500MB threshold
-            logger.warn('High memory usage detected during streaming', {
-              memoryMB: metrics.memoryUsageMB,
-              suggestion:
-                'Consider smaller batch sizes for memory-constrained environments',
-            });
-
-            // Force garbage collection if available (development/debugging)
-            if (global.gc && typeof global.gc === 'function') {
-              global.gc();
-              logger.debug('Garbage collection triggered');
-            }
-          }
-        } catch (batchError) {
-          logger.error(`Error processing batch at skip=${currentSkip}`, {
-            error: batchError,
-            localRepoPath,
-            currentSkip,
-            batchSize: currentBatchSize,
-          });
-
-          // For batch errors, we can either:
-          // 1. Skip this batch and continue (resilient)
-          // 2. Throw and abort (fail-fast)
-          // We choose resilient approach but log the error
-          currentSkip += currentBatchSize;
-          continue;
-        }
+      // Force garbage collection if available (development/debugging)
+      if (global.gc && typeof global.gc === 'function') {
+        global.gc();
+        logger.debug('Garbage collection triggered');
       }
+    }
+  }
 
+  /**
+   * Record metrics and cleanup after streaming completion
+   */
+  private async finalizeStreaming(
+    localRepoPath: string,
+    metrics: StreamingMetrics,
+    success: boolean = true
+  ): Promise<void> {
+    const totalDuration = Date.now() - metrics.startTime;
+
+    if (success) {
       // Clean up resume state on successful completion
       try {
         const resumeKey = `stream_resume:${localRepoPath}`;
@@ -412,7 +424,6 @@ class GitService {
       }
 
       // Record streaming completion
-      const totalDuration = Date.now() - metrics.startTime;
       recordStreamingCompletion(
         metrics.totalCommits,
         totalDuration,
@@ -429,23 +440,139 @@ class GitService {
         avgBatchTime: metrics.averageBatchTime,
         cacheHitRate: `${(metrics.cacheHitRate * 100).toFixed(1)}%`,
       });
+    }
+  }
+
+  /**
+   * NEW: Streaming commit retrieval using async generator with memory-aware processing
+   * Processes commits in configurable batches with progressive caching and memory protection
+   */
+  async *getCommitsStream(
+    localRepoPath: string,
+    options: StreamingOptions
+  ): AsyncGenerator<Commit[], StreamingMetrics, unknown> {
+    logger.info(`Starting memory-aware commit stream for: ${localRepoPath}`, {
+      options,
+    });
+
+    const localGit: SimpleGit = simpleGit(localRepoPath);
+    let metrics: StreamingMetrics | undefined;
+
+    try {
+      // Initialize metrics and get total count
+      const totalCommits = await this.getCommitCount(localRepoPath);
+      metrics = this.initializeStreamingMetrics(
+        totalCommits,
+        options.resumeState
+      );
+      recordStreamingStart(metrics.totalCommits);
+
+      // Setup streaming parameters
+      let currentSkip = options.resumeState?.processedCount ?? 0;
+      const baseBatchSize = options.batchSize ?? config.streaming.batchSize;
+      const maxCommits = options.maxCommits ?? metrics.totalCommits;
+
+      logger.info(`Memory-aware streaming configuration`, {
+        totalCommits: metrics.totalCommits,
+        initialBatchSize: baseBatchSize,
+        maxCommits,
+        resumeFromSkip: currentSkip,
+      });
+
+      // Main streaming loop
+      while (currentSkip < maxCommits && currentSkip < metrics.totalCommits) {
+        // Check for emergency memory pressure
+        this.checkEmergencyMemoryPressure(localRepoPath, metrics);
+
+        // Adjust batch size based on memory pressure
+        const adjustedBatchSize =
+          this.adjustBatchSizeForMemoryPressure(baseBatchSize);
+        const remaining = Math.min(
+          maxCommits - currentSkip,
+          metrics.totalCommits - currentSkip
+        );
+        const currentBatchSize = Math.min(adjustedBatchSize, remaining);
+
+        logger.debug(
+          `Processing memory-aware batch: skip=${currentSkip}, size=${currentBatchSize}, pressureLevel=${getMemoryStats().pressure.level}`
+        );
+
+        try {
+          // Process the batch
+          const batchResult = await this.processBatch(
+            localGit,
+            localRepoPath,
+            currentSkip,
+            currentBatchSize,
+            options
+          );
+
+          // Update metrics
+          this.updateMetricsAfterBatch(metrics, batchResult);
+
+          // Record batch metrics
+          recordStreamingBatch(
+            batchResult.batch.length,
+            batchResult.batchTime,
+            batchResult.wasCacheHit,
+            metrics.totalCommits
+          );
+
+          recordEnhancedCacheOperation(
+            'batch_cache',
+            batchResult.wasCacheHit,
+            undefined,
+            localRepoPath,
+            metrics.totalCommits
+          );
+
+          // Save resume state
+          await this.saveResumeState(localRepoPath, batchResult.batch, metrics);
+
+          // Log progress
+          this.logBatchProgress(metrics, batchResult.batch.length);
+
+          currentSkip += batchResult.batch.length;
+
+          // Yield the batch
+          yield batchResult.batch;
+
+          // Handle memory pressure
+          this.handleMemoryPressure(metrics);
+        } catch (batchError) {
+          logger.error(`Error processing batch at skip=${currentSkip}`, {
+            error: batchError,
+            localRepoPath,
+            currentSkip,
+            batchSize: currentBatchSize,
+          });
+
+          // Skip this batch and continue (resilient approach)
+          currentSkip += currentBatchSize;
+          continue;
+        }
+      }
+
+      // Finalize successful streaming
+      await this.finalizeStreaming(localRepoPath, metrics, true);
     } catch (error) {
       // Record streaming error
       const errorType =
         error instanceof Error ? error.constructor.name : 'UnknownError';
-      recordStreamingError(errorType, false, metrics.totalCommits);
+      recordStreamingError(errorType, false, metrics?.totalCommits ?? 0);
 
       logger.error(`Error in commit streaming for ${localRepoPath}`, {
         error,
         metrics,
       });
+
       throw new RepositoryError(
         `${ERROR_MESSAGES.COMMITS_FETCH_FAILED}: Streaming failed - ${error instanceof Error ? error.message : String(error)}`,
         localRepoPath
       );
     }
 
-    return metrics;
+    return metrics!;
   }
 
   /**
@@ -789,6 +916,7 @@ class GitService {
     });
     return buckets;
   }
+
   private tallyCommits(
     commits: Commit[],
     buckets: Map<string, CommitAggregation>
