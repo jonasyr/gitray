@@ -92,57 +92,79 @@ export const memoryPressureMiddleware = (
 };
 
 /**
- * Determine request priority based on path, method, and headers
+ * Check if request has explicit priority header
  */
-function determinePriority(req: Request): 'low' | 'normal' | 'high' {
-  // Explicit priority header
+function getExplicitPriority(req: Request): MemoryPriority | null {
   const explicitPriority = req.headers['x-priority'] as string;
   if (
     explicitPriority &&
     ['low', 'normal', 'high'].includes(explicitPriority)
   ) {
-    return explicitPriority as 'low' | 'normal' | 'high';
+    return explicitPriority as MemoryPriority;
+  }
+  return null;
+}
+
+/**
+ * Check if request is high priority based on path
+ */
+function isHighPriorityPath(req: Request): boolean {
+  return (
+    req.path.startsWith('/health') ||
+    req.path.startsWith('/metrics') ||
+    req.path.includes('/cache/')
+  );
+}
+
+/**
+ * Check if request is from admin user
+ */
+function isAdminUser(req: Request): boolean {
+  return (
+    (req.headers['user-agent']?.includes('admin') ||
+      req.headers['authorization']?.includes('admin')) ??
+    false
+  );
+}
+
+/**
+ * Check if request is for large repository operation
+ */
+function isLargeRepoOperation(req: Request): boolean {
+  if (!req.path.includes('/commits') || req.method !== 'GET') {
+    return false;
   }
 
-  // Health checks and metrics are high priority
-  if (req.path.startsWith('/health') || req.path.startsWith('/metrics')) {
+  const repoUrl = req.query.repoUrl as string;
+  return !!(
+    repoUrl &&
+    (repoUrl.includes('torvalds/linux') ||
+      repoUrl.includes('microsoft/vscode') ||
+      req.query.useStreaming === 'true')
+  );
+}
+
+/**
+ * Determine request priority based on path, method, and headers
+ */
+function determinePriority(req: Request): MemoryPriority {
+  // Check explicit priority header first
+  const explicitPriority = getExplicitPriority(req);
+  if (explicitPriority) {
+    return explicitPriority;
+  }
+
+  // High priority cases
+  if (isHighPriorityPath(req) || isAdminUser(req)) {
     return 'high';
   }
 
-  // Cache management endpoints are high priority
-  if (req.path.includes('/cache/')) {
-    return 'high';
+  // Low priority for large repository operations
+  if (isLargeRepoOperation(req)) {
+    return 'low';
   }
 
-  // Admin operations are high priority
-  if (
-    req.headers['user-agent']?.includes('admin') ||
-    req.headers['authorization']?.includes('admin')
-  ) {
-    return 'high';
-  }
-
-  // Large repository operations are low priority by default
-  if (req.path.includes('/commits') && req.method === 'GET') {
-    // Check for streaming or large repo indicators
-    const repoUrl = req.query.repoUrl as string;
-    if (
-      repoUrl &&
-      (repoUrl.includes('torvalds/linux') ||
-        repoUrl.includes('microsoft/vscode') ||
-        req.query.useStreaming === 'true')
-    ) {
-      return 'low';
-    }
-    return 'normal';
-  }
-
-  // POST operations for repository data are normal priority
-  if (req.path.includes('/repositories') && req.method === 'POST') {
-    return 'normal';
-  }
-
-  // Everything else is normal priority
+  // Normal priority for repository POST operations and everything else
   return 'normal';
 }
 
