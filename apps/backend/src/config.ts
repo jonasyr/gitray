@@ -45,7 +45,7 @@ export const config = {
 
   // Redis connection settings
   redis: {
-    host: process.env.REDIS_HOST || 'localhost',
+    host: process.env.REDIS_HOST ?? 'localhost',
     port: parseEnvNumber(process.env.REDIS_PORT, 6379),
     // Additional Redis options for production
     password: process.env.REDIS_PASSWORD,

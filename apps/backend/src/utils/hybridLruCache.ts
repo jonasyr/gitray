@@ -71,7 +71,7 @@ export class HybridLRUCache<V> {
   private isInitialized = false;
 
   constructor(private options: HybridLRUCacheOptions) {
-    this.lockTimeoutMs = options.lockTimeoutMs || 120000;
+    this.lockTimeoutMs = options.lockTimeoutMs ?? 120000;
     this.serializationPool = new SerializationPool();
     this.initRedis(options.redisConfig);
   }
