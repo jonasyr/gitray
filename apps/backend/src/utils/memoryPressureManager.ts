@@ -23,6 +23,11 @@ const logger = getLogger();
  * 3. 🎯 Resource Safety (memory pressure) ← THIS MODULE
  */
 
+/**
+ * Memory pressure levels for monitoring and response actions
+ */
+type MemoryPressureLevel = 'normal' | 'warning' | 'critical' | 'emergency';
+
 export interface MemoryPressureStats {
   system: {
     totalBytes: number;
@@ -37,7 +42,7 @@ export interface MemoryPressureStats {
     rss: number;
   };
   pressure: {
-    level: 'normal' | 'warning' | 'critical' | 'emergency';
+    level: MemoryPressureLevel;
     systemThreshold: number;
     processThreshold: number;
     action: string;

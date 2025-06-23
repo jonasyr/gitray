@@ -134,6 +134,11 @@ export interface CacheStats {
 }
 
 /**
+ * Cache tier types for rollback operations
+ */
+type CacheType = 'raw' | 'filtered' | 'aggregated';
+
+/**
  * Enhanced rollback operation with verification capabilities.
  * Provides comprehensive rollback with retry logic and verification.
  */
@@ -148,7 +153,7 @@ interface RollbackOperation {
   description: string;
 
   /** Cache tier this operation affects */
-  cacheType: 'raw' | 'filtered' | 'aggregated';
+  cacheType: CacheType;
 
   /** Cache key being rolled back */
   key: string;
