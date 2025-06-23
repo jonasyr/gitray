@@ -806,6 +806,7 @@ export class HybridLRUCache<V> {
 
   /**
    * FIX: Graceful degradation - continue operation even if some tiers fail
+   * REFACTORED: Reduced cognitive complexity by extracting operations into focused methods
    */
   async set(
     key: string,
@@ -819,105 +820,229 @@ export class HybridLRUCache<V> {
     const errors: Error[] = [];
     let memorySuccess = false;
 
-    // Try Redis operation
-    if (this.redis && this.redisHealthy) {
-      try {
-        const serialized = await this.toJSONAsync(value);
-        if (mode && duration !== undefined) {
-          await (this.redis as any).set(key, serialized.json, mode, duration);
-        } else {
-          await this.redis!.set(key, serialized.json);
-        }
-      } catch (err) {
-        // Check if it's a serialization error
-        if (err instanceof Error && err.message.includes('SerializationPool')) {
-          // If async serialization fails, try sync as fallback
-          logger.debug('Async serialization failed, falling back to sync', {
-            key,
-            error: err.message,
-          });
-          try {
-            const syncJson = this.toJSON(value);
-            if (mode && duration !== undefined) {
-              await (this.redis as any).set(key, syncJson, mode, duration);
-            } else {
-              await this.redis!.set(key, syncJson);
-            }
-          } catch (syncErr) {
-            this.redisHealthy = false;
-            logger.warn('HybridLRUCache Redis set failed', { err: syncErr });
-            errors.push(syncErr as Error);
-          }
-        } else {
-          // Redis operation failed
-          this.redisHealthy = false;
-          logger.warn('HybridLRUCache Redis set failed', { err });
-          errors.push(err as Error);
+    // Try each tier and collect errors
+    await this.setToRedis(key, value, mode, duration, errors);
+    memorySuccess = await this.setToMemory(key, value, errors);
+    await this.setToDisk(key, value, errors);
 
-          // Record detailed error
-          recordDetailedError('cache', err as Error, {
-            userImpact: 'degraded',
-            recoveryAction: 'fallback',
-            severity: 'warning',
-          });
-        }
-      }
+    // Process final result
+    this.processSetResult(key, errors, memorySuccess);
+  }
+
+  /**
+   * Attempts to set value in Redis with fallback logic
+   */
+  private async setToRedis(
+    key: string,
+    value: V,
+    mode?: 'EX' | 'PX',
+    duration?: number,
+    errors: Error[] = []
+  ): Promise<void> {
+    if (!this.redis || !this.redisHealthy) {
+      return;
     }
 
-    // Try memory operation (prefer async for better performance)
+    try {
+      await this.tryRedisSetWithSerialization(key, value, mode, duration);
+    } catch (err) {
+      await this.handleRedisSetError(key, value, err as Error, errors);
+    }
+  }
+
+  /**
+   * Attempts Redis set operation with async serialization
+   */
+  private async tryRedisSetWithSerialization(
+    key: string,
+    value: V,
+    mode?: 'EX' | 'PX',
+    duration?: number
+  ): Promise<void> {
+    const serialized = await this.toJSONAsync(value);
+
+    if (mode && duration !== undefined) {
+      await (this.redis as any).set(key, serialized.json, mode, duration);
+    } else {
+      await this.redis!.set(key, serialized.json);
+    }
+  }
+
+  /**
+   * Handles Redis set operation errors with fallback to sync serialization
+   */
+  private async handleRedisSetError(
+    key: string,
+    value: V,
+    err: Error,
+    errors: Error[],
+    mode?: 'EX' | 'PX',
+    duration?: number
+  ): Promise<void> {
+    // Check if it's a serialization error and try sync fallback
+    if (err.message.includes('SerializationPool')) {
+      await this.tryRedisSyncFallback(key, value, err, errors, mode, duration);
+    } else {
+      this.handleRedisConnectionError(err, errors);
+    }
+  }
+
+  /**
+   * Attempts sync serialization fallback for Redis
+   */
+  private async tryRedisSyncFallback(
+    key: string,
+    value: V,
+    originalErr: Error,
+    errors: Error[],
+    mode?: 'EX' | 'PX',
+    duration?: number
+  ): Promise<void> {
+    logger.debug('Async serialization failed, falling back to sync', {
+      key,
+      error: originalErr.message,
+    });
+
+    try {
+      const syncJson = this.toJSON(value);
+
+      if (mode && duration !== undefined) {
+        await (this.redis as any).set(key, syncJson, mode, duration);
+      } else {
+        await this.redis!.set(key, syncJson);
+      }
+    } catch (syncErr) {
+      this.handleRedisConnectionError(syncErr as Error, errors);
+    }
+  }
+
+  /**
+   * Handles Redis connection errors
+   */
+  private handleRedisConnectionError(err: Error, errors: Error[]): void {
+    this.redisHealthy = false;
+    logger.warn('HybridLRUCache Redis set failed', { err });
+    errors.push(err);
+
+    // Record detailed error
+    recordDetailedError('cache', err, {
+      userImpact: 'degraded',
+      recoveryAction: 'fallback',
+      severity: 'warning',
+    });
+  }
+
+  /**
+   * Attempts to set value in memory cache with fallback logic
+   */
+  private async setToMemory(
+    key: string,
+    value: V,
+    errors: Error[]
+  ): Promise<boolean> {
     try {
       await this.addToMemoryWithPressureCheckAsync(key, value);
-      memorySuccess = true;
+      return true;
     } catch (err) {
-      // Fallback to sync version if async fails
-      try {
-        this.addToMemoryWithPressureCheck(key, value);
-        memorySuccess = true;
-      } catch (syncErr) {
-        errors.push(err as Error);
-        errors.push(syncErr as Error);
-      }
+      return this.tryMemorySyncFallback(key, value, err as Error, errors);
     }
+  }
 
-    // Try disk operation
+  /**
+   * Attempts sync fallback for memory operations
+   */
+  private tryMemorySyncFallback(
+    key: string,
+    value: V,
+    originalErr: Error,
+    errors: Error[]
+  ): boolean {
+    try {
+      this.addToMemoryWithPressureCheck(key, value);
+      return true;
+    } catch (syncErr) {
+      errors.push(originalErr, syncErr as Error);
+      return false;
+    }
+  }
+
+  /**
+   * Attempts to set value in disk cache
+   */
+  private async setToDisk(
+    key: string,
+    value: V,
+    errors: Error[]
+  ): Promise<void> {
     try {
       await this.addToDisk(key, value);
     } catch (err) {
       errors.push(err as Error);
     }
+  }
 
+  /**
+   * Processes the final result of set operation and handles success/failure recording
+   */
+  private processSetResult(
+    key: string,
+    errors: Error[],
+    memorySuccess: boolean
+  ): void {
     // Only throw if all operations failed (including memory)
     if (!memorySuccess && errors.length > 0) {
-      // Record failed transaction and rollback
-      recordCacheTransaction('failed', 'all', 1);
-      recordTransactionRollback('failed', 'raw', 'set', 0);
-
-      throw new Error(
-        `All cache operations failed: ${errors.map((e) => e.message).join(', ')}`
-      );
+      this.handleCompleteFailure(errors);
+      return;
     }
 
-    // Log warnings if some operations failed but at least memory succeeded
+    // Handle partial success/failure
     if (errors.length > 0) {
-      logger.warn('Some cache tiers failed but operation completed', {
-        key,
-        failedTiers: errors.length,
-        errors: errors.map((e) => e.message),
-      });
-
-      // Record partial failure
-      recordCacheTransaction('committed', 'raw', 1);
+      this.handlePartialFailure(key, errors);
     } else {
-      // Record successful transaction
-      recordCacheTransaction('committed', 'all', 1);
-
-      // Update service health score for successful cache operation
-      updateServiceHealthScore('cache', {
-        errorRate: 0,
-        responseTime: 0.1, // Assume fast local cache operation
-        cacheHitRate: 1.0, // Successful set operation
-      });
+      this.handleCompleteSuccess();
     }
+  }
+
+  /**
+   * Handles complete failure of set operation
+   */
+  private handleCompleteFailure(errors: Error[]): never {
+    // Record failed transaction and rollback
+    recordCacheTransaction('failed', 'all', 1);
+    recordTransactionRollback('failed', 'raw', 'set', 0);
+
+    throw new Error(
+      `All cache operations failed: ${errors.map((e) => e.message).join(', ')}`
+    );
+  }
+
+  /**
+   * Handles partial failure where some tiers succeeded
+   */
+  private handlePartialFailure(key: string, errors: Error[]): void {
+    logger.warn('Some cache tiers failed but operation completed', {
+      key,
+      failedTiers: errors.length,
+      errors: errors.map((e) => e.message),
+    });
+
+    // Record partial failure
+    recordCacheTransaction('committed', 'raw', 1);
+  }
+
+  /**
+   * Handles complete success of set operation
+   */
+  private handleCompleteSuccess(): void {
+    // Record successful transaction
+    recordCacheTransaction('committed', 'all', 1);
+
+    // Update service health score for successful cache operation
+    updateServiceHealthScore('cache', {
+      errorRate: 0,
+      responseTime: 0.1, // Assume fast local cache operation
+      cacheHitRate: 1.0, // Successful set operation
+    });
   }
 
   async del(key: string): Promise<void> {
