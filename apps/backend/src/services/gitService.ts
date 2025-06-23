@@ -576,6 +576,98 @@ class GitService {
   }
 
   /**
+   * Determine if streaming should be used based on memory pressure and repo size
+   */
+  private async determineStreamingStrategy(
+    localRepoPath: string
+  ): Promise<boolean> {
+    const memoryStats = getMemoryStats();
+    const forceStreaming =
+      memoryStats.pressure.level === 'warning' ||
+      memoryStats.pressure.level === 'critical' ||
+      memoryStats.pressure.level === 'emergency';
+
+    return forceStreaming || (await this.shouldUseStreaming(localRepoPath));
+  }
+
+  /**
+   * Execute streaming-based commit retrieval
+   */
+  private async executeStreamingCommits(
+    localRepoPath: string
+  ): Promise<Commit[]> {
+    const memoryStats = getMemoryStats();
+
+    logger.info(
+      'Using streaming getCommits for large repository or memory pressure',
+      {
+        forceStreaming: memoryStats.pressure.level !== 'normal',
+        pressureLevel: memoryStats.pressure.level,
+      }
+    );
+
+    const batchSize = this.adjustBatchSizeForMemoryPressure(
+      config.streaming.batchSize
+    );
+    const streamingOptions: StreamingOptions = { batchSize };
+
+    const allCommits: Commit[] = [];
+    const streamStartTime = Date.now();
+
+    for await (const batch of this.getCommitsStream(
+      localRepoPath,
+      streamingOptions
+    )) {
+      allCommits.push(...batch);
+
+      // Check for emergency memory pressure
+      const currentStats = getMemoryStats();
+      if (currentStats.pressure.level === 'emergency') {
+        logger.warn(
+          'Emergency memory pressure during streaming - truncating results',
+          {
+            commitsCollected: allCommits.length,
+            localRepoPath,
+          }
+        );
+        break;
+      }
+
+      // Progress logging for large operations
+      if (allCommits.length % 5000 === 0) {
+        logger.info(
+          `Memory-aware streaming progress: ${allCommits.length} commits processed`,
+          {
+            memoryUsage: `${currentStats.system.usagePercentage.toFixed(2)}%`,
+            pressureLevel: currentStats.pressure.level,
+          }
+        );
+      }
+    }
+
+    this.logStreamingCompletion(
+      allCommits.length,
+      Date.now() - streamStartTime
+    );
+    return allCommits;
+  }
+
+  /**
+   * Log streaming completion statistics
+   */
+  private logStreamingCompletion(
+    commitCount: number,
+    streamTime: number
+  ): void {
+    logger.info(`Memory-protected streaming getCommits completed`, {
+      totalCommits: commitCount,
+      streamingTime: streamTime,
+      commitsPerSecond: Math.round(commitCount / (streamTime / 1000)),
+      finalMemoryPressure: getMemoryStats().pressure.level,
+    });
+  }
+
+  /**
    * ENHANCED: Original getCommits method with automatic streaming detection
    * and memory protection. Maintains backward compatibility while adding
    * streaming capabilities and memory-aware processing.
@@ -599,16 +691,7 @@ class GitService {
     }
 
     try {
-      // Check memory pressure first
-      const memoryStats = getMemoryStats();
-      const forceStreaming =
-        memoryStats.pressure.level === 'warning' ||
-        memoryStats.pressure.level === 'critical' ||
-        memoryStats.pressure.level === 'emergency';
-
-      // Check if streaming should be used
-      const useStreaming =
-        forceStreaming || (await this.shouldUseStreaming(localRepoPath));
+      const useStreaming = await this.determineStreamingStrategy(localRepoPath);
 
       if (!useStreaming) {
         logger.info('Using original getCommits for small repository');
@@ -622,72 +705,7 @@ class GitService {
         );
       }
 
-      // Use streaming for large repositories or under memory pressure
-      logger.info(
-        'Using streaming getCommits for large repository or memory pressure',
-        {
-          forceStreaming,
-          pressureLevel: memoryStats.pressure.level,
-        }
-      );
-
-      // Adjust batch size based on memory pressure
-      let batchSize = config.streaming.batchSize;
-      if (memoryStats.pressure.level === 'warning') {
-        batchSize = Math.min(batchSize, 500);
-      } else if (memoryStats.pressure.level === 'critical') {
-        batchSize = Math.min(batchSize, 250);
-      } else if (memoryStats.pressure.level === 'emergency') {
-        batchSize = Math.min(batchSize, 100);
-      }
-
-      const streamingOptions: StreamingOptions = {
-        batchSize,
-      };
-
-      const allCommits: Commit[] = [];
-      const streamStartTime = Date.now();
-
-      for await (const batch of this.getCommitsStream(
-        localRepoPath,
-        streamingOptions
-      )) {
-        allCommits.push(...batch);
-
-        // Check memory pressure during streaming
-        const currentStats = getMemoryStats();
-        if (currentStats.pressure.level === 'emergency') {
-          logger.warn(
-            'Emergency memory pressure during streaming - truncating results',
-            {
-              commitsCollected: allCommits.length,
-              localRepoPath,
-            }
-          );
-          break;
-        }
-
-        // Progress logging for large operations
-        if (allCommits.length % 5000 === 0) {
-          logger.info(
-            `Memory-aware streaming progress: ${allCommits.length} commits processed`,
-            {
-              memoryUsage: `${currentStats.system.usagePercentage.toFixed(2)}%`,
-              pressureLevel: currentStats.pressure.level,
-            }
-          );
-        }
-      }
-
-      const streamTime = Date.now() - streamStartTime;
-      logger.info(`Memory-protected streaming getCommits completed`, {
-        totalCommits: allCommits.length,
-        streamingTime: streamTime,
-        commitsPerSecond: Math.round(allCommits.length / (streamTime / 1000)),
-        finalMemoryPressure: getMemoryStats().pressure.level,
-      });
-
-      return allCommits;
+      return await this.executeStreamingCommits(localRepoPath);
     } catch (error) {
       logger.error(`Error in enhanced getCommits for ${localRepoPath}`, {
         error,
