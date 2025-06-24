@@ -63,14 +63,14 @@ interface MemoryEntry<V> {
 export class HybridLRUCache<V> {
   private redis: Redis | null = null;
   private redisHealthy = false;
-  private memory = new Map<string, MemoryEntry<V>>();
+  private readonly memory = new Map<string, MemoryEntry<V>>();
   private memoryUsage = 0;
-  private disk = new Map<string, string>();
-  private lockTimeoutMs: number;
-  private serializationPool: SerializationPool;
+  private readonly disk = new Map<string, string>();
+  private readonly lockTimeoutMs: number;
+  private readonly serializationPool: SerializationPool;
   private isInitialized = false;
 
-  constructor(private options: HybridLRUCacheOptions) {
+  constructor(private readonly options: HybridLRUCacheOptions) {
     this.lockTimeoutMs = options.lockTimeoutMs ?? 120000;
     this.serializationPool = new SerializationPool();
     this.initRedis(options.redisConfig);

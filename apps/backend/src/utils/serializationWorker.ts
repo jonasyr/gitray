@@ -49,9 +49,9 @@ export interface SerializationTask<T> {
  * Prevents JSON.stringify operations from blocking the main event loop
  */
 export class SerializationPool {
-  private workers: Worker[] = [];
-  private queue: SerializationTask<any>[] = [];
-  private activeTasks: Set<SerializationTask<any>> = new Set();
+  private readonly workers: Worker[] = [];
+  private readonly queue: SerializationTask<any>[] = [];
+  private readonly activeTasks: Set<SerializationTask<any>> = new Set();
   private readonly poolSize: number;
   private readonly workerCode: string;
   private isDestroyed = false;

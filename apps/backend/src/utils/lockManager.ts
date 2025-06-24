@@ -32,9 +32,9 @@ interface LockInfo {
 }
 
 class LockManager {
-  private inflight = new Map<string, Promise<unknown>>();
-  private activeLocks = new Map<string, LockInfo>();
-  private metrics: LockMetrics = {
+  private readonly inflight = new Map<string, Promise<unknown>>();
+  private readonly activeLocks = new Map<string, LockInfo>();
+  private readonly metrics: LockMetrics = {
     acquisitions: 0,
     timeouts: 0,
     staleCleaned: 0,

@@ -80,13 +80,16 @@ interface PendingOperation<T> {
  * Queue for coordinating operations on the same repository
  */
 class OperationQueue {
-  private pending = new Map<string, PendingOperation<any>>();
-  private metrics = {
+  private readonly pending = new Map<string, PendingOperation<any>>();
+  private readonly metrics = {
     coalescedCount: 0,
     operationCount: 0,
   };
+  private readonly repoUrl: string;
 
-  constructor(private repoUrl: string) {}
+  constructor(repoUrl: string) {
+    this.repoUrl = repoUrl;
+  }
 
   async enqueue<T>(
     operationType: string,
@@ -192,8 +195,8 @@ class OperationQueue {
  * - Cleanup operations are properly coordinated
  */
 class RepositoryCoordinator {
-  private sharedHandles = new Map<string, RepositoryHandle>();
-  private operationQueues = new Map<string, OperationQueue>();
+  private readonly sharedHandles = new Map<string, RepositoryHandle>();
+  private readonly operationQueues = new Map<string, OperationQueue>();
   private readonly activeClones = new Map<string, Promise<RepositoryHandle>>();
   private cleanupInterval: NodeJS.Timeout | null = null;
 

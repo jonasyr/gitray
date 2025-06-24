@@ -70,12 +70,12 @@ export interface MemoryPressureConfig {
 }
 
 class MemoryPressureManager {
-  private config: MemoryPressureConfig;
+  private readonly config: MemoryPressureConfig;
   private circuitBreakerState: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
   private circuitBreakerLock = false; // Prevent race conditions in state transitions
   private lastAlertTime = 0;
   private monitoringInterval: NodeJS.Timeout | null = null;
-  private pressureHistory: MemoryPressureStats[] = [];
+  private readonly pressureHistory: MemoryPressureStats[] = [];
   private emergencyEvictionCount = 0;
   private isCheckingMemory = false; // Prevent overlapping memory checks
   private lastPressureLevel: 'normal' | 'warning' | 'critical' | 'emergency' =
@@ -95,7 +95,7 @@ class MemoryPressureManager {
   private readonly CIRCUIT_BREAKER_CACHE_DURATION_MS = 100; // 100ms cache
 
   // Metrics for monitoring
-  private metrics = {
+  private readonly metrics = {
     pressureEvents: 0,
     circuitBreakerTrips: 0,
     throttledRequests: 0,
