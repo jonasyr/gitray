@@ -202,25 +202,25 @@ interface CacheTransaction {
  */
 export class RepositoryCacheManager {
   /** Primary cache tier: Raw Git commit data shared across all operations */
-  private rawCommitsCache: HybridLRUCache<Commit[]>;
+  private readonly rawCommitsCache: HybridLRUCache<Commit[]>;
 
   /** Secondary cache tier: Filtered commit data for specific query patterns */
-  private filteredCommitsCache: HybridLRUCache<Commit[]>;
+  private readonly filteredCommitsCache: HybridLRUCache<Commit[]>;
 
   /** Tertiary cache tier: Aggregated visualization data with lowest memory priority */
-  private aggregatedDataCache: HybridLRUCache<CommitHeatmapData>;
+  private readonly aggregatedDataCache: HybridLRUCache<CommitHeatmapData>;
 
   /** Active transaction tracking for ensuring atomic cache updates */
-  private activeTransactions = new Map<string, CacheTransaction>();
+  private readonly activeTransactions = new Map<string, CacheTransaction>();
 
   /** Repository-to-cache-key mapping for efficient bulk invalidation */
-  private cacheKeyPatterns = new Map<string, Set<string>>();
+  private readonly cacheKeyPatterns = new Map<string, Set<string>>();
 
   /**
    * Operational metrics tracking for performance monitoring and optimization.
    * These metrics inform cache tuning decisions and help identify bottlenecks.
    */
-  private metrics = {
+  private readonly metrics = {
     operations: {
       rawHits: 0,
       rawMisses: 0,

@@ -32,9 +32,9 @@ export class DistributedCacheInvalidation {
   private redis: Redis | null = null;
   private subscriber: Redis | null = null;
   private isHealthy = false;
-  private processId: string;
-  private subscriptions = new Set<string>();
-  private invalidationHandlers = new Map<
+  private readonly processId: string;
+  private readonly subscriptions = new Set<string>();
+  private readonly invalidationHandlers = new Map<
     string,
     (pattern: string, metadata?: any) => Promise<void>
   >();

@@ -194,7 +194,7 @@ class OperationQueue {
 class RepositoryCoordinator {
   private sharedHandles = new Map<string, RepositoryHandle>();
   private operationQueues = new Map<string, OperationQueue>();
-  private activeClones = new Map<string, Promise<RepositoryHandle>>();
+  private readonly activeClones = new Map<string, Promise<RepositoryHandle>>();
   private cleanupInterval: NodeJS.Timeout | null = null;
 
   private metrics: CoordinationMetrics = {
