@@ -2,6 +2,7 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vitest/config';
 import * as path from 'path';
+import * as os from 'os';
 
 export default defineConfig({
   test: {
@@ -10,12 +11,22 @@ export default defineConfig({
     include: ['**/*.{test,spec}.{ts,js}'],
     exclude: ['node_modules', 'dist', 'coverage'],
     testTimeout: 10000,
+    setupFiles: ['./__tests__/setup/global.setup.ts'],
+    pool: 'threads',
+    // isolate: true is the default - keeps tests reliable
+    poolOptions: {
+      threads: {
+        minThreads: 1,
+        maxThreads: Math.max(1, Math.floor(os.cpus().length * 0.8)), // Use 80% of available cores
+      },
+    },
     coverage: {
       provider: 'v8',
       include: ['src/**'], // Only include files from the src directory for this project
-      all: false, // Explicitly set all to false
+      all: true, // Include all files in src, not just executed ones
       clean: true, // Clean coverage directory before running
       extension: ['.ts'], // <--- Added: Only consider .ts files for coverage
+      // skipFull: true,
       exclude: [
         // Paths relative to this project's root (apps/backend)
         'node_modules/**',

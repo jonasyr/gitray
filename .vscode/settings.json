@@ -1,0 +1,24 @@
+{
+  "eslint.useFlatConfig": true,
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact"
+  ],
+  "eslint.workingDirectories": [
+    {
+      "mode": "auto"
+    }
+  ],
+  "eslint.codeActionsOnSave.mode": "problems",
+  "eslint.format.enable": true,
+  "eslint.lintTask.enable": true,
+  "files.associations": {
+    "*.mjs": "javascript"
+  },
+  "sonarlint.connectedMode.project": {
+    "connectionId": "gitray-org",
+    "projectKey": "gitray-dev"
+  }
+}

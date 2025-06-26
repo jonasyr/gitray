@@ -15,9 +15,10 @@ CURRENT_OPERATION=""
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_FILE="$SCRIPT_DIR/.gitray.log"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LOG_FILE="$PROJECT_ROOT/logs/.gitray.log"
 CONFIG_FILE="$SCRIPT_DIR/.gitray.config"
-PID_FILE="$SCRIPT_DIR/.gitray.pid"
+PID_FILE="$PROJECT_ROOT/locks/.gitray.pid"
 
 # Service definitions
 declare -A SERVICES=(
@@ -98,6 +99,10 @@ graceful_shutdown() {
     echo -e "${BLUE}${ICON_CLEAN} Cleaning up processes...${NC}"
     cleanup_background_processes
     
+    # Final cleanup - ensure all PID files are removed
+    echo -e "${DIM}Final PID file cleanup...${NC}"
+    clean_all_pid_files
+    
     # Clean up main PID file
     rm -f "$PID_FILE" 2>/dev/null || true
     
@@ -108,6 +113,19 @@ graceful_shutdown() {
 
 # Set up graceful shutdown trap (simple version)
 trap 'graceful_shutdown' INT TERM
+trap 'final_cleanup' EXIT
+
+# Final cleanup function for EXIT trap
+final_cleanup() {
+    # Only run if this hasn't been called by graceful_shutdown
+    if [ "$SHUTDOWN_IN_PROGRESS" != "true" ]; then
+        for service in "${!SERVICES[@]}"; do
+            if [ -f "$PROJECT_ROOT/locks/$service.pid" ]; then
+                rm -f "$PROJECT_ROOT/locks/$service.pid" 2>/dev/null || true
+            fi
+        done
+    fi
+}
 
 cleanup_background_processes() {
     # Kill any remaining background processes we might have started
@@ -115,7 +133,7 @@ cleanup_background_processes() {
     
     # Collect PIDs from our PID files
     for service in "${!SERVICES[@]}"; do
-        local pid_file="$SCRIPT_DIR/.$service.pid"
+        local pid_file="$PROJECT_ROOT/locks/$service.pid"
         if [ -f "$pid_file" ]; then
             local pid=$(cat "$pid_file" 2>/dev/null || echo "")
             if [ -n "$pid" ]; then
@@ -138,8 +156,11 @@ cleanup_background_processes() {
     # Clean up TypeScript compiler processes
     pkill -f "tsc.*watch" 2>/dev/null || true
     
-    # Clean up PID files
-    rm -f "$SCRIPT_DIR"/.*.pid 2>/dev/null || true
+    # Clean up PID files using the proper remove_pid_file function
+    echo -e "${DIM}Cleaning up remaining PID files...${NC}"
+    for service in "${!SERVICES[@]}"; do
+        remove_pid_file "$service" 2>/dev/null || true
+    done
 }
 
 # Bulletproof cleanup - DISABLED (was too aggressive)
@@ -347,6 +368,70 @@ show_system_status() {
     echo
 }
 
+# Enhanced logging function with PID cleanup debugging
+log_debug() {
+    if [ "${DEBUG_CLEANUP:-false}" = "true" ]; then
+        echo "[DEBUG] $*" >&2
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [DEBUG] $*" >> "$LOG_FILE"
+    fi
+}
+
+# Robust PID file removal with verification
+remove_pid_file() {
+    local service="$1"
+    local pid_file="$PROJECT_ROOT/locks/$service.pid"
+    
+    log_debug "Attempting to remove PID file: $pid_file"
+    
+    if [ ! -f "$pid_file" ]; then
+        log_debug "PID file doesn't exist: $pid_file"
+        return 0
+    fi
+    
+    # Try to remove the file
+    if rm -f "$pid_file" 2>/dev/null; then
+        log_debug "Successfully removed PID file: $pid_file"
+        echo -e "${DIM}Cleaned up PID file for $service${NC}"
+    else
+        echo -e "${YELLOW}${ICON_WARNING} Failed to remove PID file: $pid_file${NC}" >&2
+        return 1
+    fi
+    
+    # Verify removal was successful
+    if [ -f "$pid_file" ]; then
+        echo -e "${RED}${ICON_ERROR} PID file still exists after removal attempt: $pid_file${NC}" >&2
+        return 1
+    fi
+    
+    log_debug "PID file successfully removed and verified: $pid_file"
+    return 0
+}
+
+# Clean all PID files with verification
+clean_all_pid_files() {
+    local locks_dir="$PROJECT_ROOT/locks"
+    
+    log_debug "Starting cleanup of all PID files in: $locks_dir"
+    
+    if [ ! -d "$locks_dir" ]; then
+        log_debug "Locks directory doesn't exist: $locks_dir"
+        return 0
+    fi
+    
+    # Find and remove all PID files
+    find "$locks_dir" -name "*.pid" -type f -delete 2>/dev/null || true
+    
+    # Verify cleanup
+    local remaining_files=$(find "$locks_dir" -name "*.pid" -type f 2>/dev/null | wc -l)
+    if [ "$remaining_files" -eq 0 ]; then
+        log_debug "All PID files successfully cleaned"
+        return 0
+    else
+        echo -e "${YELLOW}${ICON_WARNING} $remaining_files PID files could not be removed${NC}" >&2
+        return 1
+    fi
+}
+
 # ============================================================================
 # SERVICE MANAGEMENT
 # ============================================================================
@@ -402,13 +487,14 @@ start_service() {
             fi
             
             # Then start the watcher like other services
-            local log_file="$SCRIPT_DIR/.$service.log"
+            local log_file="$PROJECT_ROOT/logs/$service.log"
             echo -e "${BLUE}Starting shared types watcher in background...${NC}"
             
             # Start service and capture PID, filtering output through ANSI code remover
             env NO_COLOR=1 FORCE_COLOR=0 NODE_DISABLE_COLORS=1 TERM=dumb $cmd 2>&1 | sed -u 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\[[0-9;]*[~]//g; s/\x1b\].*\x07//g; s/\x1b\[[?][0-9;]*[hl]//g; s/\x1b\[2J//g; s/\x1b\[H//g; s/\x1b\[3J//g' > "$log_file" &
             local pid=$!
-            echo $pid > "$SCRIPT_DIR/.$service.pid"
+            echo $pid > "$PROJECT_ROOT/locks/$service.pid"
+            sync  # Ensure PID file is written to disk
             
             # Wait a moment for service to initialize
             local wait_count=0
@@ -442,7 +528,7 @@ start_service() {
             fi
             ;;
         *)
-            local log_file="$SCRIPT_DIR/.$service.log"
+            local log_file="$PROJECT_ROOT/logs/$service.log"
             echo -e "${BLUE}Starting $service in background...${NC}"
             
             if [ "$SCRIPT_RUNNING" = "false" ]; then
@@ -452,7 +538,8 @@ start_service() {
             # Start service and capture PID
             $cmd > "$log_file" 2>&1 &
             local pid=$!
-            echo $pid > "$SCRIPT_DIR/.$service.pid"
+            echo $pid > "$PROJECT_ROOT/locks/$service.pid"
+            sync  # Ensure PID file is written to disk
             
             # Wait a moment for service to initialize
             local wait_count=0
@@ -500,121 +587,75 @@ stop_service() {
             docker rm gitray-redis 2>/dev/null || true
             echo -e "${YELLOW}Redis stopped${NC}"
             ;;
-        "frontend")
-            # Kill all vite processes
-            pkill -f "vite" 2>/dev/null || true
-            # Kill all pnpm processes running frontend dev
-            pkill -f "pnpm.*frontend.*dev" 2>/dev/null || true
-            # Also try to kill by PID file if it exists
-            local pid_file="$SCRIPT_DIR/.$service.pid"
+        "frontend"|"backend"|"shared-types")
+            # Kill by PID file if it exists
+            local pid_file="$PROJECT_ROOT/locks/$service.pid"
             if [ -f "$pid_file" ]; then
                 local pid=$(cat "$pid_file" 2>/dev/null || echo "")
-                if [ -n "$pid" ]; then
+                if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
                     kill -TERM "$pid" 2>/dev/null || true
                     sleep 1
-                    kill -KILL "$pid" 2>/dev/null || true
-                fi
-                rm -f "$pid_file"
-            fi
-            echo -e "${YELLOW}$service_name stopped${NC}"
-            ;;
-        "backend")
-            # Kill processes using the backend port
-            local port="${SERVICE_PORTS[$service]:-}"
-            if [ -n "$port" ]; then
-                local pids=$(lsof -t -i ":$port" 2>/dev/null || echo "")
-                if [ -n "$pids" ]; then
-                    for pid in $pids; do
-                        kill -TERM "$pid" 2>/dev/null || true
-                    done
-                    sleep 1
-                    for pid in $pids; do
+                    if kill -0 "$pid" 2>/dev/null; then
                         kill -KILL "$pid" 2>/dev/null || true
-                    done
+                    fi
                 fi
             fi
-            # Kill all pnpm processes running backend dev
-            pkill -f "pnpm.*backend.*dev" 2>/dev/null || true
-            # Also try to kill by PID file if it exists
-            local pid_file="$SCRIPT_DIR/.$service.pid"
-            if [ -f "$pid_file" ]; then
-                local pid=$(cat "$pid_file" 2>/dev/null || echo "")
-                if [ -n "$pid" ]; then
-                    kill -TERM "$pid" 2>/dev/null || true
-                    sleep 1
-                    kill -KILL "$pid" 2>/dev/null || true
-                fi
-                rm -f "$pid_file"
-            fi
+            
+            # Additional cleanup based on service type
+            case "$service" in
+                "frontend")
+                    pkill -f "vite" 2>/dev/null || true
+                    pkill -f "pnpm.*frontend.*dev" 2>/dev/null || true
+                    ;;
+                "backend")
+                    local port="${SERVICE_PORTS[$service]:-}"
+                    if [ -n "$port" ]; then
+                        local pids=$(lsof -t -i ":$port" 2>/dev/null || echo "")
+                        for pid in $pids; do
+                            kill -TERM "$pid" 2>/dev/null || true
+                        done
+                    fi
+                    pkill -f "pnpm.*backend.*dev" 2>/dev/null || true
+                    ;;
+                "shared-types")
+                    pkill -f "tsc.*watch" 2>/dev/null || true
+                    pkill -f "pnpm.*shared-types.*watch" 2>/dev/null || true
+                    ;;
+            esac
+            
+            # Remove PID file
+            remove_pid_file "$service"
             echo -e "${YELLOW}$service_name stopped${NC}"
             ;;
-        "shared-types")
-            # Kill TypeScript compiler watch processes
-            pkill -f "tsc.*watch" 2>/dev/null || true
-            # Kill all pnpm processes running shared-types watch
-            pkill -f "pnpm.*shared-types.*watch" 2>/dev/null || true
-            # Also try to kill by PID file if it exists
-            local pid_file="$SCRIPT_DIR/.$service.pid"
-            if [ -f "$pid_file" ]; then
-                local pid=$(cat "$pid_file" 2>/dev/null || echo "")
-                if [ -n "$pid" ]; then
-                    kill -TERM "$pid" 2>/dev/null || true
-                    sleep 1
-                    kill -KILL "$pid" 2>/dev/null || true
-                fi
-                rm -f "$pid_file"
-            fi
-            echo -e "${YELLOW}$service_name stopped${NC}"
-            ;;
-        *)
     esac
 }
 
 stop_all_services() {
     echo -e "${YELLOW}${ICON_WARNING} Stopping all services...${NC}"
     
+    # Stop each service individually
     for service in "${!SERVICES[@]}"; do
         stop_service "$service"
     done
     
-    # Clean up any remaining processes more aggressively
+    # Clean up any remaining processes
     echo -e "${DIM}Cleaning up any remaining processes...${NC}"
-    
-    # Kill all pnpm dev processes (including watch)
     pkill -f "pnpm.*dev" 2>/dev/null || true
     pkill -f "pnpm.*watch" 2>/dev/null || true
-    
-    # Kill any remaining vite processes
     pkill -f "vite" 2>/dev/null || true
-    
-    # Kill any remaining TypeScript compiler processes
     pkill -f "tsc.*watch" 2>/dev/null || true
     
     # Kill any node processes on our service ports
     for port in "${SERVICE_PORTS[@]}"; do
         local pids=$(lsof -t -i ":$port" 2>/dev/null || echo "")
-        if [ -n "$pids" ]; then
-            for pid in $pids; do
-                kill -TERM "$pid" 2>/dev/null || true
-            done
-        fi
-    done
-    
-    # Wait a moment for graceful shutdown
-    sleep 2
-    
-    # Force kill any remaining processes on our ports
-    for port in "${SERVICE_PORTS[@]}"; do
-        local pids=$(lsof -t -i ":$port" 2>/dev/null || echo "")
-        if [ -n "$pids" ]; then
-            for pid in $pids; do
-                kill -KILL "$pid" 2>/dev/null || true
-            done
-        fi
+        for pid in $pids; do
+            kill -KILL "$pid" 2>/dev/null || true
+        done
     done
     
     # Clean up all PID files
-    rm -f "$SCRIPT_DIR"/.*.pid 2>/dev/null || true
+    echo -e "${DIM}Cleaning up PID files...${NC}"
+    clean_all_pid_files
     
     echo -e "${GREEN}${ICON_SUCCESS} All services stopped${NC}"
 }
@@ -631,7 +672,7 @@ stop_all_services_quiet() {
                 # Kill all vite processes
                 pkill -f "vite" >/dev/null 2>&1 || true
                 pkill -f "pnpm.*frontend.*dev" >/dev/null 2>&1 || true
-                local pid_file="$SCRIPT_DIR/.$service.pid"
+                local pid_file="$PROJECT_ROOT/locks/$service.pid"
                 if [ -f "$pid_file" ]; then
                     local pid=$(cat "$pid_file" 2>/dev/null || echo "")
                     if [ -n "$pid" ]; then
@@ -639,8 +680,8 @@ stop_all_services_quiet() {
                         sleep 1
                         kill -KILL "$pid" >/dev/null 2>&1 || true
                     fi
-                    rm -f "$pid_file" >/dev/null 2>&1 || true
                 fi
+                remove_pid_file "$service" || true
                 ;;
             "backend")
                 local port="${SERVICE_PORTS[$service]:-}"
@@ -657,7 +698,7 @@ stop_all_services_quiet() {
                     fi
                 fi
                 pkill -f "pnpm.*backend.*dev" >/dev/null 2>&1 || true
-                local pid_file="$SCRIPT_DIR/.$service.pid"
+                local pid_file="$PROJECT_ROOT/locks/$service.pid"
                 if [ -f "$pid_file" ]; then
                     local pid=$(cat "$pid_file" 2>/dev/null || echo "")
                     if [ -n "$pid" ]; then
@@ -665,14 +706,17 @@ stop_all_services_quiet() {
                         sleep 1
                         kill -KILL "$pid" >/dev/null 2>&1 || true
                     fi
-                    rm -f "$pid_file" >/dev/null 2>&1 || true
+                fi
+                # Clean up PID file
+                if [ -f "$PROJECT_ROOT/locks/$service.pid" ]; then
+                    remove_pid_file "$service" || echo "Failed to remove $service PID file" >&2
                 fi
                 ;;
             "shared-types")
                 # Kill TypeScript compiler watch processes
                 pkill -f "tsc.*watch" >/dev/null 2>&1 || true
                 pkill -f "pnpm.*shared-types.*watch" >/dev/null 2>&1 || true
-                local pid_file="$SCRIPT_DIR/.$service.pid"
+                local pid_file="$PROJECT_ROOT/locks/$service.pid"
                 if [ -f "$pid_file" ]; then
                     local pid=$(cat "$pid_file" 2>/dev/null || echo "")
                     if [ -n "$pid" ]; then
@@ -680,7 +724,10 @@ stop_all_services_quiet() {
                         sleep 1
                         kill -KILL "$pid" >/dev/null 2>&1 || true
                     fi
-                    rm -f "$pid_file" >/dev/null 2>&1 || true
+                fi
+                # Clean up PID file
+                if [ -f "$PROJECT_ROOT/locks/$service.pid" ]; then
+                    remove_pid_file "$service" || echo "Failed to remove $service PID file" >&2
                 fi
                 ;;
             *)
@@ -860,17 +907,17 @@ full_development_setup() {
                 
                 # Start log viewing in background - only include existing log files
                 local log_files=()
-                [ -f "$SCRIPT_DIR/.backend.log" ] && log_files+=("$SCRIPT_DIR/.backend.log")
-                [ -f "$SCRIPT_DIR/.frontend.log" ] && log_files+=("$SCRIPT_DIR/.frontend.log")
-                [ -f "$SCRIPT_DIR/.shared-types.log" ] && log_files+=("$SCRIPT_DIR/.shared-types.log")
+                [ -f "$PROJECT_ROOT/logs/backend.log" ] && log_files+=("$PROJECT_ROOT/logs/backend.log")
+                [ -f "$PROJECT_ROOT/logs/frontend.log" ] && log_files+=("$PROJECT_ROOT/logs/frontend.log")
+                [ -f "$PROJECT_ROOT/logs/shared-types.log" ] && log_files+=("$PROJECT_ROOT/logs/shared-types.log")
                 
                 if [ ${#log_files[@]} -gt 0 ]; then
                     # Use multitail if available for better multi-file display
                     if command -v multitail >/dev/null 2>&1; then
                         local multitail_cmd="multitail -s 2"
-                        [ -f "$SCRIPT_DIR/.backend.log" ] && multitail_cmd+=" -ci green -t \"Backend\" \"$SCRIPT_DIR/.backend.log\""
-                        [ -f "$SCRIPT_DIR/.frontend.log" ] && multitail_cmd+=" -ci blue -t \"Frontend\" \"$SCRIPT_DIR/.frontend.log\""
-                        [ -f "$SCRIPT_DIR/.shared-types.log" ] && multitail_cmd+=" -ci yellow -t \"Shared Types\" \"$SCRIPT_DIR/.shared-types.log\""
+                        [ -f "$PROJECT_ROOT/logs/backend.log" ] && multitail_cmd+=" -ci green -t \"Backend\" \"$PROJECT_ROOT/logs/backend.log\""
+                        [ -f "$PROJECT_ROOT/logs/frontend.log" ] && multitail_cmd+=" -ci blue -t \"Frontend\" \"$PROJECT_ROOT/logs/frontend.log\""
+                        [ -f "$PROJECT_ROOT/logs/shared-types.log" ] && multitail_cmd+=" -ci yellow -t \"Shared Types\" \"$PROJECT_ROOT/logs/shared-types.log\""
                         # Run multitail interactively (it handles its own exit on 'q')
                         eval "$multitail_cmd"
                         # After multitail exits, return to monitoring
@@ -1049,15 +1096,15 @@ quick_start() {
                 
                 # Start log viewing in background - only include existing log files for quick start
                 local log_files=()
-                [ -f "$SCRIPT_DIR/.frontend.log" ] && log_files+=("$SCRIPT_DIR/.frontend.log")
-                [ -f "$SCRIPT_DIR/.shared-types.log" ] && log_files+=("$SCRIPT_DIR/.shared-types.log")
+                [ -f "$PROJECT_ROOT/logs/frontend.log" ] && log_files+=("$PROJECT_ROOT/logs/frontend.log")
+                [ -f "$PROJECT_ROOT/logs/shared-types.log" ] && log_files+=("$PROJECT_ROOT/logs/shared-types.log")
                 
                 if [ ${#log_files[@]} -gt 0 ]; then
                     # Use multitail if available for better multi-file display
                     if command -v multitail >/dev/null 2>&1; then
                         local multitail_cmd="multitail -s 2"
-                        [ -f "$SCRIPT_DIR/.frontend.log" ] && multitail_cmd+=" -ci blue -t \"Frontend\" \"$SCRIPT_DIR/.frontend.log\""
-                        [ -f "$SCRIPT_DIR/.shared-types.log" ] && multitail_cmd+=" -ci yellow -t \"Shared Types\" \"$SCRIPT_DIR/.shared-types.log\""
+                        [ -f "$PROJECT_ROOT/logs/frontend.log" ] && multitail_cmd+=" -ci blue -t \"Frontend\" \"$PROJECT_ROOT/logs/frontend.log\""
+                        [ -f "$PROJECT_ROOT/logs/shared-types.log" ] && multitail_cmd+=" -ci yellow -t \"Shared Types\" \"$PROJECT_ROOT/logs/shared-types.log\""
                         eval "$multitail_cmd" 2>/dev/null &
                         local tail_pid=$!
                     else
@@ -1306,12 +1353,16 @@ service_management_menu() {
         echo "  2) Start Backend"
         echo "  3) Start Frontend"
         echo "  4) Start Shared Types Watcher"
-        echo "  5) Stop All Services"
-        echo "  6) Restart All Services"
-        echo "  7) Back to Main Menu"
+        echo "  5) Stop Redis"
+        echo "  6) Stop Backend"
+        echo "  7) Stop Frontend"
+        echo "  8) Stop Shared Types Watcher"
+        echo "  9) Stop All Services"
+        echo " 10) Restart All Services"
+        echo " 11) Back to Main Menu"
         echo
         
-        read -p "Choose action (1-7): " choice
+        read -p "Choose action (1-11): " choice
         
         if [ "$SCRIPT_RUNNING" = "false" ]; then
             break
@@ -1322,14 +1373,17 @@ service_management_menu() {
             2) start_service "backend" ;;
             3) start_service "frontend" ;;
             4) start_service "shared-types" ;;
-            5) 
+            5) stop_service "redis" ;;
+            6) stop_service "backend" ;;
+            7) stop_service "frontend" ;;
+            8) stop_service "shared-types" ;;
+            9) 
                 echo -e "${BLUE}${ICON_GEAR} Stopping all services...${NC}"
-                stop_all_services_quiet
-                echo -e "${GREEN}${ICON_SUCCESS} All services stopped${NC}"
+                stop_all_services
                 ;;
-            6) 
+            10) 
                 echo -e "${BLUE}${ICON_GEAR} Restarting all services...${NC}"
-                stop_all_services_quiet
+                stop_all_services
                 if [ "$SCRIPT_RUNNING" = "true" ]; then
                     sleep 2
                     echo -e "${DIM}Starting services...${NC}"
@@ -1346,7 +1400,7 @@ service_management_menu() {
                     echo -e "${GREEN}${ICON_SUCCESS} All services restarted${NC}"
                 fi
                 ;;
-            7) break ;;
+            11) break ;;
             *) echo -e "${RED}Invalid choice${NC}" ;;
         esac
         
@@ -1385,21 +1439,21 @@ show_logs() {
     
     case $choice in
         1) 
-            if [ -f "$SCRIPT_DIR/.backend.log" ] || [ -f "$SCRIPT_DIR/.frontend.log" ] || [ -f "$SCRIPT_DIR/.shared-types.log" ]; then
+            if [ -f "$PROJECT_ROOT/logs/backend.log" ] || [ -f "$PROJECT_ROOT/logs/frontend.log" ] || [ -f "$PROJECT_ROOT/logs/shared-types.log" ]; then
                 # Collect existing log files
                 local log_files=()
-                [ -f "$SCRIPT_DIR/.backend.log" ] && log_files+=("$SCRIPT_DIR/.backend.log")
-                [ -f "$SCRIPT_DIR/.frontend.log" ] && log_files+=("$SCRIPT_DIR/.frontend.log") 
-                [ -f "$SCRIPT_DIR/.shared-types.log" ] && log_files+=("$SCRIPT_DIR/.shared-types.log")
+                [ -f "$PROJECT_ROOT/logs/backend.log" ] && log_files+=("$PROJECT_ROOT/logs/backend.log")
+                [ -f "$PROJECT_ROOT/logs/frontend.log" ] && log_files+=("$PROJECT_ROOT/logs/frontend.log") 
+                [ -f "$PROJECT_ROOT/logs/shared-types.log" ] && log_files+=("$PROJECT_ROOT/logs/shared-types.log")
                 
                 if [ ${#log_files[@]} -gt 0 ]; then
                     # Use multitail if available, otherwise fall back to formatted tail
                     if command -v multitail >/dev/null 2>&1; then
                         # Build multitail command with existing files only
                         local multitail_cmd="multitail -s 2"
-                        [ -f "$SCRIPT_DIR/.backend.log" ] && multitail_cmd+=" -ci green -t \"Backend\" \"$SCRIPT_DIR/.backend.log\""
-                        [ -f "$SCRIPT_DIR/.frontend.log" ] && multitail_cmd+=" -ci blue -t \"Frontend\" \"$SCRIPT_DIR/.frontend.log\""
-                        [ -f "$SCRIPT_DIR/.shared-types.log" ] && multitail_cmd+=" -ci yellow -t \"Shared Types\" \"$SCRIPT_DIR/.shared-types.log\""
+                        [ -f "$PROJECT_ROOT/logs/backend.log" ] && multitail_cmd+=" -ci green -t \"Backend\" \"$PROJECT_ROOT/logs/backend.log\""
+                        [ -f "$PROJECT_ROOT/logs/frontend.log" ] && multitail_cmd+=" -ci blue -t \"Frontend\" \"$PROJECT_ROOT/logs/frontend.log\""
+                        [ -f "$PROJECT_ROOT/logs/shared-types.log" ] && multitail_cmd+=" -ci yellow -t \"Shared Types\" \"$PROJECT_ROOT/logs/shared-types.log\""
                         # Run multitail interactively (it handles its own exit on 'q')
                         eval "$multitail_cmd"
                     else
@@ -1436,9 +1490,9 @@ show_logs() {
             fi
             ;;
         2) 
-            if [ -f "$SCRIPT_DIR/.backend.log" ]; then
+            if [ -f "$PROJECT_ROOT/logs/backend.log" ]; then
                 echo -e "${DIM}Press 'q' to return to menu${NC}"
-                tail -f "$SCRIPT_DIR/.backend.log" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' &
+                tail -f "$PROJECT_ROOT/logs/backend.log" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' &
                 local tail_pid=$!
                 # Wait for 'q' to exit logs
                 while [ "$SCRIPT_RUNNING" = "true" ]; do
@@ -1456,9 +1510,9 @@ show_logs() {
             fi
             ;;
         3) 
-            if [ -f "$SCRIPT_DIR/.frontend.log" ]; then
+            if [ -f "$PROJECT_ROOT/logs/frontend.log" ]; then
                 echo -e "${DIM}Press 'q' to return to menu${NC}"
-                tail -f "$SCRIPT_DIR/.frontend.log" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' &
+                tail -f "$PROJECT_ROOT/logs/frontend.log" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' &
                 local tail_pid=$!
                 # Wait for 'q' to exit logs
                 while [ "$SCRIPT_RUNNING" = "true" ]; do
@@ -1476,9 +1530,9 @@ show_logs() {
             fi
             ;;
         4) 
-            if [ -f "$SCRIPT_DIR/.shared-types.log" ]; then
+            if [ -f "$PROJECT_ROOT/logs/shared-types.log" ]; then
                 echo -e "${DIM}Press 'q' to return to menu${NC}"
-                tail -f "$SCRIPT_DIR/.shared-types.log" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' &
+                tail -f "$PROJECT_ROOT/logs/shared-types.log" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' &
                 local tail_pid=$!
                 # Wait for 'q' to exit logs
                 while [ "$SCRIPT_RUNNING" = "true" ]; do
@@ -1557,6 +1611,7 @@ main() {
     check_dependencies
     check_and_install_multitail
     mkdir -p "$(dirname "$LOG_FILE")"
+    mkdir -p "$(dirname "$PID_FILE")"
     log "GitRay Development Environment Manager started"
     
     # Create lock file to prevent multiple instances
@@ -1590,6 +1645,14 @@ main() {
     
     # Clean up on normal exit
     rm -f "$PID_FILE" 2>/dev/null || true
+    
+    # Ensure all service PID files are cleaned up on exit
+    echo -e "${DIM}Final cleanup of any remaining PID files...${NC}"
+    for service in "${!SERVICES[@]}"; do
+        if [ -f "$PROJECT_ROOT/locks/$service.pid" ]; then
+            remove_pid_file "$service" >/dev/null 2>&1 || rm -f "$PROJECT_ROOT/locks/$service.pid" 2>/dev/null || true
+        fi
+    done
 }
 
 # Execute main function

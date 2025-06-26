@@ -62,6 +62,7 @@ export interface CommitHeatmapData {
     maxCommitCount: number;
     totalCommits: number;
     filterOptions?: CommitFilterOptions;
+    streamingUsed?: boolean;
   };
 }
 
@@ -159,5 +160,20 @@ export class RepositoryError extends GitrayError {
   ) {
     super(message, HTTP_STATUS.BAD_REQUEST, 'REPOSITORY_ERROR');
     this.name = 'RepositoryError';
+  }
+}
+
+export class TransactionRollbackError extends GitrayError {
+  constructor(
+    message: string,
+    public transactionId?: string,
+    public failedOperations?: string[]
+  ) {
+    super(
+      message,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
+      'TRANSACTION_ROLLBACK_ERROR'
+    );
+    this.name = 'TransactionRollbackError';
   }
 }

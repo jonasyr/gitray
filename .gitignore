@@ -316,3 +316,18 @@ dist
 # Kompilierte JavaScript-Dateien
 apps/backend/src/**/*.js
 apps/backend/src/**/*.js.map
+
+# Application runtime directories
+cache/
+locks/
+logs/
+apps/backend/cache/
+apps/backend/locks/
+apps/backend/logs/
+
+# Script-generated log files (from start.sh)
+.backend.log
+.frontend.log
+.gitray.log
+.shared-types.log
+*.pid

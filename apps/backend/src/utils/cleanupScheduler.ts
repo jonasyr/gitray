@@ -1,7 +1,9 @@
 import { TIME } from '@gitray/shared-types';
 import { gitService } from '../services/gitService';
-import logger from '../services/logger';
+import { getLogger } from '../services/logger';
 import { cleanupQueueSize, tempDirectories } from '../services/metrics';
+
+const logger = getLogger();
 
 // Manages async cleanup of temporary repositories using a simple queue
 

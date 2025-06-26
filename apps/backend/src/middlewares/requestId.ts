@@ -15,8 +15,20 @@ export const requestIdMiddleware = (
   next: NextFunction
 ): void => {
   // Reuse provided header if present for traceability, otherwise generate one
-  const requestId =
-    (req.headers['x-request-id'] as string) || randomBytes(5).toString('hex');
+  let requestId: string;
+
+  // Handle case where headers might be undefined
+  const headerValue = req.headers?.['x-request-id'];
+
+  if (headerValue) {
+    // Handle array headers by joining with comma (Express convention)
+    requestId = Array.isArray(headerValue)
+      ? headerValue.join(',')
+      : headerValue;
+  } else {
+    requestId = randomBytes(5).toString('hex');
+  }
+
   req.id = requestId;
   res.setHeader('X-Request-ID', requestId);
   next();

@@ -6,26 +6,23 @@ import {
   stopCleanupScheduler,
   getQueueStatus,
   clearQueue,
-} from '../../src/utils/cleanupScheduler';
-import { gitService } from '../../src/services/gitService';
-import logger from '../../src/services/logger';
+} from '../../../src/utils/cleanupScheduler';
+import { gitService } from '../../../src/services/gitService';
 
 // Mock dependencies
-vi.mock('../../src/services/gitService', () => ({
+vi.mock('../../../src/services/gitService', () => ({
   gitService: {
     cleanupRepository: vi.fn(),
   },
 }));
 
-vi.mock('../../src/services/logger', () => ({
+vi.mock('../../../src/services/logger', () => ({
   __esModule: true,
-  default: {
-    info: vi.fn(),
-    error: vi.fn(),
-  },
+  default: global.mockLogger,
+  getLogger: global.getLogger,
 }));
 
-vi.mock('../../src/services/metrics', () => ({
+vi.mock('../../../src/services/metrics', () => ({
   cleanupQueueSize: {
     set: vi.fn(),
   },
@@ -38,8 +35,8 @@ vi.mock('../../src/services/metrics', () => ({
 const mockCleanupRepository = gitService.cleanupRepository as ReturnType<
   typeof vi.fn
 >;
-const mockLoggerInfo = logger.info as ReturnType<typeof vi.fn>;
-const mockLoggerError = logger.error as ReturnType<typeof vi.fn>;
+const mockLoggerInfo = global.mockLogger.info as ReturnType<typeof vi.fn>;
+const mockLoggerError = global.mockLogger.error as ReturnType<typeof vi.fn>;
 
 describe('cleanupScheduler', () => {
   beforeEach(() => {
