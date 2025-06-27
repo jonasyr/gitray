@@ -135,27 +135,17 @@ git clone https://github.com/jonasyr/gitray.git
 cd gitray
 ```
 
-1. **Install dependencies:**
+2. **Start the application:**
 
 ```bash
-pnpm install
+pnpm app
 ```
 
-1. **Start the development environment:**
+The interactive script will guide you through setup options:
 
-```bash
-./scripts/start.sh
-# or
-pnpm run start
-```
-
-The script will automatically:
-
-- Install dependencies
-- Start Redis container
-- Build shared types
-- Launch backend and frontend servers
-- Provide interactive monitoring
+- **Full Setup**: Installs dependencies, starts Redis, builds types, and launches all services
+- **Quick Start**: Frontend only
+- **Other options**: Status, stop, clean environment
 
 ### Manual Setup
 
@@ -165,17 +155,17 @@ If you prefer manual setup:
 # Install dependencies
 pnpm install
 
-# Build shared types
-pnpm run build:shared-types
+# Building
+pnpm build
 
 # Start Redis (using Docker)
 docker run --name gitray-redis -d -p 6379:6379 redis:7-alpine
 
-# Start backend (in one terminal)
-pnpm --filter backend run dev
+# Start both backend & frontend
+pnpm dev
 
-# Start frontend (in another terminal)
-pnpm --filter frontend run dev
+# Or speperatly
+pnpm dev:frontend/backend
 ```
 
 ## Configuration
@@ -301,18 +291,18 @@ curl "http://localhost:3001/metrics"
 
 ### Development Environment Management
 
-The `start.sh` script provides comprehensive development environment management:
+The start script provides comprehensive development environment management:
 
 ```bash
 # Interactive menu
-./scripts/start.sh
+pnpm app
 
 # Direct commands
-./scripts/start.sh dev      # Full development setup
-./scripts/start.sh quick    # Frontend only
-./scripts/start.sh stop     # Stop all services
-./scripts/start.sh status   # Show service status
-./scripts/start.sh clean    # Clean environment
+pnpm start           # Full development setup
+pnpm quick           # Frontend only
+pnpm env:stop        # Stop all services
+pnpm env:status      # Show service status
+pnpm env:clean       # Clean environment
 ```
 
 **Interactive Features:**
@@ -327,38 +317,55 @@ The `start.sh` script provides comprehensive development environment management:
 ### Getting Started
 
 ```bash
-# Start development environment
-pnpm run dev
+# Start development environment (builds shared types + starts all services)
+pnpm dev
 
-# Or use the professional script
-./scripts/start.sh dev
+# Or use the interactive script
+pnpm app
 ```
 
 ### Available Scripts
 
 ```bash
 # Development
-pnpm run dev                    # Start all services
-pnpm run dev:frontend          # Frontend only
-pnpm run dev:backend           # Backend only
+pnpm dev                    # Build shared types + start all services
+pnpm dev:frontend          # Frontend only
+pnpm dev:backend           # Backend only
+
+# Application Management
+pnpm app                   # Interactive development environment
+pnpm start                 # Full development setup
+pnpm quick                 # Frontend only
+
+# Environment Management
+pnpm env:status           # Show service status
+pnpm env:stop             # Stop all services
+pnpm env:clean            # Clean environment
 
 # Building
-pnpm run build                 # Build all packages
-pnpm run build:shared-types    # Build shared types only
+pnpm build                # Build shared types + all apps
+pnpm build:shared-types   # Build shared types only
+pnpm build:apps           # Build apps only
 
 # Testing
-pnpm run test                  # Run all tests
-pnpm run test:watch           # Watch mode
-pnpm run test:coverage        # Generate coverage report
+pnpm test                 # Run all tests
+pnpm test:ui              # Test with UI
+pnpm test:frontend        # Frontend tests only
+pnpm test:backend         # Backend tests only
+pnpm test:watch           # Watch mode
+pnpm test:watch:changed   # Watch changed files only
+pnpm test:coverage        # Generate coverage report
 
 # Code Quality
-pnpm run lint                 # Run ESLint
-pnpm run lint:fix            # Fix linting issues
-pnpm run format              # Format with Prettier
+pnpm lint                 # Run ESLint
+pnpm lint:fix             # Fix linting issues
+pnpm lint:md              # Lint markdown files
+pnpm format               # Format with Prettier
 
 # Cleanup
-pnpm run clean               # Clean build artifacts
-pnpm run clean:all          # Deep clean including node_modules
+pnpm clean                # Clean build artifacts and cache
+pnpm clean:all            # Deep clean including logs
+pnpm rebuild              # Full clean + install + build
 ```
 
 ### Project Structure
@@ -394,7 +401,7 @@ router.get('/your-endpoint', async (req, res) => {
 });
 ```
 
-1. **Frontend Component:**
+2. **Frontend Component:**
 
 ```tsx
 // apps/frontend/src/components/YourComponent.tsx
@@ -403,7 +410,7 @@ export const YourComponent: React.FC = () => {
 };
 ```
 
-1. **Shared Types:**
+3. **Shared Types:**
 
 ```typescript
 // packages/shared-types/src/index.ts
@@ -418,19 +425,19 @@ GitRay maintains high test coverage (86.4%+) with comprehensive test suites:
 
 ```bash
 # Run all tests
-pnpm run test
+pnpm test
 
 # Frontend tests only
-pnpm run test:frontend
+pnpm test:frontend
 
 # Backend tests only  
-pnpm run test:backend
+pnpm test:backend
 
 # Watch mode for development
-pnpm run test:watch
+pnpm test:watch
 
 # Generate coverage report
-pnpm run test:coverage
+pnpm test:coverage
 ```
 
 ### Test Structure
@@ -575,7 +582,7 @@ We welcome contributions! Please read our contributing guidelines.
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/your-feature`
 3. Install dependencies: `pnpm install`
-4. Start development environment: `./scripts/start.sh dev`
+4. Start development environment: `pnpm app`
 
 ### Code Style
 
@@ -594,7 +601,7 @@ test: add integration tests for heatmap
 
 ### Pull Request Process
 
-1. Ensure all tests pass: `pnpm run test`
+1. Ensure all tests pass: `pnpm test`
 2. Update documentation if needed
 3. Add tests for new features
 4. Ensure code coverage remains above 80%
@@ -634,16 +641,16 @@ docker restart gitray-redis
 
 ```bash
 # Check memory usage
-./scripts/start.sh status
+pnpm env:status
 # Clean environment
-./scripts/start.sh clean
+pnpm env:clean
 ```
 
 **Build Issues:**
 
 ```bash
 # Clean rebuild
-pnpm run clean && pnpm install && pnpm run build
+pnpm rebuild
 ```
 
 ### Debug Mode
