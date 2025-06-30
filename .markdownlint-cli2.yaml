@@ -25,6 +25,8 @@ config:
 
   # allow inline HTML
   MD033: false
+  # ignore ordered list item prefix rule (MD029)
+  MD029: false
 
 # 2) Automatically fix fixable errors
 fix: true
