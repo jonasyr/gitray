@@ -177,3 +177,112 @@ export class TransactionRollbackError extends GitrayError {
     this.name = 'TransactionRollbackError';
   }
 }
+
+// ============================================================================
+// FILE ANALYSIS TYPES - New feature for file type distribution analysis
+// ============================================================================
+
+/**
+ * File category for grouping file types
+ */
+export type FileCategory =
+  | 'code'
+  | 'documentation'
+  | 'configuration'
+  | 'assets'
+  | 'other';
+
+/**
+ * File type statistics for a specific category or extension
+ */
+export interface FileTypeStats {
+  /** Number of files in this category/extension */
+  count: number;
+  /** Percentage of total files */
+  percentage: number;
+  /** Total size in bytes */
+  size: number;
+  /** Average file size in bytes */
+  averageSize: number;
+}
+
+/**
+ * File information for analysis
+ */
+export interface FileInfo {
+  /** Relative path from repository root */
+  path: string;
+  /** File extension (including dot) */
+  extension: string;
+  /** File category */
+  category: FileCategory;
+  /** File size in bytes */
+  size: number;
+  /** Last modified date (ISO 8601 format) */
+  lastModified: string;
+}
+
+/**
+ * Directory-level file distribution
+ */
+export interface DirectoryDistribution {
+  /** Directory path relative to repository root */
+  path: string;
+  /** File type distribution within this directory */
+  categories: Record<FileCategory, FileTypeStats>;
+  /** Extension distribution within this directory */
+  extensions: Record<string, FileTypeStats>;
+  /** Total files in this directory */
+  totalFiles: number;
+  /** Total size of all files in this directory */
+  totalSize: number;
+  /** Subdirectories */
+  subdirectories: DirectoryDistribution[];
+}
+
+/**
+ * Complete file type distribution analysis
+ */
+export interface FileTypeDistribution {
+  /** File type distribution by category */
+  categories: Record<FileCategory, FileTypeStats>;
+  /** File type distribution by extension */
+  extensions: Record<string, FileTypeStats>;
+  /** Directory-level analysis */
+  directories: DirectoryDistribution[];
+  /** Analysis metadata */
+  metadata: {
+    /** Total number of files analyzed */
+    totalFiles: number;
+    /** Total size of all files in bytes */
+    totalSize: number;
+    /** When the analysis was performed */
+    analyzedAt: string;
+    /** Repository size category for optimization */
+    repositorySize: string;
+    /** Git commit hash at time of analysis */
+    commitHash?: string;
+    /** Whether streaming mode was used */
+    streamingUsed?: boolean;
+  };
+}
+
+/**
+ * Filter options for file analysis
+ */
+export interface FileAnalysisFilterOptions {
+  /** Filter by specific file extensions */
+  extensions?: string[];
+  /** Filter by file categories */
+  categories?: FileCategory[];
+  /** Filter by directory paths */
+  directories?: string[];
+  /** Include hidden files (starting with .) */
+  includeHidden?: boolean;
+  /** Maximum directory depth to analyze */
+  maxDepth?: number;
+  /** Minimum file size in bytes */
+  minFileSize?: number;
+  /** Maximum file size in bytes */
+  maxFileSize?: number;
+}
