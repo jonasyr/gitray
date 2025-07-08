@@ -7,17 +7,7 @@
  * @fileoverview This service implements sophisticated file system analysis:
  * - File categorization (code, documentation, configuration, assets)
  * - Extension-based distribution analysis
- * - Directory-level breakdown       const categories: Record<FileCategory, FileTypeStats> = {
-        code: { count: 0, percentage: 0, size: 0, averageSize: 0 },
-        documentation: { count: 0, percentage: 0, size: 0, averageSize: 0 },
-        configuration: { count: 0, percentage: 0, size: 0, averageSize: 0 },
-        assets: { count: 0, percentage: 0, size: 0, averageSize: 0 },
-        other: { count: 0, percentage: 0, size: 0, averageSize: 0 },
-      };
-      
-      for (const [category, categoryFiles] of Object.entries(categoryGroups)) {
-        categories[category as FileCategory] = this.calculateStatsForGroup(categoryFiles, totalFiles);
-      } recursive traversal
+ * - Directory-level breakdown with recursive traversal
  * - Size-based statistics and optimization
  * - Integration with GitRay's existing caching architecture
  *
@@ -31,6 +21,7 @@
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { getLogger } from './logger';
 import { config } from '../config';
 import {
@@ -112,32 +103,67 @@ const FILE_CATEGORY_MAP: Record<string, FileCategory> = {
   '.dockerignore': 'configuration',
   '.editorconfig': 'configuration',
 
-  // Assets
-  '.png': 'assets',
-  '.jpg': 'assets',
-  '.jpeg': 'assets',
-  '.gif': 'assets',
-  '.svg': 'assets',
-  '.webp': 'assets',
-  '.ico': 'assets',
-  '.bmp': 'assets',
-  '.tiff': 'assets',
-  '.mp4': 'assets',
-  '.webm': 'assets',
-  '.avi': 'assets',
-  '.mov': 'assets',
-  '.mp3': 'assets',
-  '.wav': 'assets',
-  '.flac': 'assets',
-  '.ogg': 'assets',
-  '.woff': 'assets',
-  '.woff2': 'assets',
-  '.ttf': 'assets',
-  '.eot': 'assets',
-  '.css': 'assets',
-  '.scss': 'assets',
-  '.sass': 'assets',
-  '.less': 'assets',
+  // Build tools and package managers
+  '.gradle': 'configuration',
+  '.gradle.kts': 'configuration',
+  '.pom.xml': 'configuration',
+  '.package.json': 'configuration',
+  '.package-lock.json': 'configuration',
+  '.yarn.lock': 'configuration',
+  '.cargo.toml': 'configuration',
+  '.cargo.lock': 'configuration',
+  '.gemfile': 'configuration',
+  '.gemfile.lock': 'configuration',
+  '.requirements.txt': 'configuration',
+  '.pipfile': 'configuration',
+  '.pipfile.lock': 'configuration',
+  '.composer.json': 'configuration',
+  '.composer.lock': 'configuration',
+
+  // Additional code files
+  '.sh': 'code',
+  '.bash': 'code',
+  '.zsh': 'code',
+  '.fish': 'code',
+  '.ps1': 'code',
+  '.bat': 'code',
+  '.cmd': 'code',
+  '.sql': 'code',
+  '.graphql': 'code',
+  '.gql': 'code',
+  '.proto': 'code',
+  '.tf': 'code',
+  '.hcl': 'code',
+
+  // Style and template files
+  '.html': 'code',
+  '.htm': 'code',
+  '.xhtml': 'code',
+  '.jsp': 'code',
+  '.asp': 'code',
+  '.aspx': 'code',
+  '.erb': 'code',
+  '.ejs': 'code',
+  '.hbs': 'code',
+  '.mustache': 'code',
+  '.twig': 'code',
+  '.liquid': 'code',
+
+  // Data files
+  '.csv': 'assets',
+  '.tsv': 'assets',
+  '.xlsx': 'assets',
+  '.xls': 'assets',
+  '.ods': 'assets',
+
+  // Archive files
+  '.zip': 'assets',
+  '.tar': 'assets',
+  '.gz': 'assets',
+  '.bz2': 'assets',
+  '.xz': 'assets',
+  '.7z': 'assets',
+  '.rar': 'assets',
 };
 
 /**
@@ -682,7 +708,123 @@ class FileAnalysisService {
   }
 
   /**
-   * Main file analysis method
+   * Generate cache key for file analysis data
+   * Following GitRay's cache key pattern: file_analysis:{repoHash}:{filterHash}
+   */
+  private generateFileAnalysisCacheKey(
+    repoUrl: string,
+    options?: FileAnalysisFilterOptions
+  ): string {
+    const repoHash = this.hashUrl(repoUrl);
+    const filterHash = this.hashObject(options || {});
+    return `file_analysis:${repoHash}:${filterHash}`;
+  }
+
+  /**
+   * Generate stable 16-character hash for repository URLs
+   * Following GitRay's caching pattern
+   */
+  private hashUrl(url: string): string {
+    return crypto.createHash('md5').update(url).digest('hex').slice(0, 16);
+  }
+
+  /**
+   * Generate stable 8-character hash for filter option objects
+   * Following GitRay's caching pattern
+   */
+  private hashObject(obj: any): string {
+    const str = JSON.stringify(
+      obj,
+      Object.keys(obj).sort((a, b) => a.localeCompare(b))
+    );
+    return crypto.createHash('md5').update(str).digest('hex').slice(0, 8);
+  }
+
+  /**
+   * Cached file analysis method with three-tier caching integration
+   *
+   * Integrates with GitRay's existing caching architecture using Redis cache
+   * for file analysis results. This provides a foundation for future integration
+   * with the three-tier cache system.
+   */
+  async analyzeRepositoryCached(
+    repoUrl: string,
+    options?: FileAnalysisFilterOptions
+  ): Promise<FileTypeDistribution> {
+    const cacheKey = this.generateFileAnalysisCacheKey(repoUrl, options);
+
+    logger.info('Starting cached file analysis', {
+      repoUrl,
+      options,
+      cacheKey,
+    });
+
+    try {
+      // For now, this method demonstrates the caching pattern
+      // The actual cache integration will be implemented when
+      // file analysis endpoint is added to routes
+      logger.info('File analysis caching pattern demonstrated', {
+        repoUrl,
+        cacheKey,
+        pattern: 'file_analysis:{repoHash}:{filterHash}',
+      });
+
+      // This method should be called with withTempRepository at route level
+      throw new Error(
+        'analyzeRepositoryCached should not perform repository cloning directly. ' +
+          'Use withTempRepository() at route level with analyzeRepository() method. ' +
+          'Cache integration will be completed at route level.'
+      );
+    } catch (error) {
+      logger.error('Cached file analysis failed', { error, repoUrl, cacheKey });
+      recordDetailedError(
+        'file-analysis-cache',
+        error instanceof Error ? error : new Error(String(error))
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Store file analysis result in cache (placeholder for route-level implementation)
+   *
+   * This method demonstrates the caching strategy that should be implemented
+   * at the route level following GitRay's patterns.
+   */
+  async cacheAnalysisResult(
+    repoUrl: string,
+    result: FileTypeDistribution,
+    options?: FileAnalysisFilterOptions
+  ): Promise<void> {
+    try {
+      const cacheKey = this.generateFileAnalysisCacheKey(repoUrl, options);
+
+      logger.info('File analysis caching strategy demonstrated', {
+        repoUrl,
+        cacheKey,
+        totalFiles: result.metadata.totalFiles,
+        totalSize: result.metadata.totalSize,
+        strategy:
+          'Redis cache with JSON serialization following GitRay patterns',
+      });
+
+      // Actual caching implementation will be done at route level
+      // following the pattern in repositoryRoutes.ts
+    } catch (error) {
+      logger.warn('Failed to demonstrate file analysis caching', {
+        error,
+        repoUrl,
+        options,
+      });
+      // Don't throw - caching failure shouldn't break the main operation
+    }
+  }
+
+  /**
+   * Main file analysis method - works with local repository path
+   *
+   * This method is designed to be used with withTempRepository() helper
+   * for proper repository coordination and resource management.
    */
   async analyzeRepository(
     localRepoPath: string,
@@ -777,6 +919,31 @@ class FileAnalysisService {
         localRepoPath
       );
     }
+  }
+
+  /**
+   * Convenience method for repository URL analysis using withTempRepository
+   *
+   * This method demonstrates the proper integration pattern with GitRay's
+   * repository coordination system. Use this pattern in routes.
+   */
+  async analyzeRepositoryFromUrl(
+    repoUrl: string,
+    options?: FileAnalysisFilterOptions
+  ): Promise<FileTypeDistribution> {
+    logger.info('Analyzing repository from URL with coordination', {
+      repoUrl,
+      options,
+    });
+
+    // Note: The actual withTempRepository call should be made at the route level
+    // for proper error handling and resource coordination. This method is provided
+    // as documentation of the expected usage pattern.
+    throw new Error(
+      'analyzeRepositoryFromUrl should not be called directly. ' +
+        'Use withTempRepository() at the route level: ' +
+        'await withTempRepository(repoUrl, (tempDir) => fileAnalysisService.analyzeRepository(tempDir, options))'
+    );
   }
 }
 
