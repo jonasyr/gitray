@@ -34,8 +34,10 @@ import {
   CommitFilterOptions,
   ERROR_MESSAGES,
   HTTP_STATUS,
+  FileAnalysisFilterOptions,
 } from '@gitray/shared-types';
 import { config } from '../config';
+import { fileAnalysisService } from '../services/fileAnalysisService';
 
 // Router serving commit related data with unified caching
 const router = express.Router();
@@ -895,6 +897,246 @@ router.post(
       res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
         error: 'Failed to clear resume state',
       });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// NEW: GET /file-analysis - File type distribution analysis endpoint
+// ---------------------------------------------------------------------------
+
+// File analysis validation chain
+const fileAnalysisValidation = (): ValidationChain[] => [
+  query('repoUrl')
+    .notEmpty()
+    .withMessage('repoUrl query parameter is required')
+    .isURL({
+      protocols: ['http', 'https'],
+      require_protocol: true,
+      require_valid_protocol: true,
+    })
+    .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
+    .matches(/\.git$|github\.com|gitlab\.com|bitbucket\.org/)
+    .withMessage(ERROR_MESSAGES.INVALID_REPO_URL),
+  query('extensions')
+    .optional()
+    .isString()
+    .custom((value) => {
+      if (!value) return true;
+      const extensions = value.split(',');
+      return (
+        extensions.length <= 50 &&
+        extensions.every((ext: string) => ext.trim().startsWith('.'))
+      );
+    })
+    .withMessage('Extensions must be comma-separated with dot prefix'),
+  query('categories')
+    .optional()
+    .isString()
+    .custom((value) => {
+      if (!value) return true;
+      const categories = value.split(',');
+      const validCategories = [
+        'code',
+        'documentation',
+        'configuration',
+        'assets',
+        'other',
+      ];
+      return (
+        categories.length <= 5 &&
+        categories.every((cat: string) => validCategories.includes(cat.trim()))
+      );
+    })
+    .withMessage('Categories must be valid file categories'),
+  query('includeHidden')
+    .optional()
+    .isBoolean()
+    .withMessage('includeHidden must be a boolean')
+    .toBoolean(),
+  query('maxDepth')
+    .optional()
+    .isInt({ min: 1, max: 20 })
+    .withMessage('maxDepth must be between 1 and 20')
+    .toInt(),
+];
+
+/**
+ * Helper to build filter options from query parameters
+ */
+function buildFileAnalysisFilters(
+  query: Record<string, string>
+): FileAnalysisFilterOptions {
+  const filterOptions: FileAnalysisFilterOptions = {};
+
+  if (query.extensions) {
+    filterOptions.extensions = query.extensions
+      .split(',')
+      .map((ext) => ext.trim());
+  }
+
+  if (query.categories) {
+    filterOptions.categories = query.categories
+      .split(',')
+      .map((cat) => cat.trim()) as any[];
+  }
+
+  if (query.includeHidden !== undefined) {
+    filterOptions.includeHidden = query.includeHidden === 'true';
+  }
+
+  if (query.maxDepth !== undefined) {
+    filterOptions.maxDepth = parseInt(query.maxDepth);
+  }
+
+  return filterOptions;
+}
+
+/**
+ * Helper to set file analysis response headers
+ */
+function setFileAnalysisHeaders(
+  res: Response,
+  analysisResult: any,
+  cacheKey: string
+): void {
+  res.setHeader('X-Cache-Status', 'MISS');
+  res.setHeader('X-Cache-Level', 'SOURCE');
+  res.setHeader('X-Cache-Key', cacheKey);
+  res.setHeader('X-Analysis-Type', 'file-distribution');
+  res.setHeader(
+    'X-Files-Analyzed',
+    analysisResult.metadata.totalFiles.toString()
+  );
+  res.setHeader(
+    'X-Streaming-Used',
+    analysisResult.metadata.streamingUsed ? 'true' : 'false'
+  );
+}
+
+/**
+ * Helper to record file analysis metrics
+ */
+function recordFileAnalysisMetrics(
+  req: Request,
+  startTime: number,
+  analysisResult: any,
+  repoUrl: string,
+  success: boolean
+): void {
+  const responseTime = (Date.now() - startTime) / 1000;
+  const userType = getUserType(req);
+
+  recordFeatureUsage('file_analysis', userType, success, 'api_call');
+
+  if (success) {
+    recordEnhancedCacheOperation(
+      'file_analysis',
+      false,
+      req,
+      repoUrl,
+      analysisResult.metadata.totalFiles
+    );
+    recordSLACompliance(req.path, responseTime, userType);
+    updateServiceHealthScore('file-analysis', {
+      errorRate: 0,
+      responseTime,
+      memoryUtilization: process.memoryUsage().rss / (1024 * 1024),
+    });
+  } else {
+    updateServiceHealthScore('file-analysis', { errorRate: 1, responseTime });
+  }
+}
+
+router.get(
+  '/file-analysis',
+  [...fileAnalysisValidation()],
+  handleValidationErrors,
+  async (req: Request, res: Response, next: NextFunction) => {
+    const logger = createRequestLogger(req);
+    const { repoUrl } = req.query as Record<string, string>;
+    const startTime = Date.now();
+
+    try {
+      logger.info('Processing file analysis request', {
+        repoUrl,
+        coordinationEnabled: config.repositoryCache?.enabled,
+      });
+
+      // Build filter options and cache key
+      const filterOptions = buildFileAnalysisFilters(
+        req.query as Record<string, string>
+      );
+      const cacheKey = `file_analysis:${repoUrl}:${JSON.stringify(filterOptions)}`;
+
+      // Get repository info for headers
+      let repositoryInfo;
+      try {
+        repositoryInfo = await getRepositoryInfo(repoUrl);
+        res.setHeader('X-Repository-Size', repositoryInfo.sizeCategory);
+        res.setHeader(
+          'X-Repository-Cached',
+          repositoryInfo.cached ? 'true' : 'false'
+        );
+        res.setHeader(
+          'X-Repository-Shared',
+          repositoryInfo.isShared ? 'true' : 'false'
+        );
+      } catch (repoInfoError) {
+        logger.warn('Failed to get repository info', {
+          repoUrl,
+          error: repoInfoError,
+        });
+      }
+
+      // Perform analysis using coordinated repository access
+      const analysisResult = await withTempRepositoryStreaming(
+        repoUrl,
+        async (tempDir) => {
+          return await fileAnalysisService.analyzeRepository(
+            tempDir,
+            filterOptions
+          );
+        },
+        { operationType: 'file-analysis' }
+      );
+
+      // Build enhanced result
+      const enhancedResult = {
+        ...analysisResult,
+        metadata: {
+          ...analysisResult.metadata,
+          filterOptions,
+          repositorySize: repositoryInfo?.sizeCategory ?? 'unknown',
+          cacheStrategy: 'unified_hierarchical',
+          processingTime: Date.now() - startTime,
+          coordinationMetrics: config.repositoryCache?.enabled
+            ? getCoordinationMetrics()
+            : null,
+        },
+      };
+
+      // Set headers and record metrics
+      setFileAnalysisHeaders(res, analysisResult, cacheKey);
+      recordFileAnalysisMetrics(req, startTime, analysisResult, repoUrl, true);
+
+      logger.info('File analysis completed', {
+        repoUrl,
+        totalFiles: analysisResult.metadata.totalFiles,
+        processingTime: Date.now() - startTime,
+      });
+
+      res.status(HTTP_STATUS.OK).json(enhancedResult);
+    } catch (error) {
+      recordFileAnalysisMetrics(req, startTime, null, repoUrl, false);
+
+      logger.error('File analysis failed', {
+        error,
+        repoUrl,
+        responseTime: (Date.now() - startTime) / 1000,
+      });
+
+      next(error);
     }
   }
 );
