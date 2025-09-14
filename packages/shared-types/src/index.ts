@@ -264,6 +264,19 @@ export interface FileTypeDistribution {
     commitHash?: string;
     /** Whether streaming mode was used */
     streamingUsed?: boolean;
+    /** Applied filter options */
+    filterOptions?: FileAnalysisFilterOptions;
+    /** Cache strategy used */
+    cacheStrategy?: string;
+    /** Processing time in milliseconds */
+    processingTime?: number;
+    /** Repository coordination metrics */
+    coordinationMetrics?: any;
+    // NEW: Performance optimization metadata
+    /** Performance metrics for this analysis */
+    performanceMetrics?: PerformanceMetrics;
+    /** Repository characteristics determined */
+    repositoryCharacteristics?: RepositoryCharacteristics;
   };
 }
 
@@ -285,4 +298,70 @@ export interface FileAnalysisFilterOptions {
   minFileSize?: number;
   /** Maximum file size in bytes */
   maxFileSize?: number;
+}
+
+// ============================================================================
+// PERFORMANCE OPTIMIZATION TYPES - Phase 2.5 Critical Enhancement
+// ============================================================================
+
+/**
+ * Analysis method used to extract file information from repository
+ */
+export type AnalysisMethod =
+  | 'full-clone' // Current method: full repository clone (most resource intensive)
+  | 'shallow-clone' // Shallow clone with blob filtering (moderate optimization)
+  | 'ls-tree-remote' // Git ls-tree on remote repository (highest optimization)
+  | 'ls-tree-local' // Git ls-tree on local clone (for cached repositories)
+  | 'cached'; // Data retrieved from cache (no analysis needed)
+
+/**
+ * Source of file data for analysis
+ */
+export type DataSource =
+  | 'git-ls-tree' // From git ls-tree commands
+  | 'filesystem-walk' // From actual filesystem traversal
+  | 'cache-hit'; // From cached analysis results
+
+/**
+ * Repository characteristics for method selection optimization
+ */
+export interface RepositoryCharacteristics {
+  /** Estimated repository size category */
+  sizeCategory: 'small' | 'medium' | 'large' | 'xl';
+  /** Estimated number of files */
+  estimatedFiles: number;
+  /** Estimated total repository size in bytes */
+  estimatedSize: number;
+  /** Whether remote ls-tree is available */
+  supportsRemoteLsTree: boolean;
+  /** Whether shallow cloning is recommended */
+  recommendShallowClone: boolean;
+  /** Current commit hash for cache invalidation */
+  currentCommitHash?: string;
+  /** Last analysis timestamp for cache decisions */
+  lastAnalyzed?: string;
+}
+
+/**
+ * Performance metrics for analysis method tracking
+ */
+export interface PerformanceMetrics {
+  /** Analysis method used */
+  analysisMethod: AnalysisMethod;
+  /** Source of file data */
+  dataSource: DataSource;
+  /** Bandwidth used in bytes */
+  bandwidthUsed: number;
+  /** Processing time in milliseconds */
+  processingTime: number;
+  /** Cache hit rate (0.0 to 1.0) */
+  cacheHitRate: number;
+  /** Performance improvement factor vs full clone baseline */
+  performanceGain: number;
+  /** Estimated bandwidth saved vs full clone */
+  bandwidthSaved: number;
+  /** Whether file tree was cached for future use */
+  fileTreeCached: boolean;
+  /** Method selection reasoning for debugging */
+  selectionReason: string;
 }
