@@ -749,6 +749,114 @@ export const repositorySizeDistribution = new Histogram({
 });
 
 // ========================================================================
+// FILE ANALYSIS PERFORMANCE METRICS - Phase 2.5 Integration
+// ========================================================================
+
+/**
+ * File analysis method effectiveness and selection frequency
+ */
+export const fileAnalysisMethodUsage = new Counter({
+  name: 'gitray_file_analysis_method_usage_total',
+  help: 'Frequency of different file analysis methods used',
+  labelNames: [
+    'method', // ls-tree-remote, shallow-clone, full-clone, cached
+    'repo_size', // small, medium, large, xl
+    'success', // true, false
+  ] as const,
+});
+
+/**
+ * File analysis bandwidth usage tracking
+ */
+export const fileAnalysisBandwidth = new Histogram({
+  name: 'gitray_file_analysis_bandwidth_bytes',
+  help: 'Bandwidth usage for different file analysis methods',
+  labelNames: [
+    'method',
+    'repo_size',
+    'optimization_level', // none, low, medium, high
+  ] as const,
+  buckets: [
+    1024, // 1KB
+    10240, // 10KB
+    102400, // 100KB
+    1048576, // 1MB
+    10485760, // 10MB
+    104857600, // 100MB
+    1073741824, // 1GB
+    10737418240, // 10GB
+  ],
+});
+
+/**
+ * File analysis performance gains achieved
+ */
+export const fileAnalysisPerformanceGain = new Histogram({
+  name: 'gitray_file_analysis_performance_gain_ratio',
+  help: 'Performance gain ratio compared to baseline (full clone)',
+  labelNames: [
+    'method',
+    'repo_size',
+    'cache_hit', // true, false
+  ] as const,
+  buckets: [1.0, 1.5, 2.0, 3.0, 5.0, 8.0, 12.0, 20.0, 30.0, 50.0], // 1x to 50x improvement
+});
+
+/**
+ * File analysis cache effectiveness
+ */
+export const fileAnalysisCacheHitRate = new Histogram({
+  name: 'gitray_file_analysis_cache_hit_rate',
+  help: 'Cache hit rate for file analysis operations (0.0-1.0)',
+  labelNames: [
+    'cache_type', // file-tree, analysis-result
+    'repo_size',
+    'commit_age_hours', // fresh, old, stale
+  ] as const,
+  buckets: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+});
+
+/**
+ * File analysis processing time by method
+ */
+export const fileAnalysisProcessingTime = new Histogram({
+  name: 'gitray_file_analysis_processing_time_seconds',
+  help: 'Processing time for file analysis operations',
+  labelNames: [
+    'method',
+    'repo_size',
+    'file_count_range', // small, medium, large, huge
+  ] as const,
+  buckets: [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0], // 0.1s to 5min
+});
+
+/**
+ * File tree cache operations tracking
+ */
+export const fileTreeCacheOperations = new Counter({
+  name: 'gitray_file_tree_cache_operations_total',
+  help: 'File tree cache operations (hits, misses, stores, invalidations)',
+  labelNames: [
+    'operation', // hit, miss, store, invalidate
+    'repo_size',
+    'commit_hash_age', // current, recent, old
+  ] as const,
+});
+
+/**
+ * File analysis method selection reasons
+ */
+export const fileAnalysisMethodSelection = new Counter({
+  name: 'gitray_file_analysis_method_selection_total',
+  help: 'Reasons for file analysis method selection',
+  labelNames: [
+    'selected_method',
+    'reason', // optimal, fallback, forced, cache-hit
+    'repo_characteristics', // supports-ls-tree, requires-shallow, large-size
+  ] as const,
+});
+
+// ========================================================================
 // CRITICAL: MEMORY PRESSURE METRICS
 // ========================================================================
 
@@ -1653,3 +1761,219 @@ export const updateAllEnhancedMetrics = async () => {
   updateSystemResourceMetrics();
   updateMemoryPressureMetrics();
 };
+
+// ========================================================================
+// FILE ANALYSIS PERFORMANCE RECORDING FUNCTIONS - Phase 2.5 Integration
+// ========================================================================
+
+/**
+ * Record file analysis method usage and effectiveness
+ */
+export function recordFileAnalysisMethodUsage(
+  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
+  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  success: boolean
+): void {
+  fileAnalysisMethodUsage.inc({
+    method,
+    repo_size: repoSize,
+    success: success.toString(),
+  });
+}
+
+/**
+ * Record bandwidth usage for file analysis
+ */
+export function recordFileAnalysisBandwidth(
+  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
+  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  bandwidthBytes: number,
+  optimizationLevel: 'none' | 'low' | 'medium' | 'high' = 'medium'
+): void {
+  fileAnalysisBandwidth.observe(
+    {
+      method,
+      repo_size: repoSize,
+      optimization_level: optimizationLevel,
+    },
+    bandwidthBytes
+  );
+}
+
+/**
+ * Record performance gain achieved
+ */
+export function recordFileAnalysisPerformanceGain(
+  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
+  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  performanceGainRatio: number,
+  cacheHit: boolean
+): void {
+  fileAnalysisPerformanceGain.observe(
+    {
+      method,
+      repo_size: repoSize,
+      cache_hit: cacheHit.toString(),
+    },
+    performanceGainRatio
+  );
+}
+
+/**
+ * Record cache hit rate for file analysis
+ */
+export function recordFileAnalysisCacheHitRate(
+  cacheType: 'file-tree' | 'analysis-result',
+  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  hitRate: number,
+  commitAgeHours: number
+): void {
+  let commitAgeCategory: string;
+  if (commitAgeHours < 1) {
+    commitAgeCategory = 'fresh';
+  } else if (commitAgeHours < 24) {
+    commitAgeCategory = 'old';
+  } else {
+    commitAgeCategory = 'stale';
+  }
+
+  fileAnalysisCacheHitRate.observe(
+    {
+      cache_type: cacheType,
+      repo_size: repoSize,
+      commit_age_hours: commitAgeCategory,
+    },
+    hitRate
+  );
+}
+
+/**
+ * Record processing time for file analysis
+ */
+export function recordFileAnalysisProcessingTime(
+  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
+  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  processingTimeSeconds: number,
+  fileCount: number
+): void {
+  let fileCountRange: string;
+  if (fileCount < 100) {
+    fileCountRange = 'small';
+  } else if (fileCount < 1000) {
+    fileCountRange = 'medium';
+  } else if (fileCount < 10000) {
+    fileCountRange = 'large';
+  } else {
+    fileCountRange = 'huge';
+  }
+
+  fileAnalysisProcessingTime.observe(
+    {
+      method,
+      repo_size: repoSize,
+      file_count_range: fileCountRange,
+    },
+    processingTimeSeconds
+  );
+}
+
+/**
+ * Record file tree cache operations
+ */
+export function recordFileTreeCacheOperation(
+  operation: 'hit' | 'miss' | 'store' | 'invalidate',
+  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  commitHashAgeHours: number
+): void {
+  let commitHashAgeCategory: string;
+  if (commitHashAgeHours < 1) {
+    commitHashAgeCategory = 'current';
+  } else if (commitHashAgeHours < 24) {
+    commitHashAgeCategory = 'recent';
+  } else {
+    commitHashAgeCategory = 'old';
+  }
+
+  fileTreeCacheOperations.inc({
+    operation,
+    repo_size: repoSize,
+    commit_hash_age: commitHashAgeCategory,
+  });
+}
+
+/**
+ * Record file analysis method selection reasoning
+ */
+export function recordFileAnalysisMethodSelection(
+  selectedMethod: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
+  reason: 'optimal' | 'fallback' | 'forced' | 'cache-hit',
+  repoCharacteristics: 'supports-ls-tree' | 'requires-shallow' | 'large-size'
+): void {
+  fileAnalysisMethodSelection.inc({
+    selected_method: selectedMethod,
+    reason,
+    repo_characteristics: repoCharacteristics,
+  });
+}
+
+/**
+ * Comprehensive file analysis performance tracking
+ *
+ * This function combines multiple metrics for a complete performance picture
+ */
+export function recordFileAnalysisPerformanceMetrics(metrics: {
+  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached';
+  repoSize: 'small' | 'medium' | 'large' | 'xl';
+  success: boolean;
+  bandwidthBytes: number;
+  performanceGainRatio: number;
+  processingTimeSeconds: number;
+  fileCount: number;
+  cacheHit: boolean;
+  selectionReason: 'optimal' | 'fallback' | 'forced' | 'cache-hit';
+  repoCharacteristics: 'supports-ls-tree' | 'requires-shallow' | 'large-size';
+}): void {
+  // Record method usage
+  recordFileAnalysisMethodUsage(
+    metrics.method,
+    metrics.repoSize,
+    metrics.success
+  );
+
+  // Record bandwidth usage
+  recordFileAnalysisBandwidth(
+    metrics.method,
+    metrics.repoSize,
+    metrics.bandwidthBytes,
+    metrics.method === 'ls-tree-remote'
+      ? 'high'
+      : metrics.method === 'shallow-clone'
+        ? 'medium'
+        : metrics.method === 'cached'
+          ? 'high'
+          : 'none'
+  );
+
+  // Record performance gain
+  recordFileAnalysisPerformanceGain(
+    metrics.method,
+    metrics.repoSize,
+    metrics.performanceGainRatio,
+    metrics.cacheHit
+  );
+
+  // Record processing time
+  recordFileAnalysisProcessingTime(
+    metrics.method,
+    metrics.repoSize,
+    metrics.processingTimeSeconds,
+    metrics.fileCount
+  );
+
+  // Record method selection reasoning
+  recordFileAnalysisMethodSelection(
+    metrics.method,
+    metrics.selectionReason,
+    metrics.repoCharacteristics
+  );
+}

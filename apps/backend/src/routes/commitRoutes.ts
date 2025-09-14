@@ -993,12 +993,13 @@ function buildFileAnalysisFilters(
 }
 
 /**
- * Helper to set file analysis response headers
+ * Helper to set file analysis response headers with performance metrics
  */
 function setFileAnalysisHeaders(
   res: Response,
   analysisResult: any,
-  cacheKey: string
+  cacheKey: string,
+  performanceMetrics?: any
 ): void {
   res.setHeader('X-Cache-Status', 'MISS');
   res.setHeader('X-Cache-Level', 'SOURCE');
@@ -1012,6 +1013,24 @@ function setFileAnalysisHeaders(
     'X-Streaming-Used',
     analysisResult.metadata.streamingUsed ? 'true' : 'false'
   );
+
+  // Add performance optimization headers
+  if (performanceMetrics) {
+    res.setHeader('X-Analysis-Method', performanceMetrics.analysisMethod);
+    res.setHeader('X-Data-Source', performanceMetrics.dataSource);
+    res.setHeader(
+      'X-Bandwidth-Saved',
+      performanceMetrics.bandwidthSaved.toString()
+    );
+    res.setHeader(
+      'X-Performance-Gain',
+      performanceMetrics.performanceGain.toFixed(1) + 'x'
+    );
+    res.setHeader(
+      'X-File-Tree-Cached',
+      performanceMetrics.fileTreeCached ? 'true' : 'false'
+    );
+  }
 }
 
 /**
@@ -1057,17 +1076,17 @@ router.get(
     const { repoUrl } = req.query as Record<string, string>;
     const startTime = Date.now();
 
+    // Build filter options and cache key outside try block for error handling
+    const filterOptions = buildFileAnalysisFilters(
+      req.query as Record<string, string>
+    );
+    const cacheKey = `file_analysis:${repoUrl}:${JSON.stringify(filterOptions)}`;
+
     try {
       logger.info('Processing file analysis request', {
         repoUrl,
         coordinationEnabled: config.repositoryCache?.enabled,
       });
-
-      // Build filter options and cache key
-      const filterOptions = buildFileAnalysisFilters(
-        req.query as Record<string, string>
-      );
-      const cacheKey = `file_analysis:${repoUrl}:${JSON.stringify(filterOptions)}`;
 
       // Get repository info for headers
       let repositoryInfo;
@@ -1089,19 +1108,69 @@ router.get(
         });
       }
 
-      // Perform analysis using coordinated repository access
-      const analysisResult = await withTempRepositoryStreaming(
-        repoUrl,
-        async (tempDir) => {
-          return await fileAnalysisService.analyzeRepository(
-            tempDir,
+      // Perform analysis using optimized methods with fallback to coordinated repository access
+      let analysisResult;
+      let performanceMetrics;
+      let usingOptimizedMethods = false;
+
+      try {
+        // First, try the optimized analysis methods (ls-tree-remote, shallow-clone, caching)
+        logger.info('Attempting optimized file analysis', { repoUrl });
+        const optimizedResult =
+          await fileAnalysisService.analyzeRepositoryOptimized(
+            repoUrl,
             filterOptions
           );
-        },
-        { operationType: 'file-analysis' }
-      );
+        analysisResult = optimizedResult.result;
+        performanceMetrics = optimizedResult.performanceMetrics;
+        usingOptimizedMethods = true;
 
-      // Build enhanced result
+        logger.info('Optimized file analysis succeeded', {
+          repoUrl,
+          method: performanceMetrics.analysisMethod,
+          bandwidthSaved: performanceMetrics.bandwidthSaved,
+          performanceGain: performanceMetrics.performanceGain,
+          cacheHit: performanceMetrics.fileTreeCached,
+        });
+      } catch (optimizedError) {
+        // Fallback to traditional coordinated repository access
+        logger.warn(
+          'Optimized analysis failed, falling back to traditional method',
+          {
+            repoUrl,
+            optimizedError:
+              optimizedError instanceof Error
+                ? optimizedError.message
+                : String(optimizedError),
+          }
+        );
+
+        analysisResult = await withTempRepositoryStreaming(
+          repoUrl,
+          async (tempDir) => {
+            return await fileAnalysisService.analyzeRepository(
+              tempDir,
+              filterOptions
+            );
+          },
+          { operationType: 'file-analysis' }
+        );
+
+        // Create fallback performance metrics
+        performanceMetrics = {
+          analysisMethod: 'full-clone' as const,
+          dataSource: 'filesystem-walk' as const,
+          bandwidthUsed: 0, // Not tracked for fallback
+          processingTime: Date.now() - startTime,
+          cacheHitRate: 0.0,
+          performanceGain: 1.0, // Baseline
+          bandwidthSaved: 0,
+          fileTreeCached: false,
+          selectionReason: 'fallback due to optimization failure',
+        };
+      }
+
+      // Build enhanced result with performance metrics
       const enhancedResult = {
         ...analysisResult,
         metadata: {
@@ -1113,11 +1182,18 @@ router.get(
           coordinationMetrics: config.repositoryCache?.enabled
             ? getCoordinationMetrics()
             : null,
+          // Add performance optimization metadata
+          performanceMetrics: performanceMetrics,
+          optimizedAnalysis: usingOptimizedMethods,
+          analysisMethod: performanceMetrics.analysisMethod,
+          dataSource: performanceMetrics.dataSource,
+          bandwidthSaved: performanceMetrics.bandwidthSaved,
+          performanceGain: performanceMetrics.performanceGain,
         },
       };
 
-      // Set headers and record metrics
-      setFileAnalysisHeaders(res, analysisResult, cacheKey);
+      // Set headers with performance metrics and record metrics
+      setFileAnalysisHeaders(res, analysisResult, cacheKey, performanceMetrics);
       recordFileAnalysisMetrics(req, startTime, analysisResult, repoUrl, true);
 
       logger.info('File analysis completed', {
@@ -1128,6 +1204,34 @@ router.get(
 
       res.status(HTTP_STATUS.OK).json(enhancedResult);
     } catch (error) {
+      // Create default performance metrics for error case
+      const defaultPerformanceMetrics = {
+        analysisMethod: 'failed' as const,
+        dataSource: 'none' as const,
+        bandwidthUsed: 0,
+        processingTime: Date.now() - startTime,
+        cacheHitRate: 0.0,
+        performanceGain: 0.0,
+        bandwidthSaved: 0,
+        fileTreeCached: false,
+        selectionReason: 'analysis failed',
+      };
+
+      // Create minimal analysis result for headers
+      const failedAnalysisResult = {
+        metadata: {
+          totalFiles: 0,
+          streamingUsed: false,
+        },
+      };
+
+      // Set headers with default performance metrics
+      setFileAnalysisHeaders(
+        res,
+        failedAnalysisResult,
+        cacheKey,
+        defaultPerformanceMetrics
+      );
       recordFileAnalysisMetrics(req, startTime, null, repoUrl, false);
 
       logger.error('File analysis failed', {

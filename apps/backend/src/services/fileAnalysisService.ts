@@ -32,8 +32,12 @@ import {
   recordDetailedError,
   updateServiceHealthScore,
   getRepositorySizeCategory,
+  recordFileAnalysisMethodUsage,
+  recordFileTreeCacheOperation,
+  recordFileAnalysisPerformanceMetrics,
 } from './metrics';
 import { getMemoryStats } from '../utils/memoryPressureManager';
+import HybridLRUCache from '../utils/hybridLruCache';
 import {
   FileTypeDistribution,
   FileAnalysisFilterOptions,
@@ -216,12 +220,277 @@ class FileAnalysisService {
     maxFiles: config.streaming?.maxFiles ?? 100000,
   };
 
+  /**
+   * File tree cache for commit-hash based raw file trees
+   * Separate cache from processed analysis results for better performance
+   */
+  private readonly fileTreeCache: HybridLRUCache<FileInfo[]>;
+
   constructor() {
-    logger.info('FileAnalysisService initialized with streaming support', {
-      defaultBatchSize: this.defaultStreamingOptions.batchSize,
-      maxFiles: this.defaultStreamingOptions.maxFiles,
-      streamingEnabled: config.streaming?.enabled ?? true,
+    // Initialize file tree cache with optimized settings for raw file data
+    const baseConfig = config.hybridCache;
+    this.fileTreeCache = new HybridLRUCache<FileInfo[]>({
+      maxEntries: Math.floor((baseConfig?.maxEntries ?? 500) * 0.2), // 20% of total entries for file trees
+      memoryLimitBytes: Math.floor(
+        (baseConfig?.memoryLimitBytes ?? 100 * 1024 * 1024) * 0.15
+      ), // 15% of memory budget
+      diskPath: `${baseConfig?.diskPath ?? './cache'}/file-trees`,
+      lockTimeoutMs: baseConfig?.lockTimeoutMs ?? 5000,
+      redisConfig: baseConfig?.enableRedis
+        ? {
+            ...baseConfig.redisConfig,
+            keyPrefix: `${baseConfig.redisConfig.keyPrefix}file_tree:`,
+          }
+        : undefined,
     });
+
+    logger.info(
+      'FileAnalysisService initialized with streaming support and file tree caching',
+      {
+        defaultBatchSize: this.defaultStreamingOptions.batchSize,
+        maxFiles: this.defaultStreamingOptions.maxFiles,
+        streamingEnabled: config.streaming?.enabled ?? true,
+        fileTreeCacheEnabled: true,
+      }
+    );
+  }
+
+  // ============================================================================
+  // FILE TREE CACHING METHODS - Phase 2.5 Integration Layer
+  // ============================================================================
+
+  /**
+   * Generate cache key for file tree data with commit-hash based invalidation
+   * Cache key pattern: file_tree:{repoHash}:{commitHash}
+   */
+  private generateFileTreeCacheKey(
+    repoUrl: string,
+    commitHash: string
+  ): string {
+    const repoHash = this.hashUrl(repoUrl);
+    const commitHashShort = commitHash.substring(0, 12); // Use first 12 chars for efficiency
+    return `file_tree:${repoHash}:${commitHashShort}`;
+  }
+
+  /**
+   * Get cached file tree for a specific repository and commit
+   * Returns null if not cached or if cache entry is invalid
+   */
+  async getCachedFileTree(
+    repoUrl: string,
+    commitHash: string
+  ): Promise<FileInfo[] | null> {
+    const startTime = Date.now();
+    const cacheKey = this.generateFileTreeCacheKey(repoUrl, commitHash);
+
+    try {
+      logger.debug('Attempting to retrieve file tree from cache', {
+        repoUrl,
+        commitHash: commitHash.substring(0, 8),
+        cacheKey,
+      });
+
+      const cachedFileTree = await this.fileTreeCache.get(cacheKey);
+
+      if (cachedFileTree) {
+        const retrievalTime = Date.now() - startTime;
+
+        logger.info('File tree cache hit', {
+          repoUrl,
+          commitHash: commitHash.substring(0, 8),
+          cacheKey,
+          filesCount: cachedFileTree.length,
+          retrievalTime,
+        });
+
+        // Record cache hit metrics
+        const repoSize = this.categorizeRepositorySize(cachedFileTree.length);
+        recordFileTreeCacheOperation('hit', repoSize, 0); // Assume current commit
+
+        return cachedFileTree;
+      }
+
+      logger.debug('File tree cache miss', {
+        repoUrl,
+        commitHash: commitHash.substring(0, 8),
+        cacheKey,
+      });
+
+      // Record cache miss metrics
+      if (!cachedFileTree) {
+        // We need to estimate repo size for cache miss - use fallback
+        recordFileTreeCacheOperation('miss', 'medium', 0);
+      }
+
+      return null;
+    } catch (error) {
+      const retrievalTime = Date.now() - startTime;
+
+      logger.warn('File tree cache retrieval failed', {
+        repoUrl,
+        commitHash: commitHash.substring(0, 8),
+        cacheKey,
+        error: error instanceof Error ? error.message : String(error),
+        retrievalTime,
+      });
+
+      // Record cache operation failure
+      recordDetailedError(
+        'file-tree-cache-error',
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          userImpact: 'degraded',
+          recoveryAction: 'fallback',
+          severity: 'warning',
+        }
+      );
+
+      return null; // Fallback gracefully
+    }
+  }
+
+  /**
+   * Cache file tree data for a specific repository and commit
+   * Uses commit hash for automatic invalidation when repository changes
+   */
+  async cacheFileTree(
+    repoUrl: string,
+    commitHash: string,
+    fileTree: FileInfo[]
+  ): Promise<void> {
+    const startTime = Date.now();
+    const cacheKey = this.generateFileTreeCacheKey(repoUrl, commitHash);
+
+    try {
+      logger.debug('Caching file tree data', {
+        repoUrl,
+        commitHash: commitHash.substring(0, 8),
+        cacheKey,
+        filesCount: fileTree.length,
+        totalSize: fileTree.reduce((sum, file) => sum + file.size, 0),
+      });
+
+      await this.fileTreeCache.set(cacheKey, fileTree);
+
+      const cachingTime = Date.now() - startTime;
+
+      logger.info('File tree cached successfully', {
+        repoUrl,
+        commitHash: commitHash.substring(0, 8),
+        cacheKey,
+        filesCount: fileTree.length,
+        cachingTime,
+      });
+
+      // Record cache store metrics
+      const repoSize = this.categorizeRepositorySize(fileTree.length);
+      recordFileTreeCacheOperation('store', repoSize, 0);
+    } catch (error) {
+      const cachingTime = Date.now() - startTime;
+
+      logger.warn('Failed to cache file tree data', {
+        repoUrl,
+        commitHash: commitHash.substring(0, 8),
+        cacheKey,
+        filesCount: fileTree.length,
+        error: error instanceof Error ? error.message : String(error),
+        cachingTime,
+      });
+
+      // Record cache operation failure but don't throw - caching is optional
+      recordDetailedError(
+        'file-tree-cache-store-error',
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          userImpact: 'none', // Caching failure doesn't affect functionality
+          recoveryAction: 'retry',
+          severity: 'warning',
+        }
+      );
+    }
+  }
+
+  /**
+   * Invalidate cached file trees for a repository when commit changes
+   * This is called when we detect that repository has newer commits
+   */
+  async invalidateFileTreeCache(
+    repoUrl: string,
+    oldCommitHash?: string
+  ): Promise<void> {
+    const startTime = Date.now();
+
+    try {
+      logger.debug('Invalidating file tree cache', {
+        repoUrl,
+        oldCommitHash: oldCommitHash?.substring(0, 8),
+      });
+
+      // If we have the old commit hash, invalidate that specific entry
+      if (oldCommitHash) {
+        const oldCacheKey = this.generateFileTreeCacheKey(
+          repoUrl,
+          oldCommitHash
+        );
+
+        try {
+          await this.fileTreeCache.del(oldCacheKey);
+          logger.debug('Specific file tree cache entry invalidated', {
+            repoUrl,
+            oldCommitHash: oldCommitHash.substring(0, 8),
+            cacheKey: oldCacheKey,
+          });
+        } catch (error) {
+          logger.warn('Failed to invalidate specific file tree cache entry', {
+            repoUrl,
+            oldCommitHash: oldCommitHash.substring(0, 8),
+            cacheKey: oldCacheKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } else {
+        // If no specific commit hash, we'd need to scan all keys (expensive)
+        // For now, just log that full invalidation would be needed
+        logger.info(
+          'Full file tree cache invalidation requested but not implemented',
+          {
+            repoUrl,
+            reason:
+              'No specific commit hash provided - would require full cache scan',
+            recommendation:
+              'Consider implementing prefix-based invalidation if needed',
+          }
+        );
+      }
+
+      const invalidationTime = Date.now() - startTime;
+
+      logger.info('File tree cache invalidation completed', {
+        repoUrl,
+        oldCommitHash: oldCommitHash?.substring(0, 8),
+        invalidationTime,
+      });
+    } catch (error) {
+      const invalidationTime = Date.now() - startTime;
+
+      logger.error('File tree cache invalidation failed', {
+        repoUrl,
+        oldCommitHash: oldCommitHash?.substring(0, 8),
+        error: error instanceof Error ? error.message : String(error),
+        invalidationTime,
+      });
+
+      // Record invalidation failure but don't throw - it's not critical
+      recordDetailedError(
+        'file-tree-cache-invalidation-error',
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          userImpact: 'degraded', // Stale cache entries might persist
+          recoveryAction: 'retry',
+          severity: 'warning',
+        }
+      );
+    }
   }
 
   // ============================================================================
@@ -1899,6 +2168,322 @@ class FileAnalysisService {
       });
       // Don't throw - caching failure shouldn't break the main operation
     }
+  }
+
+  /**
+   * Enhanced file analysis method with optimized performance strategies
+   *
+   * This method automatically selects the best analysis strategy based on repository
+   * characteristics and integrates file tree caching for maximum performance.
+   * Designed to be used directly with repository URLs for optimal bandwidth usage.
+   */
+  async analyzeRepositoryOptimized(
+    repoUrl: string,
+    options?: FileAnalysisFilterOptions
+  ): Promise<{
+    result: FileTypeDistribution;
+    performanceMetrics: PerformanceMetrics;
+  }> {
+    const startTime = Date.now();
+
+    try {
+      logger.info('Starting optimized file analysis', { repoUrl, options });
+
+      // Step 1: Determine optimal method
+      const methodDecision = await this.determineOptimalAnalysisMethod(repoUrl);
+      const { method, reason, expectedPerformanceGain, fallbackMethods } =
+        methodDecision;
+
+      logger.info('Using optimal analysis method', {
+        repoUrl,
+        method,
+        reason,
+        expectedPerformanceGain,
+        fallbackMethods,
+      });
+
+      // Step 2: Execute optimized analysis with caching
+      const analysisResult = await this.executeOptimizedAnalysis(
+        repoUrl,
+        method,
+        options
+      );
+
+      // Step 3: Build performance metrics
+      const processingTime = Date.now() - startTime;
+      const performanceMetrics: PerformanceMetrics = {
+        analysisMethod: analysisResult.actualMethod,
+        dataSource: analysisResult.dataSource,
+        bandwidthUsed: analysisResult.bandwidthUsed,
+        processingTime,
+        cacheHitRate: analysisResult.fileTreeCached ? 1.0 : 0.0,
+        performanceGain: this.calculateActualPerformanceGain(
+          analysisResult.actualMethod,
+          processingTime
+        ),
+        bandwidthSaved: this.calculateBandwidthSaved(
+          analysisResult.actualMethod,
+          analysisResult.bandwidthUsed
+        ),
+        fileTreeCached: analysisResult.fileTreeCached,
+        selectionReason: reason,
+      };
+
+      // Step 4: Enhance result with performance data
+      const enhancedResult = this.enhanceResultWithPerformanceMetrics(
+        analysisResult.result,
+        performanceMetrics,
+        methodDecision
+      );
+
+      // Step 5: Record comprehensive performance metrics
+      const repoSize = this.categorizeRepositorySize(
+        analysisResult.result.metadata.totalFiles
+      );
+      const repoCharacteristics =
+        methodDecision.method === 'ls-tree-remote'
+          ? 'supports-ls-tree'
+          : methodDecision.method === 'shallow-clone'
+            ? 'requires-shallow'
+            : 'large-size';
+
+      recordFileAnalysisPerformanceMetrics({
+        method: analysisResult.actualMethod as
+          | 'ls-tree-remote'
+          | 'shallow-clone'
+          | 'full-clone'
+          | 'cached',
+        repoSize,
+        success: true,
+        bandwidthBytes: analysisResult.bandwidthUsed,
+        performanceGainRatio: performanceMetrics.performanceGain,
+        processingTimeSeconds: processingTime / 1000,
+        fileCount: analysisResult.result.metadata.totalFiles,
+        cacheHit: analysisResult.fileTreeCached,
+        selectionReason: analysisResult.fileTreeCached
+          ? 'cache-hit'
+          : 'optimal',
+        repoCharacteristics,
+      });
+
+      logger.info('Optimized file analysis completed', {
+        repoUrl,
+        selectedMethod: method,
+        actualMethod: analysisResult.actualMethod,
+        totalFiles: analysisResult.result.metadata.totalFiles,
+        processingTime,
+        performanceGain: performanceMetrics.performanceGain,
+        bandwidthSaved: performanceMetrics.bandwidthSaved,
+        cacheHit: analysisResult.fileTreeCached,
+      });
+
+      return { result: enhancedResult, performanceMetrics };
+    } catch (error) {
+      const processingTime = Date.now() - startTime;
+
+      // Record failed analysis metrics
+      try {
+        recordFileAnalysisMethodUsage('full-clone', 'medium', false); // Use fallback for failures
+      } catch (metricsError) {
+        // Don't let metrics recording failure break the main error flow
+        logger.warn('Failed to record error metrics', { metricsError });
+      }
+
+      logger.error('Optimized file analysis failed', {
+        repoUrl,
+        error: error instanceof Error ? error.message : String(error),
+        processingTime,
+      });
+
+      throw new RepositoryError(
+        `Optimized file analysis failed: ${error instanceof Error ? error.message : String(error)}`,
+        repoUrl
+      );
+    }
+  }
+
+  /**
+   * Execute optimized analysis with caching support
+   */
+  private async executeOptimizedAnalysis(
+    repoUrl: string,
+    method: AnalysisMethod,
+    options?: FileAnalysisFilterOptions
+  ): Promise<{
+    result: FileTypeDistribution;
+    actualMethod: AnalysisMethod;
+    dataSource: DataSource;
+    bandwidthUsed: number;
+    fileTreeCached: boolean;
+    commitHash: string;
+  }> {
+    // Get commit hash for cache checking
+    const commitHash = await this.getRepositoryCommitHash(repoUrl);
+
+    // Check cache first
+    const cachedFileTree = await this.getCachedFileTree(repoUrl, commitHash);
+
+    if (cachedFileTree) {
+      logger.info('Using cached file tree', {
+        repoUrl,
+        commitHash: commitHash.substring(0, 8),
+        filesCount: cachedFileTree.length,
+        cacheHit: true,
+      });
+
+      const result = this.buildAnalysisResultFromFileInfos(
+        cachedFileTree,
+        commitHash
+      );
+      return {
+        result,
+        actualMethod: 'cached',
+        dataSource: 'cache-hit',
+        bandwidthUsed: 0,
+        fileTreeCached: true,
+        commitHash,
+      };
+    }
+
+    // Execute the selected method
+    const execution = await this.executeOptimizedMethod(
+      repoUrl,
+      method,
+      commitHash,
+      options
+    );
+
+    // Cache the result for future use
+    if (execution.fileInfos && commitHash) {
+      await this.cacheFileTree(repoUrl, commitHash, execution.fileInfos);
+    }
+
+    const result = this.buildAnalysisResultFromFileInfos(
+      execution.fileInfos,
+      commitHash
+    );
+
+    return {
+      result,
+      actualMethod: execution.actualMethod,
+      dataSource: execution.dataSource,
+      bandwidthUsed: execution.bandwidthUsed,
+      fileTreeCached: false,
+      commitHash,
+    };
+  }
+
+  /**
+   * Get repository commit hash for caching
+   */
+  private async getRepositoryCommitHash(repoUrl: string): Promise<string> {
+    const git: SimpleGit = simpleGit();
+    const refs = await git.listRemote(['--heads', repoUrl]);
+    const mainBranch = refs
+      .split('\n')
+      .find(
+        (line) =>
+          line.includes('refs/heads/main') || line.includes('refs/heads/master')
+      );
+
+    if (!mainBranch) {
+      throw new Error('Unable to determine main branch from remote repository');
+    }
+
+    return mainBranch.split('\t')[0];
+  }
+
+  /**
+   * Execute specific optimized method
+   */
+  private async executeOptimizedMethod(
+    repoUrl: string,
+    method: AnalysisMethod,
+    commitHash: string,
+    options?: FileAnalysisFilterOptions
+  ): Promise<{
+    fileInfos: FileInfo[];
+    actualMethod: AnalysisMethod;
+    dataSource: DataSource;
+    bandwidthUsed: number;
+  }> {
+    if (method === 'ls-tree-remote') {
+      const { files } = await this.getFileTreeRemote(repoUrl);
+      const fileInfos = await this.processRemoteFileTree(
+        files,
+        commitHash,
+        options
+      );
+
+      return {
+        fileInfos,
+        actualMethod: 'ls-tree-remote',
+        dataSource: 'git-ls-tree',
+        bandwidthUsed: this.estimateBandwidthUsage(
+          'ls-tree-remote',
+          files.length
+        ),
+      };
+    }
+
+    if (method === 'shallow-clone') {
+      const { files, tempDir } = await this.getFileTreeShallow(repoUrl);
+
+      try {
+        const fileInfos = await this.processRemoteFileTree(
+          files,
+          commitHash,
+          options
+        );
+
+        return {
+          fileInfos,
+          actualMethod: 'shallow-clone',
+          dataSource: 'git-ls-tree',
+          bandwidthUsed: this.estimateBandwidthUsage(
+            'shallow-clone',
+            files.length
+          ),
+        };
+      } finally {
+        await this.cleanupShallowClone(tempDir);
+      }
+    }
+
+    throw new Error(
+      'analyzeRepositoryOptimized should be used with repository coordination. ' +
+        'Use withTempRepository() at route level for full clone fallback.'
+    );
+  }
+
+  /**
+   * Build analysis result from file infos (used by optimized methods)
+   */
+  private buildAnalysisResultFromFileInfos(
+    fileInfos: FileInfo[],
+    commitHash: string
+  ): FileTypeDistribution {
+    const totalFiles = fileInfos.length;
+
+    // Calculate statistics
+    const categories = this.calculateCategoryStatistics(fileInfos, totalFiles);
+    const extensions = this.calculateExtensionStatistics(fileInfos, totalFiles);
+    const directories = this.buildDirectoryDistribution(fileInfos);
+    const totalSize = fileInfos.reduce((sum, file) => sum + file.size, 0);
+
+    return {
+      categories,
+      extensions,
+      directories,
+      metadata: {
+        totalFiles,
+        totalSize,
+        analyzedAt: new Date().toISOString(),
+        repositorySize: getRepositorySizeCategory(totalFiles),
+        commitHash,
+        streamingUsed: false, // Optimized methods don't use streaming
+      },
+    };
   }
 
   /**
