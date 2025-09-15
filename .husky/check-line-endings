@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Pre-commit hook to automatically fix Unix line endings (LF)
+# This will convert CRLF to LF and re-stage the files
+
+set -e
+
+echo "🔍 Checking line endings in staged files..."
+
+# Get list of staged text files
+staged_files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx|json|md|yml|yaml|toml|ini|xml|conf|config|env|sh|bash|zsh|fish|ps1|bat|cmd|sql|graphql|gql|proto|tf|hcl|html|htm|css|scss|sass|less|vue|svelte|py|java|c|cpp|cs|go|rs|php|rb|swift|kt|scala|clj|hs|ml|r|m|dart|elm)$|Dockerfile|\.gitignore$|\.gitattributes$|\.editorconfig$' || true)
+
+if [[ -z "$staged_files" ]]; then
+    echo "✅ No text files staged for commit."
+    exit 0
+fi
+
+# Check for CRLF line endings in staged files and fix them
+crlf_files=()
+for file in $staged_files; do
+    if [[ -f "$file" ]] && grep -q $'\r' "$file" 2>/dev/null; then
+        crlf_files+=("$file")
+    fi
+done
+
+if [[ ${#crlf_files[@]} -gt 0 ]]; then
+    echo "🔧 Converting CRLF to LF in files:"
+    printf "   %s\n" "${crlf_files[@]}"
+    
+    # Convert CRLF to LF for each file
+    for file in "${crlf_files[@]}"; do
+        sed -i 's/\r$//' "$file"
+        # Re-stage the fixed file
+        git add "$file"
+    done
+    
+    echo "✅ Line endings converted and files re-staged."
+else
+    echo "✅ All staged files already have Unix line endings (LF)."
+fi
+
+exit 0
