@@ -29,6 +29,7 @@ import {
   getUserType,
   getRepositoryType,
   updateServiceHealthScore,
+  recordDetailedError,
 } from '../services/metrics';
 import {
   CommitFilterOptions,
@@ -1133,7 +1134,7 @@ router.get(
           cacheHit: performanceMetrics.fileTreeCached,
         });
       } catch (optimizedError) {
-        // Fallback to traditional coordinated repository access
+        // Fallback to traditional coordinated repository access with improved error handling
         logger.warn(
           'Optimized analysis failed, falling back to traditional method',
           {
@@ -1142,32 +1143,93 @@ router.get(
               optimizedError instanceof Error
                 ? optimizedError.message
                 : String(optimizedError),
+            fallbackMethod: 'withTempRepositoryStreaming',
           }
         );
 
-        analysisResult = await withTempRepositoryStreaming(
-          repoUrl,
-          async (tempDir) => {
-            return await fileAnalysisService.analyzeRepository(
-              tempDir,
-              filterOptions
-            );
-          },
-          { operationType: 'file-analysis' }
-        );
+        try {
+          analysisResult = await withTempRepositoryStreaming(
+            repoUrl,
+            async (tempDir) => {
+              return await fileAnalysisService.analyzeRepository(
+                tempDir,
+                filterOptions
+              );
+            },
+            { operationType: 'file-analysis' }
+          );
 
-        // Create fallback performance metrics
-        performanceMetrics = {
-          analysisMethod: 'full-clone' as const,
-          dataSource: 'filesystem-walk' as const,
-          bandwidthUsed: 0, // Not tracked for fallback
-          processingTime: Date.now() - startTime,
-          cacheHitRate: 0.0,
-          performanceGain: 1.0, // Baseline
-          bandwidthSaved: 0,
-          fileTreeCached: false,
-          selectionReason: 'fallback due to optimization failure',
-        };
+          // Create fallback performance metrics
+          performanceMetrics = {
+            analysisMethod: 'full-clone' as const,
+            dataSource: 'filesystem-walk' as const,
+            bandwidthUsed: 0, // Not tracked for fallback
+            processingTime: Date.now() - startTime,
+            cacheHitRate: 0.0,
+            performanceGain: 1.0, // Baseline
+            bandwidthSaved: 0,
+            fileTreeCached: false,
+            selectionReason: 'fallback due to optimization failure',
+          };
+
+          logger.info('Fallback file analysis succeeded', {
+            repoUrl,
+            method: 'full-clone',
+            optimizedErrorType:
+              optimizedError instanceof Error
+                ? optimizedError.constructor.name
+                : 'Unknown',
+          });
+        } catch (fallbackError) {
+          // Both optimized and fallback failed - this is a critical error
+          logger.error('Both optimized and fallback file analysis failed', {
+            repoUrl,
+            optimizedError:
+              optimizedError instanceof Error
+                ? optimizedError.message
+                : String(optimizedError),
+            fallbackError:
+              fallbackError instanceof Error
+                ? fallbackError.message
+                : String(fallbackError),
+            totalTime: Date.now() - startTime,
+          });
+
+          // Record cascade failure for monitoring
+          recordDetailedError(
+            'file-analysis-cascade-failure',
+            new Error(
+              `All file analysis methods failed. Optimized: ${
+                optimizedError instanceof Error
+                  ? optimizedError.message
+                  : String(optimizedError)
+              }. Fallback: ${
+                fallbackError instanceof Error
+                  ? fallbackError.message
+                  : String(fallbackError)
+              }`
+            ),
+            {
+              userImpact: 'blocking',
+              recoveryAction: 'retry',
+              severity: 'critical',
+            }
+          );
+
+          // Log the cascade failure for monitoring
+          logger.error(
+            'File analysis cascade failure - all methods exhausted',
+            {
+              repoUrl,
+              totalAttempts: 2,
+              failureTypes: ['optimized', 'fallback'],
+              requiresManualIntervention: true,
+            }
+          );
+
+          // Re-throw the fallback error (more likely to be informative)
+          throw fallbackError;
+        }
       }
 
       // Build enhanced result with performance metrics
