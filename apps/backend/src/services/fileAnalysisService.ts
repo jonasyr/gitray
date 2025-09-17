@@ -230,6 +230,13 @@ interface CircuitBreakerConfig {
   halfOpenMaxAttempts: number;
 }
 
+interface InFlightAnalysisResult {
+  fileInfos: FileInfo[];
+  actualMethod: AnalysisMethod;
+  dataSource: DataSource;
+  bandwidthUsed: number;
+}
+
 /**
  * File Analysis Service Class
  */
@@ -249,29 +256,15 @@ class FileAnalysisService {
    * Analysis locks to prevent concurrent analysis of same repository
    * This prevents race conditions and resource waste
    */
-  private readonly analysisLocks = new Map<string, Promise<FileInfo[]>>();
+  private readonly analysisLocks = new Map<
+    string,
+    Promise<InFlightAnalysisResult>
+  >();
 
   /**
    * Git operation timeouts to prevent resource leaks
    */
   private readonly GIT_OPERATION_TIMEOUT = 30000; // 30 seconds
-
-  /**
-   * Circuit breaker for failing repositories
-   * Prevents cascading failures and improves system resilience
-   */
-  private readonly circuitBreaker = {
-    failures: new Map<string, number>(),
-    lastFailure: new Map<string, number>(),
-    blacklist: new Set<string>(),
-
-    // Circuit breaker configuration
-    config: {
-      failureThreshold: 3, // Open circuit after 3 failures
-      recoveryTime: 300000, // 5 minutes recovery time
-      blacklistTime: 1800000, // 30 minutes blacklist time
-    },
-  };
 
   /**
    * Circuit breaker for failing repositories
@@ -373,11 +366,11 @@ class FileAnalysisService {
             repoUrl,
             commitHash: commitHash.substring(0, 8),
             cacheKey,
-            filesCount: result.length,
+            filesCount: result.fileInfos.length,
             retrievalTime,
           });
 
-          return result;
+          return result.fileInfos;
         } catch (analysisError) {
           logger.warn('Ongoing analysis failed, checking cache', {
             repoUrl,
@@ -516,17 +509,34 @@ class FileAnalysisService {
    * Create and manage analysis lock for a specific cache key
    * This prevents concurrent analysis of the same repository
    */
-  private async createAnalysisLock(
+  private async runWithAnalysisLock(
     cacheKey: string,
-    analysisPromise: Promise<FileInfo[]>
-  ): Promise<FileInfo[]> {
+    task: () => Promise<InFlightAnalysisResult>
+  ): Promise<InFlightAnalysisResult> {
+    const existingAnalysis = this.analysisLocks.get(cacheKey);
+    if (existingAnalysis) {
+      return existingAnalysis;
+    }
+
+    let resolveFn!: (value: InFlightAnalysisResult) => void;
+    let rejectFn!: (reason?: unknown) => void;
+
+    const pendingPromise = new Promise<InFlightAnalysisResult>(
+      (resolve, reject) => {
+        resolveFn = resolve;
+        rejectFn = reject;
+      }
+    );
+
+    this.analysisLocks.set(cacheKey, pendingPromise);
+
     try {
-      // Store the promise for other concurrent requests to wait on
-      this.analysisLocks.set(cacheKey, analysisPromise);
-
-      const result = await analysisPromise;
-
+      const result = await task();
+      resolveFn(result);
       return result;
+    } catch (error) {
+      rejectFn(error);
+      throw error;
     } finally {
       // Always cleanup the lock when analysis completes (success or failure)
       this.analysisLocks.delete(cacheKey);
@@ -713,6 +723,7 @@ class FileAnalysisService {
     // Check if we should open the circuit
     if (state.failures >= this.circuitBreakerConfig.failureThreshold) {
       state.isOpen = true;
+      state.halfOpenAttempts = 0;
       logger.warn('Circuit breaker opened for repository', {
         repoUrl: repoUrl.substring(0, 50) + '...',
         failures: state.failures,
@@ -748,19 +759,60 @@ class FileAnalysisService {
 
     // Reset failure count on success
     state.failures = 0;
+    state.halfOpenAttempts = 0;
+    state.isOpen = false;
 
     // If we're in half-open state, we might close the circuit
-    if (!state.isOpen && state.halfOpenAttempts >= 0) {
-      logger.info('Circuit breaker closed for repository', {
-        repoUrl: repoUrl.substring(0, 50) + '...',
-        previousFailures: state.failures,
-      });
+    logger.info('Circuit breaker closed for repository', {
+      repoUrl: repoUrl.substring(0, 50) + '...',
+      previousFailures: state.failures,
+    });
 
-      // Remove from map to save memory (closed state is default)
-      this.circuitBreakers.delete(repoHash);
-    } else {
+    // Remove from map to save memory (closed state is default)
+    this.circuitBreakers.delete(repoHash);
+  }
+
+  private registerHalfOpenAttempt(repoUrl: string): boolean {
+    const repoHash = this.hashUrl(repoUrl);
+    const state = this.circuitBreakers.get(repoHash);
+
+    if (!state || state.isOpen) {
+      return false;
+    }
+
+    if (state.failures >= this.circuitBreakerConfig.failureThreshold) {
+      state.halfOpenAttempts += 1;
+
+      if (
+        state.halfOpenAttempts > this.circuitBreakerConfig.halfOpenMaxAttempts
+      ) {
+        state.isOpen = true;
+        state.lastFailureTime = Date.now();
+
+        logger.warn('Circuit breaker half-open attempt limit exceeded', {
+          repoUrl: repoUrl.substring(0, 50) + '...',
+          attempts: state.halfOpenAttempts,
+          maxAttempts: this.circuitBreakerConfig.halfOpenMaxAttempts,
+        });
+
+        recordDetailedError(
+          'circuit-breaker-half-open-limit',
+          new Error('Half-open attempt limit exceeded'),
+          {
+            userImpact: 'blocking',
+            recoveryAction: 'retry',
+            severity: 'warning',
+          }
+        );
+
+        this.circuitBreakers.set(repoHash, state);
+        return true;
+      }
+
       this.circuitBreakers.set(repoHash, state);
     }
+
+    return false;
   }
 
   /**
@@ -769,12 +821,19 @@ class FileAnalysisService {
   private async executeWithCircuitBreaker<T>(
     repoUrl: string,
     operation: () => Promise<T>,
-    operationName: string
+    operationName = 'repository-analysis'
   ): Promise<T> {
     // Check if circuit breaker is open
     if (this.isCircuitBreakerOpen(repoUrl)) {
       throw new RepositoryError(
         `Circuit breaker is open for repository analysis. Repository: ${repoUrl.substring(0, 50)}... Operation: ${operationName}`,
+        repoUrl
+      );
+    }
+
+    if (this.registerHalfOpenAttempt(repoUrl)) {
+      throw new RepositoryError(
+        `Circuit breaker half-open attempt limit reached. Repository: ${repoUrl.substring(0, 50)}... Operation: ${operationName}`,
         repoUrl
       );
     }
@@ -786,6 +845,77 @@ class FileAnalysisService {
     } catch (error) {
       this.recordCircuitBreakerFailure(repoUrl);
       throw error;
+    }
+  }
+
+  getCircuitBreakerStatus(repoUrl: string): {
+    state: 'open' | 'half-open' | 'closed';
+    isBlocked: boolean;
+    failures: number;
+    lastFailure?: Date;
+    timeUntilRecovery?: number;
+  } {
+    const repoHash = this.hashUrl(repoUrl);
+    const state = this.circuitBreakers.get(repoHash);
+
+    if (!state) {
+      return {
+        state: 'closed',
+        isBlocked: false,
+        failures: 0,
+      };
+    }
+
+    const now = Date.now();
+
+    if (state.isOpen) {
+      return {
+        state: 'open',
+        isBlocked: true,
+        failures: state.failures,
+        lastFailure: state.lastFailureTime
+          ? new Date(state.lastFailureTime)
+          : undefined,
+        timeUntilRecovery: Math.max(
+          0,
+          this.circuitBreakerConfig.timeoutMs - (now - state.lastFailureTime)
+        ),
+      };
+    }
+
+    const isHalfOpen =
+      state.failures >= this.circuitBreakerConfig.failureThreshold;
+
+    return {
+      state: isHalfOpen ? 'half-open' : 'closed',
+      isBlocked: false,
+      failures: state.failures,
+      lastFailure: state.lastFailureTime
+        ? new Date(state.lastFailureTime)
+        : undefined,
+      timeUntilRecovery: isHalfOpen
+        ? Math.max(
+            0,
+            this.circuitBreakerConfig.timeoutMs - (now - state.lastFailureTime)
+          )
+        : undefined,
+    };
+  }
+
+  resetCircuitBreaker(repoUrl: string): void {
+    const repoHash = this.hashUrl(repoUrl);
+
+    if (this.circuitBreakers.delete(repoHash)) {
+      logger.info('Circuit breaker manually reset for repository', {
+        repoUrl,
+      });
+    } else {
+      logger.debug(
+        'Circuit breaker reset requested for repository with no state',
+        {
+          repoUrl,
+        }
+      );
     }
   }
 
@@ -992,164 +1122,6 @@ class FileAnalysisService {
   // ============================================================================
   // CIRCUIT BREAKER METHODS - Resilience Enhancement
   // ============================================================================
-
-  /**
-   * Check if repository should be blocked by circuit breaker
-   */
-  private isRepositoryBlocked(repoUrl: string): boolean {
-    const repoKey = this.normalizeRepoKey(repoUrl);
-    const now = Date.now();
-
-    // Check if repository is blacklisted
-    if (this.circuitBreaker.blacklist.has(repoKey)) {
-      const lastFailure = this.circuitBreaker.lastFailure.get(repoKey) || 0;
-      if (now - lastFailure < this.circuitBreaker.config.blacklistTime) {
-        return true;
-      } else {
-        // Blacklist expired, remove from blacklist
-        this.circuitBreaker.blacklist.delete(repoKey);
-        this.circuitBreaker.failures.delete(repoKey);
-        this.circuitBreaker.lastFailure.delete(repoKey);
-      }
-    }
-
-    // Check if circuit is open (too many recent failures)
-    const failures = this.circuitBreaker.failures.get(repoKey) || 0;
-    const lastFailure = this.circuitBreaker.lastFailure.get(repoKey) || 0;
-
-    if (failures >= this.circuitBreaker.config.failureThreshold) {
-      if (now - lastFailure < this.circuitBreaker.config.recoveryTime) {
-        return true; // Circuit is open
-      } else {
-        // Recovery time passed, reset failure count
-        this.circuitBreaker.failures.set(repoKey, 0);
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Record a successful repository analysis
-   */
-  private recordRepositorySuccess(repoUrl: string): void {
-    const repoKey = this.normalizeRepoKey(repoUrl);
-
-    // Reset failure tracking on success
-    this.circuitBreaker.failures.delete(repoKey);
-    this.circuitBreaker.lastFailure.delete(repoKey);
-    this.circuitBreaker.blacklist.delete(repoKey);
-
-    logger.debug('Repository success recorded, circuit breaker reset', {
-      repoUrl,
-      repoKey,
-    });
-  }
-
-  /**
-   * Record a repository analysis failure
-   */
-  private recordRepositoryFailure(repoUrl: string, error: Error): void {
-    const repoKey = this.normalizeRepoKey(repoUrl);
-    const now = Date.now();
-
-    // Increment failure count
-    const currentFailures = this.circuitBreaker.failures.get(repoKey) || 0;
-    const newFailures = currentFailures + 1;
-
-    this.circuitBreaker.failures.set(repoKey, newFailures);
-    this.circuitBreaker.lastFailure.set(repoKey, now);
-
-    // Check if repository should be blacklisted
-    if (newFailures >= this.circuitBreaker.config.failureThreshold) {
-      this.circuitBreaker.blacklist.add(repoKey);
-
-      logger.warn('Repository added to circuit breaker blacklist', {
-        repoUrl,
-        repoKey,
-        failures: newFailures,
-        error: error.message,
-        blacklistTime: this.circuitBreaker.config.blacklistTime,
-      });
-
-      // Record circuit breaker activation for monitoring
-      recordDetailedError('circuit-breaker-activated', error, {
-        userImpact: 'blocking',
-        recoveryAction: 'retry',
-        severity: 'warning',
-      });
-    } else {
-      logger.debug('Repository failure recorded', {
-        repoUrl,
-        repoKey,
-        failures: newFailures,
-        threshold: this.circuitBreaker.config.failureThreshold,
-      });
-    }
-  }
-
-  /**
-   * Normalize repository URL for consistent circuit breaker key
-   */
-  private normalizeRepoKey(repoUrl: string): string {
-    // Normalize URL to handle different formats consistently
-    return repoUrl
-      .toLowerCase()
-      .replace(/\.git$/, '')
-      .replace(/\/+$/, '')
-      .replace(/^https?:\/\//, '');
-  }
-
-  /**
-   * Get circuit breaker status for a repository
-   */
-  getCircuitBreakerStatus(repoUrl: string): {
-    isBlocked: boolean;
-    failures: number;
-    lastFailure?: Date;
-    timeUntilRecovery?: number;
-  } {
-    const repoKey = this.normalizeRepoKey(repoUrl);
-    const now = Date.now();
-    const isBlocked = this.isRepositoryBlocked(repoUrl);
-    const failures = this.circuitBreaker.failures.get(repoKey) || 0;
-    const lastFailure = this.circuitBreaker.lastFailure.get(repoKey);
-
-    let timeUntilRecovery: number | undefined;
-    if (isBlocked && lastFailure) {
-      if (this.circuitBreaker.blacklist.has(repoKey)) {
-        timeUntilRecovery =
-          this.circuitBreaker.config.blacklistTime - (now - lastFailure);
-      } else {
-        timeUntilRecovery =
-          this.circuitBreaker.config.recoveryTime - (now - lastFailure);
-      }
-      timeUntilRecovery = Math.max(0, timeUntilRecovery);
-    }
-
-    return {
-      isBlocked,
-      failures,
-      lastFailure: lastFailure ? new Date(lastFailure) : undefined,
-      timeUntilRecovery,
-    };
-  }
-
-  /**
-   * Reset circuit breaker for a specific repository (admin function)
-   */
-  resetCircuitBreaker(repoUrl: string): void {
-    const repoKey = this.normalizeRepoKey(repoUrl);
-
-    this.circuitBreaker.failures.delete(repoKey);
-    this.circuitBreaker.lastFailure.delete(repoKey);
-    this.circuitBreaker.blacklist.delete(repoKey);
-
-    logger.info('Circuit breaker manually reset for repository', {
-      repoUrl,
-      repoKey,
-    });
-  }
 
   /**
    * Convert remote file tree data to FileInfo objects for analysis
@@ -2978,6 +2950,7 @@ class FileAnalysisService {
   }> {
     // Get commit hash for cache checking
     const commitHash = await this.getRepositoryCommitHash(repoUrl);
+    const cacheKey = this.generateFileTreeCacheKey(repoUrl, commitHash);
 
     // Check cache first
     const cachedFileTree = await this.getCachedFileTree(repoUrl, commitHash);
@@ -3004,18 +2977,19 @@ class FileAnalysisService {
       };
     }
 
-    // Execute the selected method
-    const execution = await this.executeOptimizedMethod(
-      repoUrl,
-      method,
-      commitHash,
-      options
-    );
+    // Execute the selected method with concurrency control
+    const execution = await this.runWithAnalysisLock(cacheKey, async () => {
+      const methodExecution = await this.executeOptimizedMethod(
+        repoUrl,
+        method,
+        commitHash,
+        options
+      );
 
-    // Cache the result for future use
-    if (execution.fileInfos && commitHash) {
-      await this.cacheFileTree(repoUrl, commitHash, execution.fileInfos);
-    }
+      await this.cacheFileTree(repoUrl, commitHash, methodExecution.fileInfos);
+
+      return methodExecution;
+    });
 
     const result = this.buildAnalysisResultFromFileInfos(
       execution.fileInfos,
