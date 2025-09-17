@@ -58,7 +58,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@10.12.2",
+  "packageManager": "pnpm@10.16.1",
   "devDependencies": {
     "@eslint/js": "^9.27.0",
     "@vitest/coverage-v8": "^3.2.3",
@@ -81,6 +81,10 @@
     "vitest": "^3.2.3"
   },
   "dependencies": {
-    "@rive-app/react-canvas": "^4.21.3"
+    "@rive-app/react-canvas": "^4.21.3",
+    "@types/react": "^18.3.24",
+    "@types/react-dom": "^18.3.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   }
 }
