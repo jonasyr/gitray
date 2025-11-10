@@ -963,7 +963,6 @@ class GitService {
 
       for (const commit of commitsWithStats) {
         // Use author name as the unique identifier for GDPR compliance (pseudonymized)
-        // Email addresses are considered personal data under GDPR
         const login = commit.authorName;
 
         if (!contributorMap.has(login)) {
