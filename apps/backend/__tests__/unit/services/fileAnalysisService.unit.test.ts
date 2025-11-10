@@ -986,4 +986,448 @@ describe('FileAnalysisService', () => {
       expect(calculatedTotal).toBe(totalSize);
     });
   });
+
+  // ================================================================
+  // 9. HELPER METHODS TESTS (20+ tests for 80% coverage)
+  // ================================================================
+  describe('Helper Methods (Happy Path)', () => {
+    describe('shouldIncludeFile', () => {
+      it('should include file when no filters applied', () => {
+        const result = (service as any).shouldIncludeFile(
+          { path: 'src/app.ts', size: 1000, mode: '100644' },
+          {}
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should include file matching extension filter', () => {
+        const result = (service as any).shouldIncludeFile(
+          { path: 'src/app.ts', size: 1000, mode: '100644' },
+          { extensions: ['.ts', '.js'] }
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should exclude file not matching extension filter', () => {
+        const result = (service as any).shouldIncludeFile(
+          { path: 'README.md', size: 1000, mode: '100644' },
+          { extensions: ['.ts', '.js'] }
+        );
+        expect(result).toBe(false);
+      });
+
+      it('should include file matching directory filter', () => {
+        const result = (service as any).shouldIncludeFile(
+          { path: 'src/app.ts', size: 1000, mode: '100644' },
+          { directories: ['src'] }
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should exclude hidden file when includeHidden is false', () => {
+        const result = (service as any).shouldIncludeFile(
+          { path: 'src/.env', size: 1000, mode: '100644' },
+          { includeHidden: false }
+        );
+        expect(result).toBe(false);
+      });
+    });
+
+    describe('passesExtensionFilter', () => {
+      it('should pass when no extension filter', () => {
+        const result = (service as any).passesExtensionFilter(
+          { path: 'app.ts', size: 1000, mode: '100644' },
+          {}
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should pass when extension matches', () => {
+        const result = (service as any).passesExtensionFilter(
+          { path: 'app.ts', size: 1000, mode: '100644' },
+          { extensions: ['.ts', '.js'] }
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should fail when extension does not match', () => {
+        const result = (service as any).passesExtensionFilter(
+          { path: 'app.py', size: 1000, mode: '100644' },
+          { extensions: ['.ts', '.js'] }
+        );
+        expect(result).toBe(false);
+      });
+    });
+
+    describe('passesHiddenFilter', () => {
+      it('should pass non-hidden file when includeHidden is true', () => {
+        const result = (service as any).passesHiddenFilter(
+          { path: 'src/app.ts', size: 1000, mode: '100644' },
+          { includeHidden: true }
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should pass hidden file when includeHidden is true', () => {
+        const result = (service as any).passesHiddenFilter(
+          { path: '.gitignore', size: 100, mode: '100644' },
+          { includeHidden: true }
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should pass non-hidden file when includeHidden is false', () => {
+        const result = (service as any).passesHiddenFilter(
+          { path: 'src/app.ts', size: 1000, mode: '100644' },
+          { includeHidden: false }
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should fail hidden file when includeHidden is false', () => {
+        const result = (service as any).passesHiddenFilter(
+          { path: '.gitignore', size: 100, mode: '100644' },
+          { includeHidden: false }
+        );
+        expect(result).toBe(false);
+      });
+    });
+
+    describe('passesSizeFilters', () => {
+      it('should pass when no size filters', () => {
+        const result = (service as any).passesSizeFilters(
+          { path: 'app.ts', size: 5000, mode: '100644' },
+          {}
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should pass when size is above minSize', () => {
+        const result = (service as any).passesSizeFilters(
+          { path: 'app.ts', size: 5000, mode: '100644' },
+          { minFileSize: 1000 }
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should fail when size is below minSize', () => {
+        const result = (service as any).passesSizeFilters(
+          { path: 'app.ts', size: 500, mode: '100644' },
+          { minFileSize: 1000 }
+        );
+        expect(result).toBe(false);
+      });
+
+      it('should pass when size is below maxSize', () => {
+        const result = (service as any).passesSizeFilters(
+          { path: 'app.ts', size: 5000, mode: '100644' },
+          { maxFileSize: 10000 }
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should fail when size is above maxSize', () => {
+        const result = (service as any).passesSizeFilters(
+          { path: 'app.ts', size: 15000, mode: '100644' },
+          { maxFileSize: 10000 }
+        );
+        expect(result).toBe(false);
+      });
+
+      it('should pass when size is in range', () => {
+        const result = (service as any).passesSizeFilters(
+          { path: 'app.ts', size: 5000, mode: '100644' },
+          { minFileSize: 1000, maxFileSize: 10000 }
+        );
+        expect(result).toBe(true);
+      });
+    });
+
+    describe('passesDepthFilter', () => {
+      it('should pass when no depth filter', () => {
+        const result = (service as any).passesDepthFilter(
+          { path: 'a/b/c/d/e/app.ts', size: 1000, mode: '100644' },
+          {}
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should pass when depth is within limit', () => {
+        const result = (service as any).passesDepthFilter(
+          { path: 'src/app.ts', size: 1000, mode: '100644' },
+          { maxDepth: 3 }
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should fail when depth exceeds limit', () => {
+        const result = (service as any).passesDepthFilter(
+          { path: 'a/b/c/d/e/app.ts', size: 1000, mode: '100644' },
+          { maxDepth: 3 }
+        );
+        expect(result).toBe(false);
+      });
+    });
+
+    describe('passesDirectoryFilter', () => {
+      it('should pass when no directory filter', () => {
+        const result = (service as any).passesDirectoryFilter(
+          { path: 'src/app.ts', size: 1000, mode: '100644' },
+          {}
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should pass when in included directory', () => {
+        const result = (service as any).passesDirectoryFilter(
+          { path: 'src/app.ts', size: 1000, mode: '100644' },
+          { directories: ['src', 'lib'] }
+        );
+        expect(result).toBe(true);
+      });
+
+      it('should fail when not in included directory', () => {
+        const result = (service as any).passesDirectoryFilter(
+          { path: 'test/app.test.ts', size: 1000, mode: '100644' },
+          { directories: ['src', 'lib'] }
+        );
+        expect(result).toBe(false);
+      });
+    });
+
+    describe('applyFileFilters', () => {
+      it('should return all files when no filters', () => {
+        const files = ['app.ts', 'README.md', 'package.json'];
+        const result = (service as any).applyFileFilters(files, {});
+        expect(result).toHaveLength(3);
+      });
+
+      it('should filter by extension', () => {
+        const files = ['app.ts', 'util.ts', 'README.md'];
+        const result = (service as any).applyFileFilters(files, {
+          extensions: ['.ts'],
+        });
+        expect(result).toHaveLength(2);
+        expect(result[0]).toBe('app.ts');
+        expect(result[1]).toBe('util.ts');
+      });
+
+      it('should filter by directory', () => {
+        const files = ['src/app.ts', 'lib/util.ts', 'test/app.test.ts'];
+        const result = (service as any).applyFileFilters(files, {
+          directories: ['src', 'lib'],
+        });
+        expect(result).toHaveLength(2);
+        expect(result).toContain('src/app.ts');
+        expect(result).toContain('lib/util.ts');
+      });
+
+      it('should combine multiple filters', () => {
+        const files = ['src/app.ts', 'src/README.md', 'test/app.test.ts'];
+        const result = (service as any).applyFileFilters(files, {
+          extensions: ['.ts'],
+          directories: ['src'],
+        });
+        expect(result).toHaveLength(1);
+        expect(result[0]).toBe('src/app.ts');
+      });
+    });
+
+    describe('createFileInfoFromRemote', () => {
+      it('should create FileInfo from remote file data', () => {
+        const remoteFile = {
+          path: 'src/app.ts',
+          size: 1000,
+        };
+        const result = (service as any).createFileInfoFromRemote(remoteFile);
+
+        expect(result.path).toBe('src/app.ts');
+        expect(result.size).toBe(1000);
+        expect(result.extension).toBe('.ts');
+        expect(result.category).toBe('code');
+        expect(result.lastModified).toBeDefined();
+      });
+
+      it('should categorize README correctly', () => {
+        const remoteFile = {
+          path: 'README.md',
+          size: 2000,
+        };
+        const result = (service as any).createFileInfoFromRemote(remoteFile);
+
+        expect(result.category).toBe('documentation');
+      });
+
+      it('should categorize LICENSE correctly', () => {
+        const remoteFile = {
+          path: 'LICENSE',
+          size: 1000,
+        };
+        const result = (service as any).createFileInfoFromRemote(remoteFile);
+
+        expect(result.category).toBe('documentation');
+      });
+
+      it('should handle files without extensions', () => {
+        const remoteFile = {
+          path: 'Makefile',
+          size: 500,
+        };
+        const result = (service as any).createFileInfoFromRemote(remoteFile);
+
+        expect(result.extension).toBe('');
+        expect(result.category).toBeDefined();
+      });
+    });
+
+    describe('estimateFilesByRepositoryType', () => {
+      it('should estimate files for known repository types', () => {
+        const frameworkEstimate = (
+          service as any
+        ).estimateFilesByRepositoryType(
+          'https://github.com/user/framework-project.git'
+        );
+        expect(frameworkEstimate).toBe(2000);
+
+        const exampleEstimate = (service as any).estimateFilesByRepositoryType(
+          'https://github.com/user/example-project.git'
+        );
+        expect(exampleEstimate).toBe(500);
+      });
+
+      it('should return default estimate for unknown types', () => {
+        const defaultEstimate = (service as any).estimateFilesByRepositoryType(
+          'https://github.com/user/unknown-project.git'
+        );
+        expect(defaultEstimate).toBe(3000); // Default is 3000, not 500
+      });
+    });
+
+    describe('estimateRepositorySize', () => {
+      it('should estimate size for small repository', () => {
+        const size = (service as any).estimateRepositorySize(100, 'small');
+        expect(size).toBe(100 * 8 * 1024); // 100 files * 8KB
+        expect(size).toBeGreaterThan(0);
+      });
+
+      it('should estimate size for medium repository', () => {
+        const size = (service as any).estimateRepositorySize(1000, 'medium');
+        expect(size).toBe(1000 * 12 * 1024); // 1000 files * 12KB
+        expect(size).toBeGreaterThan(1024 * 1024); // More than 1MB
+      });
+
+      it('should estimate size for large repository', () => {
+        const size = (service as any).estimateRepositorySize(10000, 'large');
+        expect(size).toBe(10000 * 15 * 1024); // 10000 files * 15KB
+        expect(size).toBeGreaterThan(10 * 1024 * 1024); // More than 10MB
+      });
+    });
+
+    describe('calculatePerformanceGain', () => {
+      it('should calculate gain for sparse clone vs full clone', () => {
+        const gain = (service as any).calculatePerformanceGain(
+          'ls-tree-remote',
+          'medium'
+        );
+        expect(gain).toBe(18.0); // From the implementation
+      });
+
+      it('should calculate gain for shallow clone', () => {
+        const gain = (service as any).calculatePerformanceGain(
+          'shallow-clone',
+          'medium'
+        );
+        expect(gain).toBe(3.0); // From the implementation
+      });
+
+      it('should return 1 for full clone (baseline)', () => {
+        const gain = (service as any).calculatePerformanceGain(
+          'full-clone',
+          'small'
+        );
+        expect(gain).toBe(1.0);
+      });
+
+      it('should return high gain for cached method', () => {
+        const gain = (service as any).calculatePerformanceGain(
+          'cached',
+          'large'
+        );
+        expect(gain).toBe(50.0); // From the implementation
+      });
+    });
+
+    describe('parseLsTreeOutput', () => {
+      it('should parse valid ls-tree output', () => {
+        // Format: mode type hash size\tpath
+        const output = `100644 blob abc1234567890 1000\tsrc/app.ts
+100644 blob def1234567890 2000\tREADME.md`;
+        const result = (service as any).parseLsTreeOutput(output);
+
+        expect(result).toHaveLength(2);
+        expect(result[0]).toEqual({
+          path: 'src/app.ts',
+          size: 1000,
+          mode: '100644',
+        });
+        expect(result[1]).toEqual({
+          path: 'README.md',
+          size: 2000,
+          mode: '100644',
+        });
+      });
+
+      it('should handle empty output', () => {
+        const result = (service as any).parseLsTreeOutput('');
+        expect(result).toHaveLength(0);
+      });
+
+      it('should skip invalid lines', () => {
+        const output = `100644 blob abc1234567890 1000\tsrc/app.ts
+invalid line
+100644 blob def1234567890 2000\tREADME.md`;
+        const result = (service as any).parseLsTreeOutput(output);
+
+        expect(result).toHaveLength(2);
+      });
+    });
+
+    describe('generateFileTreeCacheKey', () => {
+      it('should generate consistent cache key for same inputs', () => {
+        const key1 = (service as any).generateFileTreeCacheKey(
+          'https://github.com/user/repo.git',
+          'main'
+        );
+        const key2 = (service as any).generateFileTreeCacheKey(
+          'https://github.com/user/repo.git',
+          'main'
+        );
+        expect(key1).toBe(key2);
+      });
+
+      it('should generate different keys for different repos', () => {
+        const key1 = (service as any).generateFileTreeCacheKey(
+          'https://github.com/user/repo1.git',
+          'main'
+        );
+        const key2 = (service as any).generateFileTreeCacheKey(
+          'https://github.com/user/repo2.git',
+          'main'
+        );
+        expect(key1).not.toBe(key2);
+      });
+
+      it('should generate different keys for different branches', () => {
+        const key1 = (service as any).generateFileTreeCacheKey(
+          'https://github.com/user/repo.git',
+          'main'
+        );
+        const key2 = (service as any).generateFileTreeCacheKey(
+          'https://github.com/user/repo.git',
+          'develop'
+        );
+        expect(key1).not.toBe(key2);
+      });
+    });
+  });
 });
