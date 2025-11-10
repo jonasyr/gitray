@@ -1398,8 +1398,9 @@ export class RepositoryCacheManager {
 
       try {
         // Use ordered locking to prevent deadlocks
+        // Note: cache-contributors lock is already held by outer withKeyLock
         let contributors = await withOrderedLocks(
-          [`cache-contributors:${repoUrl}`, `repo-access:${repoUrl}`],
+          [`repo-access:${repoUrl}`],
           async () => {
             return withSharedRepository(
               repoUrl,
