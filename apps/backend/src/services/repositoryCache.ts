@@ -299,8 +299,18 @@ export class RepositoryCacheManager {
      * Initialize aggregated data cache with smallest allocation.
      * Aggregations are computationally expensive but have the lowest reuse rate
      * since they're often specific to particular visualization requests.
+     * Now supports both CommitHeatmapData and ContributorStat[] types.
      */
-    this.aggregatedDataCache = new HybridLRUCache<CommitHeatmapData>({
+    this.aggregatedDataCache = new HybridLRUCache<
+      | CommitHeatmapData
+      | Array<{
+          login: string;
+          commitCount: number;
+          linesAdded: number;
+          linesDeleted: number;
+          contributionPercentage: number;
+        }>
+    >({
       maxEntries: Math.floor(baseConfig.maxEntries * 0.2), // 20% of total entries
       memoryLimitBytes: Math.floor(baseConfig.memoryLimitBytes * 0.15), // 15% of memory budget
       diskPath: `${baseConfig.diskPath}/aggregated-data`,
