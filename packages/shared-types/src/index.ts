@@ -365,3 +365,23 @@ export interface PerformanceMetrics {
   /** Method selection reasoning for debugging */
   selectionReason: string;
 }
+
+// ============================================================================
+// CONTRIBUTOR STATISTICS - Top Contributors Feature
+// ============================================================================
+
+/**
+ * Represents statistics for a repository contributor
+ */
+export interface ContributorStat {
+  /** GitHub handle or author identifier (name or email) */
+  login: string;
+  /** Total number of commits by this contributor */
+  commitCount: number;
+  /** Total lines added by this contributor */
+  linesAdded: number;
+  /** Total lines deleted by this contributor */
+  linesDeleted: number;
+  /** Contribution percentage relative to total commits (0.0 to 1.0) */
+  contributionPercentage: number;
+}

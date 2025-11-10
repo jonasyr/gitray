@@ -1297,6 +1297,177 @@ export class RepositoryCacheManager {
   }
 
   /**
+   * NEW: Retrieves or generates top contributor statistics using the aggregated cache tier.
+   *
+   * This method processes commit data to generate contributor-level statistics including
+   * commit counts, lines added/deleted, and contribution percentages. Results are cached
+   * to avoid expensive recomputation for subsequent requests.
+   *
+   * @param repoUrl - Git repository URL
+   * @param filterOptions - Optional filters for contributor data scope
+   * @returns Promise resolving to array of top contributor statistics
+   */
+  async getOrGenerateContributors(
+    repoUrl: string,
+    filterOptions?: CommitFilterOptions
+  ): Promise<
+    Array<{
+      login: string;
+      commitCount: number;
+      linesAdded: number;
+      linesDeleted: number;
+      contributionPercentage: number;
+    }>
+  > {
+    return withKeyLock(`cache-contributors:${repoUrl}`, async () => {
+      const startTime = Date.now();
+
+      // Generate cache key for contributors
+      const contributorsKey = this.generateContributorsKey(
+        repoUrl,
+        filterOptions
+      );
+      let contributors = await this.aggregatedDataCache.get(contributorsKey);
+
+      if (contributors) {
+        // Cache hit: Return cached contributor data
+        this.metrics.operations.aggregatedHits++;
+        this.recordHitTime(startTime);
+        cacheHits.inc({ operation: 'contributors' });
+        recordEnhancedCacheOperation('contributors', true, undefined, repoUrl);
+
+        // Track data freshness
+        const cacheAge = Date.now() - startTime;
+        recordDataFreshness('contributors', cacheAge);
+
+        logger.debug('Contributors cache hit', {
+          repoUrl,
+          contributorsCount: contributors.length,
+          filters: filterOptions,
+          cacheKey: contributorsKey,
+        });
+
+        return contributors;
+      }
+
+      // Cache miss: Generate contributor data
+      this.metrics.operations.aggregatedMisses++;
+      this.recordMissTime(startTime);
+      cacheMisses.inc({ operation: 'contributors' });
+      recordEnhancedCacheOperation('contributors', false, undefined, repoUrl);
+
+      logger.debug('Contributors cache miss, generating from commits', {
+        repoUrl,
+        filters: filterOptions,
+        cacheKey: contributorsKey,
+      });
+
+      const transaction = this.createTransaction(repoUrl);
+
+      try {
+        // Use ordered locking to prevent deadlocks
+        contributors = await withOrderedLocks(
+          [`cache-contributors:${repoUrl}`, `repo-access:${repoUrl}`],
+          async () => {
+            return withSharedRepository(
+              repoUrl,
+              async (handle: RepositoryHandle) => {
+                logger.info('Fetching contributors via shared repository', {
+                  repoUrl,
+                  commitCount: handle.commitCount,
+                  sizeCategory: handle.sizeCategory,
+                  isShared: handle.isShared,
+                });
+
+                // Track efficiency gains from repository sharing
+                if (handle.isShared && handle.refCount > 1) {
+                  this.metrics.efficiency.duplicateClonesPrevented++;
+                  logger.debug('Duplicate clone prevented for contributors', {
+                    repoUrl,
+                    refCount: handle.refCount,
+                  });
+                }
+
+                return gitService.getTopContributors(
+                  handle.localPath,
+                  filterOptions
+                );
+              }
+            );
+          }
+        );
+
+        // Defensive programming: Handle null contributors gracefully
+        if (!contributors) {
+          contributors = [];
+          logger.warn(
+            'gitService.getTopContributors returned null, using empty array',
+            { repoUrl }
+          );
+        }
+
+        // Cache the contributors data
+        const ttl = config.cacheStrategy.cacheKeys.aggregatedDataTTL;
+        await this.transactionalSet(
+          this.aggregatedDataCache,
+          'aggregated',
+          contributorsKey,
+          contributors,
+          ttl,
+          transaction
+        );
+
+        // Finalize the transaction
+        await this.commitTransaction(transaction);
+
+        logger.debug('Contributors cached with transaction', {
+          repoUrl,
+          filters: filterOptions,
+          contributorsCount: contributors.length,
+          ttl,
+          transactionId: transaction.id,
+        });
+
+        // Update system health metrics
+        updateServiceHealthScore('cache', {
+          cacheHitRate: 1.0,
+          errorRate: 0.0,
+        });
+
+        return contributors;
+      } catch (error) {
+        // Track contributor generation failure
+        this.metrics.transactions.failed++;
+
+        // Record comprehensive error details
+        recordDetailedError(
+          'cache',
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            userImpact: 'degraded',
+            recoveryAction: 'retry',
+            severity: 'warning',
+          }
+        );
+
+        // Update system health metrics
+        updateServiceHealthScore('cache', { errorRate: 1.0 });
+
+        // Rollback transaction to maintain cache consistency
+        await this.rollbackTransaction(transaction);
+
+        logger.error('Failed to cache contributors, transaction rolled back', {
+          repoUrl,
+          transactionId: transaction.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
+        throw error;
+      }
+    });
+  }
+
+  /**
    * Retrieves or generates aggregated visualization data using the tertiary cache tier.
    *
    * This method handles the most computationally expensive operations by processing
@@ -1773,6 +1944,17 @@ export class RepositoryCacheManager {
   ): string {
     const filterHash = this.hashObject(filterOptions ?? {});
     const key = `aggregated_data:${this.hashUrl(repoUrl)}:${filterHash}`;
+    this.trackCacheKey(key);
+    return key;
+  }
+
+  /** NEW: Generate cache key for contributors data */
+  private generateContributorsKey(
+    repoUrl: string,
+    filterOptions?: CommitFilterOptions
+  ): string {
+    const filterHash = this.hashObject(filterOptions ?? {});
+    const key = `contributors:${this.hashUrl(repoUrl)}:${filterHash}`;
     this.trackCacheKey(key);
     return key;
   }
@@ -2367,4 +2549,29 @@ export async function invalidateCachedRepository(
  */
 export function getRepositoryCacheStats(): CacheStats {
   return repositoryCache.getCacheStats();
+}
+
+/**
+ * NEW: Retrieves top contributor statistics for a repository.
+ *
+ * Returns cached data when available, or generates fresh statistics by
+ * analyzing commit history with line-level changes.
+ *
+ * @param repoUrl - Repository URL to analyze
+ * @param filterOptions - Optional filters for contributor scope
+ * @returns Promise resolving to array of top contributor statistics
+ */
+export async function getCachedContributors(
+  repoUrl: string,
+  filterOptions?: CommitFilterOptions
+): Promise<
+  Array<{
+    login: string;
+    commitCount: number;
+    linesAdded: number;
+    linesDeleted: number;
+    contributionPercentage: number;
+  }>
+> {
+  return repositoryCache.getOrGenerateContributors(repoUrl, filterOptions);
 }
