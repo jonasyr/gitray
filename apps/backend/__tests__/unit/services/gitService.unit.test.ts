@@ -1335,21 +1335,21 @@ pqr678|2023-01-06T12:00:00Z|Bob|bob@example.com|commit 6
       // Assert
       expect(result).toHaveLength(3); // Alice, Bob, Charlie
       expect(result[0]).toEqual({
-        login: 'alice@example.com',
+        login: 'Alice',
         commitCount: 3,
         linesAdded: 38,
         linesDeleted: 19,
         contributionPercentage: 0.5, // 3 out of 6 commits
       });
       expect(result[1]).toEqual({
-        login: 'bob@example.com',
+        login: 'Bob',
         commitCount: 2,
         linesAdded: 27,
         linesDeleted: 9,
         contributionPercentage: 2 / 6,
       });
       expect(result[2]).toEqual({
-        login: 'charlie@example.com',
+        login: 'Charlie',
         commitCount: 1,
         linesAdded: 5,
         linesDeleted: 2,
