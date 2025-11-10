@@ -149,6 +149,12 @@ export const config = {
       50000
     ),
 
+    // Threshold for switching to streaming mode for file analysis (number of files)
+    fileThreshold: parseEnvNumber(process.env.STREAMING_FILE_THRESHOLD, 10000),
+
+    // Maximum number of files to process in file analysis
+    maxFiles: parseEnvNumber(process.env.STREAMING_MAX_FILES, 100000),
+
     // Batch size for streaming operations
     batchSize: parseEnvNumber(process.env.STREAMING_BATCH_SIZE, 1000),
 

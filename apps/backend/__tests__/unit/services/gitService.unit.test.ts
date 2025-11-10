@@ -64,6 +64,8 @@ describe('GitService Optimized Unit Tests', () => {
     config.streaming = {
       enabled: true,
       commitThreshold: 1000,
+      fileThreshold: 10000,
+      maxFiles: 100000,
       batchSize: 1000,
     };
     config.git = { maxConcurrentProcesses: 1, cloneDepth: 50 };

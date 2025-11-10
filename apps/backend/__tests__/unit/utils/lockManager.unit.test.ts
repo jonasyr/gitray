@@ -509,7 +509,9 @@ describe('Lock Manager Unit Tests', () => {
 
       // Assert
       expect(result).toBe(true);
-      expect(mockFs.unlink).toHaveBeenCalledWith('/tmp/test-locks/test-key');
+      expect(mockFs.unlink).toHaveBeenCalledWith(
+        expect.stringContaining('test-key')
+      );
     });
 
     test('should return false when force release fails', async () => {
@@ -547,7 +549,8 @@ describe('Lock Manager Unit Tests', () => {
 
       // Capture the order locks are acquired by monitoring fs.open calls
       mockFs.open.mockImplementation((path: string) => {
-        const lockName = path.split('/').pop();
+        // Extract just the filename part, handling both Unix and Windows paths
+        const lockName = path.split(/[/\\]/).pop();
         lockOrder.push(lockName!);
         return Promise.resolve(mockFileHandle);
       });
@@ -582,7 +585,8 @@ describe('Lock Manager Unit Tests', () => {
       const lockOrder: string[] = [];
 
       mockFs.open.mockImplementation((path: string) => {
-        const lockName = path.split('/').pop();
+        // Extract just the filename part, handling both Unix and Windows paths
+        const lockName = path.split(/[/\\]/).pop();
         lockOrder.push(lockName!);
         return Promise.resolve(mockFileHandle);
       });

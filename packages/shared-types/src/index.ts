@@ -177,3 +177,191 @@ export class TransactionRollbackError extends GitrayError {
     this.name = 'TransactionRollbackError';
   }
 }
+
+// ============================================================================
+// FILE ANALYSIS TYPES - New feature for file type distribution analysis
+// ============================================================================
+
+/**
+ * File category for grouping file types
+ */
+export type FileCategory =
+  | 'code'
+  | 'documentation'
+  | 'configuration'
+  | 'assets'
+  | 'other';
+
+/**
+ * File type statistics for a specific category or extension
+ */
+export interface FileTypeStats {
+  /** Number of files in this category/extension */
+  count: number;
+  /** Percentage of total files */
+  percentage: number;
+  /** Total size in bytes */
+  size: number;
+  /** Average file size in bytes */
+  averageSize: number;
+}
+
+/**
+ * File information for analysis
+ */
+export interface FileInfo {
+  /** Relative path from repository root */
+  path: string;
+  /** File extension (including dot) */
+  extension: string;
+  /** File category */
+  category: FileCategory;
+  /** File size in bytes */
+  size: number;
+  /** Last modified date (ISO 8601 format) */
+  lastModified: string;
+}
+
+/**
+ * Directory-level file distribution
+ */
+export interface DirectoryDistribution {
+  /** Directory path relative to repository root */
+  path: string;
+  /** File type distribution within this directory */
+  categories: Record<FileCategory, FileTypeStats>;
+  /** Extension distribution within this directory */
+  extensions: Record<string, FileTypeStats>;
+  /** Total files in this directory */
+  totalFiles: number;
+  /** Total size of all files in this directory */
+  totalSize: number;
+  /** Subdirectories */
+  subdirectories: DirectoryDistribution[];
+}
+
+/**
+ * Complete file type distribution analysis
+ */
+export interface FileTypeDistribution {
+  /** File type distribution by category */
+  categories: Record<FileCategory, FileTypeStats>;
+  /** File type distribution by extension */
+  extensions: Record<string, FileTypeStats>;
+  /** Directory-level analysis */
+  directories: DirectoryDistribution[];
+  /** Analysis metadata */
+  metadata: {
+    /** Total number of files analyzed */
+    totalFiles: number;
+    /** Total size of all files in bytes */
+    totalSize: number;
+    /** When the analysis was performed */
+    analyzedAt: string;
+    /** Repository size category for optimization */
+    repositorySize: string;
+    /** Git commit hash at time of analysis */
+    commitHash?: string;
+    /** Whether streaming mode was used */
+    streamingUsed?: boolean;
+    /** Applied filter options */
+    filterOptions?: FileAnalysisFilterOptions;
+    /** Cache strategy used */
+    cacheStrategy?: string;
+    /** Processing time in milliseconds */
+    processingTime?: number;
+    /** Repository coordination metrics */
+    coordinationMetrics?: any;
+    // NEW: Performance optimization metadata
+    /** Performance metrics for this analysis */
+    performanceMetrics?: PerformanceMetrics;
+    /** Repository characteristics determined */
+    repositoryCharacteristics?: RepositoryCharacteristics;
+  };
+}
+
+/**
+ * Filter options for file analysis
+ */
+export interface FileAnalysisFilterOptions {
+  /** Filter by specific file extensions */
+  extensions?: string[];
+  /** Filter by file categories */
+  categories?: FileCategory[];
+  /** Filter by directory paths */
+  directories?: string[];
+  /** Include hidden files (starting with .) */
+  includeHidden?: boolean;
+  /** Maximum directory depth to analyze */
+  maxDepth?: number;
+  /** Minimum file size in bytes */
+  minFileSize?: number;
+  /** Maximum file size in bytes */
+  maxFileSize?: number;
+}
+
+// ============================================================================
+// PERFORMANCE OPTIMIZATION TYPES - Phase 2.5 Critical Enhancement
+// ============================================================================
+
+/**
+ * Analysis method used to extract file information from repository
+ */
+export type AnalysisMethod =
+  | 'full-clone' // Current method: full repository clone (most resource intensive)
+  | 'shallow-clone' // Shallow clone with blob filtering (moderate optimization)
+  | 'ls-tree-remote' // Git ls-tree on remote repository (highest optimization)
+  | 'ls-tree-local' // Git ls-tree on local clone (for cached repositories)
+  | 'cached'; // Data retrieved from cache (no analysis needed)
+
+/**
+ * Source of file data for analysis
+ */
+export type DataSource =
+  | 'git-ls-tree' // From git ls-tree commands
+  | 'filesystem-walk' // From actual filesystem traversal
+  | 'cache-hit'; // From cached analysis results
+
+/**
+ * Repository characteristics for method selection optimization
+ */
+export interface RepositoryCharacteristics {
+  /** Estimated repository size category */
+  sizeCategory: 'small' | 'medium' | 'large' | 'xl';
+  /** Estimated number of files */
+  estimatedFiles: number;
+  /** Estimated total repository size in bytes */
+  estimatedSize: number;
+  /** Whether remote ls-tree is available */
+  supportsRemoteLsTree: boolean;
+  /** Whether shallow cloning is recommended */
+  recommendShallowClone: boolean;
+  /** Current commit hash for cache invalidation */
+  currentCommitHash?: string;
+  /** Last analysis timestamp for cache decisions */
+  lastAnalyzed?: string;
+}
+
+/**
+ * Performance metrics for analysis method tracking
+ */
+export interface PerformanceMetrics {
+  /** Analysis method used */
+  analysisMethod: AnalysisMethod;
+  /** Source of file data */
+  dataSource: DataSource;
+  /** Bandwidth used in bytes */
+  bandwidthUsed: number;
+  /** Processing time in milliseconds */
+  processingTime: number;
+  /** Cache hit rate (0.0 to 1.0) */
+  cacheHitRate: number;
+  /** Performance improvement factor vs full clone baseline */
+  performanceGain: number;
+  /** Estimated bandwidth saved vs full clone */
+  bandwidthSaved: number;
+  /** Whether file tree was cached for future use */
+  fileTreeCached: boolean;
+  /** Method selection reasoning for debugging */
+  selectionReason: string;
+}

@@ -3,4 +3,9 @@
 
 echo "🔧 Husky pre-commit hook running..."
 
+# Auto-fix line endings first
+echo "📝 Auto-fixing line endings to Unix (LF)..."
+bash "$(dirname "$0")/check-line-endings"
+
+# Run lint-staged
 pnpm lint-staged
