@@ -1002,8 +1002,14 @@ function setFileAnalysisHeaders(
   cacheKey: string,
   performanceMetrics?: any
 ): void {
-  res.setHeader('X-Cache-Status', 'MISS');
-  res.setHeader('X-Cache-Level', 'SOURCE');
+  // Determine cache status based on performance metrics
+  const isCacheHit =
+    performanceMetrics?.fileTreeCached === true ||
+    performanceMetrics?.analysisMethod === 'cached' ||
+    performanceMetrics?.dataSource === 'cache-hit';
+
+  res.setHeader('X-Cache-Status', isCacheHit ? 'HIT' : 'MISS');
+  res.setHeader('X-Cache-Level', isCacheHit ? 'MEMORY' : 'SOURCE');
   res.setHeader('X-Cache-Key', cacheKey);
   res.setHeader('X-Analysis-Type', 'file-distribution');
   res.setHeader(
@@ -1088,26 +1094,6 @@ router.get(
         repoUrl,
         coordinationEnabled: config.repositoryCache?.enabled,
       });
-
-      // Get repository info for headers
-      let repositoryInfo;
-      try {
-        repositoryInfo = await getRepositoryInfo(repoUrl);
-        res.setHeader('X-Repository-Size', repositoryInfo.sizeCategory);
-        res.setHeader(
-          'X-Repository-Cached',
-          repositoryInfo.cached ? 'true' : 'false'
-        );
-        res.setHeader(
-          'X-Repository-Shared',
-          repositoryInfo.isShared ? 'true' : 'false'
-        );
-      } catch (repoInfoError) {
-        logger.warn('Failed to get repository info', {
-          repoUrl,
-          error: repoInfoError,
-        });
-      }
 
       // Perform analysis using optimized methods with fallback to coordinated repository access
       let analysisResult;
@@ -1238,7 +1224,7 @@ router.get(
         metadata: {
           ...analysisResult.metadata,
           filterOptions,
-          repositorySize: repositoryInfo?.sizeCategory ?? 'unknown',
+          repositorySize: analysisResult.metadata.repositorySize ?? 'unknown',
           cacheStrategy: 'unified_hierarchical',
           processingTime: Date.now() - startTime,
           coordinationMetrics: config.repositoryCache?.enabled
