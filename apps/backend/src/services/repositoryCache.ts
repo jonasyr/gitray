@@ -208,7 +208,16 @@ export class RepositoryCacheManager {
   private readonly filteredCommitsCache: HybridLRUCache<Commit[]>;
 
   /** Tertiary cache tier: Aggregated visualization data with lowest memory priority */
-  private readonly aggregatedDataCache: HybridLRUCache<CommitHeatmapData>;
+  private readonly aggregatedDataCache: HybridLRUCache<
+    | CommitHeatmapData
+    | Array<{
+        login: string;
+        commitCount: number;
+        linesAdded: number;
+        linesDeleted: number;
+        contributionPercentage: number;
+      }>
+  >;
 
   /** Active transaction tracking for ensuring atomic cache updates */
   private readonly activeTransactions = new Map<string, CacheTransaction>();
@@ -1327,9 +1336,22 @@ export class RepositoryCacheManager {
         repoUrl,
         filterOptions
       );
-      let contributors = await this.aggregatedDataCache.get(contributorsKey);
+      const cachedData = await this.aggregatedDataCache.get(contributorsKey);
 
-      if (contributors) {
+      // Type guard to ensure we have contributor data
+      const isContributorArray = (
+        data: any
+      ): data is Array<{
+        login: string;
+        commitCount: number;
+        linesAdded: number;
+        linesDeleted: number;
+        contributionPercentage: number;
+      }> => {
+        return Array.isArray(data) && (data.length === 0 || 'login' in data[0]);
+      };
+
+      if (cachedData && isContributorArray(cachedData)) {
         // Cache hit: Return cached contributor data
         this.metrics.operations.aggregatedHits++;
         this.recordHitTime(startTime);
@@ -1342,12 +1364,12 @@ export class RepositoryCacheManager {
 
         logger.debug('Contributors cache hit', {
           repoUrl,
-          contributorsCount: contributors.length,
+          contributorsCount: cachedData.length,
           filters: filterOptions,
           cacheKey: contributorsKey,
         });
 
-        return contributors;
+        return cachedData;
       }
 
       // Cache miss: Generate contributor data
@@ -1366,7 +1388,7 @@ export class RepositoryCacheManager {
 
       try {
         // Use ordered locking to prevent deadlocks
-        contributors = await withOrderedLocks(
+        let contributors = await withOrderedLocks(
           [`cache-contributors:${repoUrl}`, `repo-access:${repoUrl}`],
           async () => {
             return withSharedRepository(
@@ -1493,9 +1515,19 @@ export class RepositoryCacheManager {
         repoUrl,
         filterOptions
       );
-      let aggregatedData = await this.aggregatedDataCache.get(aggregatedKey);
+      const cachedData = await this.aggregatedDataCache.get(aggregatedKey);
 
-      if (aggregatedData) {
+      // Type guard to ensure we have CommitHeatmapData
+      const isCommitHeatmapData = (data: any): data is CommitHeatmapData => {
+        return (
+          data !== null &&
+          typeof data === 'object' &&
+          'timePeriod' in data &&
+          'data' in data
+        );
+      };
+
+      if (cachedData && isCommitHeatmapData(cachedData)) {
         // Cache hit: Return pre-computed visualization data
         this.metrics.operations.aggregatedHits++;
         this.recordHitTime(startTime);
@@ -1517,7 +1549,7 @@ export class RepositoryCacheManager {
           cacheKey: aggregatedKey,
         });
 
-        return aggregatedData;
+        return cachedData;
       }
 
       // Cache miss: Generate aggregated data from filtered commits
@@ -1556,6 +1588,8 @@ export class RepositoryCacheManager {
           [`cache-aggregated:${repoUrl}`, `cache-filtered:${repoUrl}`],
           () => this.getOrParseFilteredCommitsUnlocked(repoUrl, commitOptions)
         );
+
+        let aggregatedData: CommitHeatmapData;
 
         // Defensive programming: Handle null commits gracefully
         if (!commits) {
