@@ -374,7 +374,10 @@ export interface PerformanceMetrics {
  * Represents statistics for a repository contributor
  */
 export interface ContributorStat {
-  /** GitHub handle or author name (pseudonymized for GDPR compliance, not email) */
+  /**
+   * Git author name (pseudonymized identifier for GDPR compliance).
+   * Uses the author's configured git name, not email address.
+   */
   login: string;
   /** Total number of commits by this contributor */
   commitCount: number;
