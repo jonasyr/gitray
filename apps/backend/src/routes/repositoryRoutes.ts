@@ -218,6 +218,94 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
+// POST endpoint to get repository top contributors
+// ---------------------------------------------------------------------------
+router.post(
+  '/contributors',
+  setRequestPriority('normal'), // Normal priority for contributor data
+  repoUrlValidation,
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { repoUrl, filterOptions } = req.body;
+    const userType = getUserType(req);
+
+    try {
+      const cacheKey = `contributors:${repoUrl}:${JSON.stringify(filterOptions || {})}`;
+      let cached = null;
+      let contributors = null;
+
+      // Try to get from cache, but handle cache failures gracefully
+      try {
+        cached = await redis.get(cacheKey);
+        if (cached) {
+          contributors = JSON.parse(cached);
+          // Record enhanced cache operation and feature usage
+          recordEnhancedCacheOperation(
+            'contributors',
+            true,
+            req,
+            repoUrl,
+            contributors.length
+          );
+          recordFeatureUsage('contributors_view', userType, true, 'api_call');
+          recordDataFreshness('contributors', 0, 'hybrid');
+
+          res.status(HTTP_STATUS.OK).json({ contributors });
+          return;
+        }
+      } catch (cacheError) {
+        // Cache operation failed, continue to fetch from repository
+        console.warn(
+          'Cache get operation failed:',
+          (cacheError as Error).message
+        );
+      }
+
+      // Fetch contributors using the service layer
+      contributors ??= await withTempRepository(repoUrl, (tempDir) =>
+        gitService.getTopContributors(
+          tempDir,
+          filterOptions as CommitFilterOptions
+        )
+      );
+
+      // Record cache miss and successful operation
+      recordEnhancedCacheOperation(
+        'contributors',
+        false,
+        req,
+        repoUrl,
+        contributors ? contributors.length : 0
+      );
+      recordFeatureUsage('contributors_view', userType, true, 'api_call');
+
+      // Try to cache the result, but don't fail if cache operation fails
+      if (contributors) {
+        try {
+          await redis.set(
+            cacheKey,
+            JSON.stringify(contributors),
+            'EX',
+            TIME.HOUR / 1000
+          );
+        } catch (cacheError) {
+          console.warn(
+            'Cache set operation failed:',
+            (cacheError as Error).message
+          );
+        }
+      }
+
+      res.status(HTTP_STATUS.OK).json({ contributors });
+      return;
+    } catch (error) {
+      // Record failed feature usage
+      recordFeatureUsage('contributors_view', userType, false, 'api_call');
+      next(error);
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
 // POST endpoint to fetch both commits and heatmap data in a single request
 // ---------------------------------------------------------------------------
 router.post(
