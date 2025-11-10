@@ -809,6 +809,210 @@ class GitService {
     }
   }
 
+  /**
+   * NEW: Build git log arguments with filters for commit statistics
+   */
+  private buildCommitStatsArgs(options?: CommitFilterOptions): string[] {
+    const args = ['log', '--pretty=format:%H|%cI|%an|%ae|%s', '--numstat'];
+
+    if (options?.fromDate) args.push(`--since=${options.fromDate}`);
+    if (options?.toDate) args.push(`--until=${options.toDate}`);
+    if (options?.authors && options.authors.length > 0) {
+      options.authors.forEach((author) => args.push(`--author=${author}`));
+    } else if (options?.author) {
+      args.push(`--author=${options.author}`);
+    }
+    if (options?.fileExtension) args.push(`-- **/*.${options.fileExtension}`);
+
+    return args;
+  }
+
+  /**
+   * NEW: Parse commit header line from git log output
+   */
+  private parseCommitHeader(line: string) {
+    const parts = line.split('|');
+    if (parts.length < 5) return null;
+
+    const [sha, date, authorName, authorEmail] = parts;
+    const message = parts.slice(4).join('|');
+
+    return {
+      sha,
+      authorName,
+      authorEmail,
+      date,
+      message,
+      linesAdded: 0,
+      linesDeleted: 0,
+    };
+  }
+
+  /**
+   * NEW: Parse numstat line and update commit statistics
+   */
+  private parseNumstatLine(line: string, currentCommit: any): void {
+    const statParts = line.split(/\s+/);
+    if (statParts.length >= 2) {
+      const added = parseInt(statParts[0], 10);
+      const deleted = parseInt(statParts[1], 10);
+
+      if (!isNaN(added)) currentCommit.linesAdded += added;
+      if (!isNaN(deleted)) currentCommit.linesDeleted += deleted;
+    }
+  }
+
+  /**
+   * NEW: Get commits with line-level statistics using --numstat
+   * Fetches commit data including lines added and deleted per commit
+   */
+  async getCommitsWithStats(
+    localRepoPath: string,
+    options?: CommitFilterOptions
+  ): Promise<
+    Array<{
+      sha: string;
+      authorName: string;
+      authorEmail: string;
+      date: string;
+      message: string;
+      linesAdded: number;
+      linesDeleted: number;
+    }>
+  > {
+    logger.info(`Getting commits with stats from: ${localRepoPath}`, {
+      options,
+    });
+
+    try {
+      const localGit = simpleGit(localRepoPath);
+      const args = this.buildCommitStatsArgs(options);
+      const raw = await localGit.raw(args);
+
+      const commits: Array<any> = [];
+      const lines = raw.split('\n');
+      let currentCommit: any = null;
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+
+        if (line.includes('|')) {
+          if (currentCommit) commits.push(currentCommit);
+          currentCommit = this.parseCommitHeader(line);
+        } else if (currentCommit && line.match(/^\d+\s+\d+\s+/)) {
+          this.parseNumstatLine(line, currentCommit);
+        }
+      }
+
+      if (currentCommit) commits.push(currentCommit);
+
+      logger.info(
+        `Successfully retrieved ${commits.length} commits with stats from ${localRepoPath}`
+      );
+      return commits;
+    } catch (error) {
+      logger.error(
+        `Error reading commits with stats from repository ${localRepoPath}`,
+        {
+          error,
+          localRepoPath,
+        }
+      );
+      throw new RepositoryError(
+        `${ERROR_MESSAGES.COMMITS_FETCH_FAILED}: ${error instanceof Error ? error.message : String(error)}`,
+        localRepoPath
+      );
+    }
+  }
+
+  /**
+   * NEW: Get top contributors with aggregated statistics
+   * Returns up to 5 top contributors sorted by commit count
+   */
+  async getTopContributors(
+    localRepoPath: string,
+    options?: CommitFilterOptions
+  ): Promise<
+    Array<{
+      login: string;
+      commitCount: number;
+      linesAdded: number;
+      linesDeleted: number;
+      contributionPercentage: number;
+    }>
+  > {
+    logger.info(`Getting top contributors from: ${localRepoPath}`, { options });
+
+    try {
+      // Fetch commits with line statistics
+      const commitsWithStats = await this.getCommitsWithStats(
+        localRepoPath,
+        options
+      );
+
+      // Aggregate stats by author
+      const contributorMap = new Map<
+        string,
+        {
+          login: string;
+          commitCount: number;
+          linesAdded: number;
+          linesDeleted: number;
+        }
+      >();
+
+      for (const commit of commitsWithStats) {
+        // Use email as the unique identifier (login)
+        const login = commit.authorEmail;
+
+        if (!contributorMap.has(login)) {
+          contributorMap.set(login, {
+            login,
+            commitCount: 0,
+            linesAdded: 0,
+            linesDeleted: 0,
+          });
+        }
+
+        const contributor = contributorMap.get(login)!;
+        contributor.commitCount += 1;
+        contributor.linesAdded += commit.linesAdded;
+        contributor.linesDeleted += commit.linesDeleted;
+      }
+
+      // Convert to array and sort by commit count
+      const contributors = Array.from(contributorMap.values());
+      contributors.sort((a, b) => b.commitCount - a.commitCount);
+
+      // Calculate contribution percentages and take top 5
+      const totalCommits = commitsWithStats.length;
+      const topContributors = contributors.slice(0, 5).map((contributor) => ({
+        ...contributor,
+        contributionPercentage:
+          totalCommits > 0 ? contributor.commitCount / totalCommits : 0,
+      }));
+
+      logger.info(
+        `Successfully aggregated ${topContributors.length} top contributors from ${localRepoPath}`,
+        {
+          totalContributors: contributors.length,
+          totalCommits,
+        }
+      );
+
+      return topContributors;
+    } catch (error) {
+      logger.error(`Error getting top contributors from ${localRepoPath}`, {
+        error,
+        localRepoPath,
+      });
+      throw new RepositoryError(
+        `Failed to get top contributors: ${error instanceof Error ? error.message : String(error)}`,
+        localRepoPath
+      );
+    }
+  }
+
   // ========================================================================
   // EXISTING METHODS (unchanged for backward compatibility)
   // ========================================================================
