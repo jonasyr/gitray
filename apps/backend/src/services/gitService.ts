@@ -822,7 +822,9 @@ class GitService {
     } else if (options?.author) {
       args.push(`--author=${options.author}`);
     }
-    if (options?.fileExtension) args.push(`-- **/*.${options.fileExtension}`);
+    if (options?.fileExtension) {
+      args.push('--', `**/*.${options.fileExtension}`);
+    }
 
     return args;
   }
