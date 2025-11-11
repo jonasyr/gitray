@@ -1202,4 +1202,230 @@ describe('GitService Optimized Unit Tests', () => {
       expect(result.metadata!.totalCommits).toBe(1); // Only yesterday's commit
     });
   });
+
+  // ========================================================================
+  // CONTRIBUTOR STATISTICS - Top Contributors Feature
+  // ========================================================================
+
+  describe('getCommitsWithStats', () => {
+    test('should parse commits with line statistics correctly', async () => {
+      // Arrange
+      const commitDataWithStats = `abc123|2023-01-01T12:00:00Z|Alice|alice@example.com|feat: add feature A
+10\t5\tfile1.ts
+20\t3\tfile2.ts
+
+def456|2023-01-02T12:00:00Z|Bob|bob@example.com|fix: bug fix B
+5\t2\tfile3.ts`;
+      mockGit.raw.mockResolvedValue(commitDataWithStats);
+
+      // Act
+      const result = await gitService.getCommitsWithStats('/test/repo');
+
+      // Assert
+      expect(result).toHaveLength(2);
+      expect(result[0]).toEqual({
+        sha: 'abc123',
+        authorName: 'Alice',
+        authorEmail: 'alice@example.com',
+        date: '2023-01-01T12:00:00Z',
+        message: 'feat: add feature A',
+        linesAdded: 30,
+        linesDeleted: 8,
+      });
+      expect(result[1]).toEqual({
+        sha: 'def456',
+        authorName: 'Bob',
+        authorEmail: 'bob@example.com',
+        date: '2023-01-02T12:00:00Z',
+        message: 'fix: bug fix B',
+        linesAdded: 5,
+        linesDeleted: 2,
+      });
+    });
+
+    test('should handle commits with no file changes', async () => {
+      // Arrange
+      const commitDataNoChanges = `abc123|2023-01-01T12:00:00Z|Alice|alice@example.com|docs: update README
+
+def456|2023-01-02T12:00:00Z|Bob|bob@example.com|chore: merge commit
+`;
+      mockGit.raw.mockResolvedValue(commitDataNoChanges);
+
+      // Act
+      const result = await gitService.getCommitsWithStats('/test/repo');
+
+      // Assert
+      expect(result).toHaveLength(2);
+      expect(result[0].linesAdded).toBe(0);
+      expect(result[0].linesDeleted).toBe(0);
+      expect(result[1].linesAdded).toBe(0);
+      expect(result[1].linesDeleted).toBe(0);
+    });
+
+    test('should apply author filter correctly', async () => {
+      // Arrange
+      const commitData = `abc123|2023-01-01T12:00:00Z|Alice|alice@example.com|commit 1
+10\t5\tfile1.ts`;
+      mockGit.raw.mockResolvedValue(commitData);
+
+      // Act
+      const result = await gitService.getCommitsWithStats('/test/repo', {
+        author: 'Alice',
+      });
+
+      // Assert
+      expect(mockGit.raw).toHaveBeenCalledWith(
+        expect.arrayContaining(['--author=Alice'])
+      );
+      expect(result).toHaveLength(1);
+    });
+
+    test('should apply date range filters correctly', async () => {
+      // Arrange
+      mockGit.raw.mockResolvedValue('');
+
+      // Act
+      await gitService.getCommitsWithStats('/test/repo', {
+        fromDate: '2023-01-01',
+        toDate: '2023-12-31',
+      });
+
+      // Assert
+      expect(mockGit.raw).toHaveBeenCalledWith(
+        expect.arrayContaining(['--since=2023-01-01', '--until=2023-12-31'])
+      );
+    });
+
+    test('should handle git errors gracefully', async () => {
+      // Arrange
+      mockGit.raw.mockRejectedValue(new Error('Git command failed'));
+
+      // Act & Assert
+      await expect(
+        gitService.getCommitsWithStats('/test/repo')
+      ).rejects.toThrow('Failed to fetch commits from repository');
+    });
+  });
+
+  describe('getTopContributors', () => {
+    test('should aggregate and return top 5 contributors sorted by commit count', async () => {
+      // Arrange
+      const commitsWithStats = `abc123|2023-01-01T12:00:00Z|Alice|alice@example.com|commit 1
+10\t5\tfile1.ts
+
+def456|2023-01-02T12:00:00Z|Bob|bob@example.com|commit 2
+15\t3\tfile2.ts
+
+ghi789|2023-01-03T12:00:00Z|Alice|alice@example.com|commit 3
+20\t10\tfile3.ts
+
+jkl012|2023-01-04T12:00:00Z|Charlie|charlie@example.com|commit 4
+5\t2\tfile4.ts
+
+mno345|2023-01-05T12:00:00Z|Alice|alice@example.com|commit 5
+8\t4\tfile5.ts
+
+pqr678|2023-01-06T12:00:00Z|Bob|bob@example.com|commit 6
+12\t6\tfile6.ts`;
+      mockGit.raw.mockResolvedValue(commitsWithStats);
+
+      // Act
+      const result = await gitService.getTopContributors('/test/repo');
+
+      // Assert
+      expect(result).toHaveLength(3); // Alice, Bob, Charlie
+      expect(result[0]).toEqual({
+        login: 'Alice',
+        commitCount: 3,
+        linesAdded: 38,
+        linesDeleted: 19,
+        contributionPercentage: 0.5, // 3 out of 6 commits
+      });
+      expect(result[1]).toEqual({
+        login: 'Bob',
+        commitCount: 2,
+        linesAdded: 27,
+        linesDeleted: 9,
+        contributionPercentage: 2 / 6,
+      });
+      expect(result[2]).toEqual({
+        login: 'Charlie',
+        commitCount: 1,
+        linesAdded: 5,
+        linesDeleted: 2,
+        contributionPercentage: 1 / 6,
+      });
+    });
+
+    test('should return empty array when no commits exist', async () => {
+      // Arrange
+      mockGit.raw.mockResolvedValue('');
+
+      // Act
+      const result = await gitService.getTopContributors('/test/repo');
+
+      // Assert
+      expect(result).toEqual([]);
+    });
+
+    test('should limit results to top 5 contributors', async () => {
+      // Arrange
+      const manyCommits = Array.from(
+        { length: 10 },
+        (_, i) =>
+          `commit${i}|2023-01-0${i + 1}T12:00:00Z|User${i}|user${i}@example.com|commit ${i}\n10\t5\tfile${i}.ts`
+      ).join('\n\n');
+      mockGit.raw.mockResolvedValue(manyCommits);
+
+      // Act
+      const result = await gitService.getTopContributors('/test/repo');
+
+      // Assert
+      expect(result.length).toBeLessThanOrEqual(5);
+    });
+
+    test('should apply filter options to underlying commits', async () => {
+      // Arrange
+      const commitData = `abc123|2023-01-01T12:00:00Z|Alice|alice@example.com|commit 1
+10\t5\tfile1.ts`;
+      mockGit.raw.mockResolvedValue(commitData);
+
+      // Act
+      await gitService.getTopContributors('/test/repo', {
+        fromDate: '2023-01-01',
+        toDate: '2023-12-31',
+      });
+
+      // Assert
+      expect(mockGit.raw).toHaveBeenCalledWith(
+        expect.arrayContaining(['--since=2023-01-01', '--until=2023-12-31'])
+      );
+    });
+
+    test('should calculate contribution percentage correctly', async () => {
+      // Arrange
+      const twoCommits = `abc123|2023-01-01T12:00:00Z|Alice|alice@example.com|commit 1
+10\t5\tfile1.ts
+
+def456|2023-01-02T12:00:00Z|Alice|alice@example.com|commit 2
+20\t10\tfile2.ts`;
+      mockGit.raw.mockResolvedValue(twoCommits);
+
+      // Act
+      const result = await gitService.getTopContributors('/test/repo');
+
+      // Assert
+      expect(result[0].contributionPercentage).toBe(1.0); // 100% when only one contributor
+    });
+
+    test('should handle git errors gracefully', async () => {
+      // Arrange
+      mockGit.raw.mockRejectedValue(new Error('Git error'));
+
+      // Act & Assert
+      await expect(gitService.getTopContributors('/test/repo')).rejects.toThrow(
+        'Failed to get top contributors'
+      );
+    });
+  });
 });
