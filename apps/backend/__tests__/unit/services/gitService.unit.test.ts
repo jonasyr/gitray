@@ -1428,4 +1428,377 @@ def456|2023-01-02T12:00:00Z|Alice|alice@example.com|commit 2
       );
     });
   });
+
+  // ========================================================================
+  // CODE CHURN ANALYSIS - File Change Frequency and Risk Analysis
+  // ========================================================================
+
+  describe('analyzeCodeChurn', () => {
+    test('should analyze file change frequencies and assign risk levels correctly', async () => {
+      // Arrange
+      const churnLogData = `abc123|2023-01-01T12:00:00Z|Alice
+file1.ts
+file2.js
+
+def456|2023-01-02T12:00:00Z|Bob
+file1.ts
+file3.py
+
+ghi789|2023-01-03T12:00:00Z|Charlie
+file1.ts`;
+      mockGit.raw.mockResolvedValue(churnLogData);
+
+      // Act
+      const result = await gitService.analyzeCodeChurn('/test/repo');
+
+      // Assert
+      expect(result.files).toHaveLength(3);
+
+      // file1.ts changed 3 times (low risk by default thresholds)
+      const file1 = result.files.find((f) => f.path === 'file1.ts');
+      expect(file1).toBeDefined();
+      expect(file1!.changes).toBe(3);
+      expect(file1!.risk).toBe('low');
+      expect(file1!.extension).toBe('.ts');
+      expect(file1!.authorCount).toBe(3);
+
+      // file2.js changed 1 time
+      const file2 = result.files.find((f) => f.path === 'file2.js');
+      expect(file2).toBeDefined();
+      expect(file2!.changes).toBe(1);
+      expect(file2!.risk).toBe('low');
+
+      // file3.py changed 1 time
+      const file3 = result.files.find((f) => f.path === 'file3.py');
+      expect(file3).toBeDefined();
+      expect(file3!.changes).toBe(1);
+      expect(file3!.risk).toBe('low');
+    });
+
+    test('should classify files into correct risk levels based on thresholds', async () => {
+      // Arrange - Create data with files having various change counts
+      const generateChurnData = (fileName: string, changeCount: number) => {
+        return Array.from(
+          { length: changeCount },
+          (_, i) =>
+            `commit${i}|2023-01-0${(i % 9) + 1}T12:00:00Z|User${i}\n${fileName}`
+        ).join('\n\n');
+      };
+
+      const churnData = [
+        generateChurnData('high-risk.ts', 35), // 35 changes = high risk
+        generateChurnData('medium-risk.js', 20), // 20 changes = medium risk
+        generateChurnData('low-risk.py', 5), // 5 changes = low risk
+      ].join('\n\n');
+
+      mockGit.raw.mockResolvedValue(churnData);
+
+      // Act
+      const result = await gitService.analyzeCodeChurn('/test/repo');
+
+      // Assert
+      const highRiskFile = result.files.find((f) => f.path === 'high-risk.ts');
+      expect(highRiskFile!.risk).toBe('high');
+      expect(highRiskFile!.changes).toBe(35);
+
+      const mediumRiskFile = result.files.find(
+        (f) => f.path === 'medium-risk.js'
+      );
+      expect(mediumRiskFile!.risk).toBe('medium');
+      expect(mediumRiskFile!.changes).toBe(20);
+
+      const lowRiskFile = result.files.find((f) => f.path === 'low-risk.py');
+      expect(lowRiskFile!.risk).toBe('low');
+      expect(lowRiskFile!.changes).toBe(5);
+
+      // Check metadata
+      expect(result.metadata.highRiskCount).toBe(1);
+      expect(result.metadata.mediumRiskCount).toBe(1);
+      expect(result.metadata.lowRiskCount).toBe(1);
+    });
+
+    test('should filter files by extension', async () => {
+      // Arrange
+      const churnData = `abc123|2023-01-01T12:00:00Z|Alice
+file1.ts
+file2.js
+file3.py
+
+def456|2023-01-02T12:00:00Z|Bob
+file1.ts
+file2.js`;
+      mockGit.raw.mockResolvedValue(churnData);
+
+      // Act - Filter for TypeScript files only
+      const result = await gitService.analyzeCodeChurn('/test/repo', {
+        extensions: ['ts'],
+      });
+
+      // Assert
+      expect(result.files).toHaveLength(1);
+      expect(result.files[0].path).toBe('file1.ts');
+      expect(result.files[0].changes).toBe(2);
+    });
+
+    test('should filter files by minimum changes', async () => {
+      // Arrange
+      const churnData = `abc123|2023-01-01T12:00:00Z|Alice
+frequently-changed.ts
+rarely-changed.ts
+
+def456|2023-01-02T12:00:00Z|Bob
+frequently-changed.ts
+
+ghi789|2023-01-03T12:00:00Z|Charlie
+frequently-changed.ts`;
+      mockGit.raw.mockResolvedValue(churnData);
+
+      // Act - Only include files with 2 or more changes
+      const result = await gitService.analyzeCodeChurn('/test/repo', {
+        minChanges: 2,
+      });
+
+      // Assert
+      expect(result.files).toHaveLength(1);
+      expect(result.files[0].path).toBe('frequently-changed.ts');
+      expect(result.files[0].changes).toBe(3);
+    });
+
+    test('should filter files by risk levels', async () => {
+      // Arrange
+      const generateChurnData = (fileName: string, changeCount: number) => {
+        return Array.from(
+          { length: changeCount },
+          (_, i) =>
+            `commit${i}|2023-01-0${(i % 9) + 1}T12:00:00Z|User${i}\n${fileName}`
+        ).join('\n\n');
+      };
+
+      const churnData = [
+        generateChurnData('high-risk.ts', 35),
+        generateChurnData('medium-risk.js', 20),
+        generateChurnData('low-risk.py', 5),
+      ].join('\n\n');
+
+      mockGit.raw.mockResolvedValue(churnData);
+
+      // Act - Only get high and medium risk files
+      const result = await gitService.analyzeCodeChurn('/test/repo', {
+        riskLevels: ['high', 'medium'],
+      });
+
+      // Assert
+      expect(result.files).toHaveLength(2);
+      expect(
+        result.files.every((f) => f.risk === 'high' || f.risk === 'medium')
+      ).toBe(true);
+    });
+
+    test('should sort files by changes in descending order', async () => {
+      // Arrange
+      const churnData = `abc123|2023-01-01T12:00:00Z|Alice
+file1.ts
+
+def456|2023-01-02T12:00:00Z|Bob
+file2.ts
+file1.ts
+
+ghi789|2023-01-03T12:00:00Z|Charlie
+file3.ts
+file2.ts
+file1.ts`;
+      mockGit.raw.mockResolvedValue(churnData);
+
+      // Act
+      const result = await gitService.analyzeCodeChurn('/test/repo');
+
+      // Assert
+      expect(result.files[0].path).toBe('file1.ts');
+      expect(result.files[0].changes).toBe(3);
+      expect(result.files[1].path).toBe('file2.ts');
+      expect(result.files[1].changes).toBe(2);
+      expect(result.files[2].path).toBe('file3.ts');
+      expect(result.files[2].changes).toBe(1);
+    });
+
+    test('should use custom thresholds when provided', async () => {
+      // Arrange
+      const churnData = `abc123|2023-01-01T12:00:00Z|Alice
+file1.ts
+
+def456|2023-01-02T12:00:00Z|Bob
+file1.ts
+
+ghi789|2023-01-03T12:00:00Z|Charlie
+file1.ts
+
+jkl012|2023-01-04T12:00:00Z|Dave
+file1.ts
+
+mno345|2023-01-05T12:00:00Z|Eve
+file1.ts`;
+      mockGit.raw.mockResolvedValue(churnData);
+
+      // Act - Use custom thresholds (high: 5, medium: 3, low: 0)
+      const result = await gitService.analyzeCodeChurn(
+        '/test/repo',
+        undefined,
+        {
+          high: 5,
+          medium: 3,
+          low: 0,
+        }
+      );
+
+      // Assert
+      expect(result.files[0].changes).toBe(5);
+      expect(result.files[0].risk).toBe('high');
+      expect(result.metadata.riskThresholds.high).toBe(5);
+      expect(result.metadata.riskThresholds.medium).toBe(3);
+    });
+
+    test('should handle empty repository gracefully', async () => {
+      // Arrange
+      mockGit.raw.mockResolvedValue('');
+
+      // Act
+      const result = await gitService.analyzeCodeChurn('/test/repo');
+
+      // Assert
+      expect(result.files).toHaveLength(0);
+      expect(result.metadata.totalFiles).toBe(0);
+      expect(result.metadata.totalChanges).toBe(0);
+      expect(result.metadata.highRiskCount).toBe(0);
+      expect(result.metadata.mediumRiskCount).toBe(0);
+      expect(result.metadata.lowRiskCount).toBe(0);
+    });
+
+    test('should include metadata with processing time', async () => {
+      // Arrange
+      mockGit.raw.mockResolvedValue(
+        'abc123|2023-01-01T12:00:00Z|Alice\nfile1.ts'
+      );
+
+      // Act
+      const result = await gitService.analyzeCodeChurn('/test/repo');
+
+      // Assert
+      expect(result.metadata.analyzedAt).toBeDefined();
+      expect(result.metadata.processingTime).toBeDefined();
+      expect(typeof result.metadata.processingTime).toBe('number');
+      expect(result.metadata.processingTime).toBeGreaterThanOrEqual(0);
+      expect(result.metadata.dateRange).toBeDefined();
+      expect(result.metadata.dateRange.from).toBeDefined();
+      expect(result.metadata.dateRange.to).toBeDefined();
+    });
+
+    test('should apply date range filters to git log command', async () => {
+      // Arrange
+      mockGit.raw.mockResolvedValue('');
+
+      // Act
+      await gitService.analyzeCodeChurn('/test/repo', {
+        since: '2023-01-01',
+        until: '2023-12-31',
+      });
+
+      // Assert
+      expect(mockGit.raw).toHaveBeenCalledWith(
+        expect.arrayContaining(['--since=2023-01-01', '--until=2023-12-31'])
+      );
+    });
+
+    test('should track first and last change dates for files', async () => {
+      // Arrange
+      const churnData = `abc123|2023-01-01T12:00:00Z|Alice
+file1.ts
+
+def456|2023-06-15T14:30:00Z|Bob
+file1.ts
+
+ghi789|2023-12-31T23:59:00Z|Charlie
+file1.ts`;
+      mockGit.raw.mockResolvedValue(churnData);
+
+      // Act
+      const result = await gitService.analyzeCodeChurn('/test/repo');
+
+      // Assert
+      const file1 = result.files[0];
+      expect(file1.firstChange).toBe('2023-01-01T12:00:00Z');
+      expect(file1.lastChange).toBe('2023-12-31T23:59:00Z');
+    });
+
+    test('should handle git command errors gracefully', async () => {
+      // Arrange
+      mockGit.raw.mockRejectedValue(new Error('Git command failed'));
+
+      // Act & Assert
+      await expect(gitService.analyzeCodeChurn('/test/repo')).rejects.toThrow(
+        'Failed to analyze code churn'
+      );
+    });
+
+    test('should handle malformed git log entries', async () => {
+      // Arrange
+      const churnData = `abc123|2023-01-01T12:00:00Z|Alice
+valid-file.ts
+
+|invalid|entry|
+another-file.js
+
+def456|2023-01-02T12:00:00Z|Bob
+valid-file.ts`;
+      mockGit.raw.mockResolvedValue(churnData);
+
+      // Act
+      const result = await gitService.analyzeCodeChurn('/test/repo');
+
+      // Assert - Should process valid entries and skip malformed ones
+      expect(result.files).toHaveLength(2);
+      expect(
+        result.files.find((f) => f.path === 'valid-file.ts')
+      ).toBeDefined();
+      expect(
+        result.files.find((f) => f.path === 'another-file.js')
+      ).toBeDefined();
+    });
+
+    test('should apply path filters when provided', async () => {
+      // Arrange
+      mockGit.raw.mockResolvedValue('');
+
+      // Act
+      await gitService.analyzeCodeChurn('/test/repo', {
+        paths: ['src/**/*.ts', 'lib/**/*.js'],
+      });
+
+      // Assert
+      expect(mockGit.raw).toHaveBeenCalledWith(
+        expect.arrayContaining(['--', 'src/**/*.ts', 'lib/**/*.js'])
+      );
+    });
+
+    test('should count unique authors per file', async () => {
+      // Arrange
+      const churnData = `abc123|2023-01-01T12:00:00Z|Alice
+file1.ts
+
+def456|2023-01-02T12:00:00Z|Alice
+file1.ts
+
+ghi789|2023-01-03T12:00:00Z|Bob
+file1.ts
+
+jkl012|2023-01-04T12:00:00Z|Charlie
+file1.ts`;
+      mockGit.raw.mockResolvedValue(churnData);
+
+      // Act
+      const result = await gitService.analyzeCodeChurn('/test/repo');
+
+      // Assert
+      expect(result.files[0].authorCount).toBe(3); // Alice, Bob, Charlie
+    });
+  });
 });

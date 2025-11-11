@@ -31,6 +31,11 @@ import {
   GIT_SERVICE,
   ERROR_MESSAGES,
   RepositoryError,
+  CodeChurnAnalysis,
+  FileChurnData,
+  ChurnFilterOptions,
+  ChurnRiskLevel,
+  ChurnRiskThresholds,
 } from '@gitray/shared-types';
 import { shallowClone } from '../utils/gitUtils';
 import redis from '../services/cache';
@@ -1010,6 +1015,301 @@ class GitService {
       });
       throw new RepositoryError(
         `Failed to get top contributors: ${error instanceof Error ? error.message : String(error)}`,
+        localRepoPath
+      );
+    }
+  }
+
+  // ========================================================================
+  // CODE CHURN ANALYSIS - File Change Frequency and Risk Analysis
+  // ========================================================================
+
+  /**
+   * Default risk thresholds for code churn analysis
+   */
+  private readonly DEFAULT_CHURN_THRESHOLDS: ChurnRiskThresholds = {
+    high: 30,
+    medium: 15,
+    low: 0,
+  };
+
+  /**
+   * Determine risk level based on change count and thresholds
+   */
+  private determineRiskLevel(
+    changes: number,
+    thresholds: ChurnRiskThresholds
+  ): ChurnRiskLevel {
+    if (changes >= thresholds.high) return 'high';
+    if (changes >= thresholds.medium) return 'medium';
+    return 'low';
+  }
+
+  /**
+   * Build git log arguments for churn analysis
+   */
+  private buildChurnAnalysisArgs(options?: ChurnFilterOptions): string[] {
+    const args = ['log', '--name-only', '--pretty=format:%H|%cI|%an'];
+
+    // Add date filters
+    if (options?.since) {
+      args.push(`--since=${options.since}`);
+    }
+    if (options?.until) {
+      args.push(`--until=${options.until}`);
+    }
+
+    // Add path filters if specified
+    if (options?.paths && options.paths.length > 0) {
+      args.push('--');
+      args.push(...options.paths);
+    }
+
+    return args;
+  }
+
+  /**
+   * Parse git log output for churn analysis
+   * Extracts file paths and associated commit information
+   */
+  private parseChurnLogOutput(
+    output: string,
+    options?: ChurnFilterOptions
+  ): Map<
+    string,
+    {
+      changes: number;
+      firstChange?: string;
+      lastChange?: string;
+      authors: Set<string>;
+    }
+  > {
+    const fileChurnMap = new Map<
+      string,
+      {
+        changes: number;
+        firstChange?: string;
+        lastChange?: string;
+        authors: Set<string>;
+      }
+    >();
+
+    const lines = output.split('\n');
+    let currentCommitDate: string | null = null;
+    let currentAuthor: string | null = null;
+
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      if (!trimmedLine) continue;
+
+      // Check if this is a commit header line
+      if (trimmedLine.includes('|')) {
+        const parts = trimmedLine.split('|');
+        if (parts.length >= 3) {
+          currentCommitDate = parts[1];
+          currentAuthor = parts[2];
+          continue;
+        }
+      }
+
+      // This is a file path
+      if (currentCommitDate && currentAuthor && trimmedLine) {
+        const filePath = trimmedLine;
+
+        // Apply extension filter if specified
+        if (options?.extensions && options.extensions.length > 0) {
+          const fileExt = path.extname(filePath).substring(1); // Remove leading dot
+          if (!options.extensions.includes(fileExt)) {
+            continue;
+          }
+        }
+
+        // Initialize or update file churn data
+        if (!fileChurnMap.has(filePath)) {
+          fileChurnMap.set(filePath, {
+            changes: 0,
+            firstChange: currentCommitDate,
+            lastChange: currentCommitDate,
+            authors: new Set(),
+          });
+        }
+
+        const fileData = fileChurnMap.get(filePath)!;
+        fileData.changes += 1;
+        fileData.authors.add(currentAuthor);
+
+        // Update date range (git log is in reverse chronological order)
+        if (
+          !fileData.lastChange ||
+          new Date(currentCommitDate) > new Date(fileData.lastChange)
+        ) {
+          fileData.lastChange = currentCommitDate;
+        }
+        if (
+          !fileData.firstChange ||
+          new Date(currentCommitDate) < new Date(fileData.firstChange)
+        ) {
+          fileData.firstChange = currentCommitDate;
+        }
+      }
+    }
+
+    return fileChurnMap;
+  }
+
+  /**
+   * Apply filters and sorting to churn data
+   */
+  private filterAndSortChurnData(
+    churnData: FileChurnData[],
+    options?: ChurnFilterOptions
+  ): FileChurnData[] {
+    let filtered = churnData;
+
+    // Filter by minimum changes
+    if (options?.minChanges !== undefined && options.minChanges > 0) {
+      const minChanges = options.minChanges;
+      filtered = filtered.filter((file) => file.changes >= minChanges);
+    }
+
+    // Filter by risk levels
+    if (options?.riskLevels && options.riskLevels.length > 0) {
+      filtered = filtered.filter((file) =>
+        options.riskLevels!.includes(file.risk)
+      );
+    }
+
+    // Sort by changes (descending) - highest churn files first
+    filtered.sort((a, b) => b.changes - a.changes);
+
+    return filtered;
+  }
+
+  /**
+   * Calculate metadata for churn analysis
+   */
+  private calculateChurnMetadata(
+    files: FileChurnData[],
+    thresholds: ChurnRiskThresholds,
+    dateRange: { from: string; to: string },
+    options?: ChurnFilterOptions,
+    processingTime?: number
+  ): CodeChurnAnalysis['metadata'] {
+    const totalChanges = files.reduce((sum, file) => sum + file.changes, 0);
+
+    const highRiskCount = files.filter((f) => f.risk === 'high').length;
+    const mediumRiskCount = files.filter((f) => f.risk === 'medium').length;
+    const lowRiskCount = files.filter((f) => f.risk === 'low').length;
+
+    return {
+      totalFiles: files.length,
+      totalChanges,
+      riskThresholds: thresholds,
+      dateRange,
+      highRiskCount,
+      mediumRiskCount,
+      lowRiskCount,
+      analyzedAt: new Date().toISOString(),
+      filterOptions: options,
+      processingTime,
+    };
+  }
+
+  /**
+   * NEW: Analyze code churn (file change frequency) for the repository
+   * Returns detailed analysis of which files change most frequently
+   */
+  async analyzeCodeChurn(
+    localRepoPath: string,
+    options?: ChurnFilterOptions,
+    customThresholds?: ChurnRiskThresholds
+  ): Promise<CodeChurnAnalysis> {
+    const startTime = Date.now();
+    logger.info(`Analyzing code churn for: ${localRepoPath}`, { options });
+
+    try {
+      const localGit = simpleGit(localRepoPath);
+
+      // Determine date range
+      const until = options?.until || new Date().toISOString();
+      const since =
+        options?.since || subDays(new Date(), 365).toISOString().split('T')[0]; // Default: last year
+
+      // Use custom thresholds or defaults
+      const thresholds = customThresholds || this.DEFAULT_CHURN_THRESHOLDS;
+
+      // Build and execute git log command
+      const args = this.buildChurnAnalysisArgs({
+        ...options,
+        since,
+        until,
+      });
+
+      logger.debug('Executing git log for churn analysis', {
+        args: args.join(' '),
+      });
+
+      const raw = await localGit.raw(args);
+
+      // Parse the output to extract file change frequencies
+      const fileChurnMap = this.parseChurnLogOutput(raw, options);
+
+      // Convert to FileChurnData array with risk levels
+      const filesWithChurn: FileChurnData[] = Array.from(
+        fileChurnMap.entries()
+      ).map(([filePath, data]) => {
+        const extension = path.extname(filePath);
+        const risk = this.determineRiskLevel(data.changes, thresholds);
+
+        return {
+          path: filePath,
+          changes: data.changes,
+          risk,
+          extension: extension || undefined,
+          firstChange: data.firstChange,
+          lastChange: data.lastChange,
+          authorCount: data.authors.size,
+        };
+      });
+
+      // Apply filters and sorting
+      const filteredFiles = this.filterAndSortChurnData(
+        filesWithChurn,
+        options
+      );
+
+      // Calculate processing time
+      const processingTime = Date.now() - startTime;
+
+      // Build metadata
+      const metadata = this.calculateChurnMetadata(
+        filteredFiles,
+        thresholds,
+        { from: since, to: until },
+        options,
+        processingTime
+      );
+
+      logger.info(`Successfully analyzed code churn for ${localRepoPath}`, {
+        totalFiles: metadata.totalFiles,
+        totalChanges: metadata.totalChanges,
+        highRiskCount: metadata.highRiskCount,
+        mediumRiskCount: metadata.mediumRiskCount,
+        lowRiskCount: metadata.lowRiskCount,
+        processingTime,
+      });
+
+      return {
+        files: filteredFiles,
+        metadata,
+      };
+    } catch (error) {
+      logger.error(`Error analyzing code churn for ${localRepoPath}`, {
+        error,
+        localRepoPath,
+      });
+      throw new RepositoryError(
+        `Failed to analyze code churn: ${error instanceof Error ? error.message : String(error)}`,
         localRepoPath
       );
     }
