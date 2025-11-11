@@ -1657,6 +1657,96 @@ file1.ts`;
       expect(result.metadata.riskThresholds.medium).toBe(3);
     });
 
+    test('should filter out files below low threshold', async () => {
+      // Arrange
+      const generateChurnData = (fileName: string, changeCount: number) => {
+        return Array.from(
+          { length: changeCount },
+          (_, i) =>
+            `commit${i}|2023-01-0${(i % 9) + 1}T12:00:00Z|User${i}\n${fileName}`
+        ).join('\n\n');
+      };
+
+      const churnData = [
+        generateChurnData('high-risk.ts', 35), // 35 changes >= 30 (high)
+        generateChurnData('medium-risk.js', 20), // 20 changes >= 15 (medium)
+        generateChurnData('low-risk.py', 5), // 5 changes >= 1 (low)
+        generateChurnData('below-threshold.md', 0), // 0 changes < 1 (filtered out)
+      ].join('\n\n');
+
+      // Add one commit for the below-threshold file to ensure it has 0 changes after parsing
+      // Actually, let's test with a custom threshold instead
+      const churnDataWithBelowThreshold = [
+        generateChurnData('above-threshold.ts', 10), // 10 changes >= 10
+        generateChurnData('at-threshold.js', 5), // 5 changes >= 5 (should be included)
+        generateChurnData('below-threshold.py', 4), // 4 changes < 5 (should be filtered)
+        generateChurnData('well-below.md', 2), // 2 changes < 5 (should be filtered)
+      ].join('\n\n');
+
+      mockGit.raw.mockResolvedValue(churnDataWithBelowThreshold);
+
+      // Act - Use custom thresholds with low threshold at 5
+      const result = await gitService.analyzeCodeChurn(
+        '/test/repo',
+        undefined,
+        {
+          high: 15,
+          medium: 10,
+          low: 5,
+        }
+      );
+
+      // Assert
+      // Only files with 5+ changes should be included
+      expect(result.files).toHaveLength(2);
+      expect(result.files.some((f) => f.path === 'above-threshold.ts')).toBe(
+        true
+      );
+      expect(result.files.some((f) => f.path === 'at-threshold.js')).toBe(true);
+      expect(result.files.some((f) => f.path === 'below-threshold.py')).toBe(
+        false
+      );
+      expect(result.files.some((f) => f.path === 'well-below.md')).toBe(false);
+
+      // Verify the file at threshold is included
+      const atThresholdFile = result.files.find(
+        (f) => f.path === 'at-threshold.js'
+      );
+      expect(atThresholdFile).toBeDefined();
+      expect(atThresholdFile!.changes).toBe(5);
+      expect(atThresholdFile!.risk).toBe('low');
+
+      // Verify metadata counts only include files above threshold
+      expect(result.metadata.totalFiles).toBe(2);
+      expect(result.metadata.lowRiskCount).toBe(1); // at-threshold.js
+      expect(result.metadata.mediumRiskCount).toBe(1); // above-threshold.ts
+    });
+
+    test('should respect low threshold with default values', async () => {
+      // Arrange - Test with default low threshold of 0
+      // This means all files with 0+ changes should be included
+      const churnData = `abc123|2023-01-01T12:00:00Z|Alice
+file-with-changes.ts
+
+def456|2023-01-02T12:00:00Z|Bob
+file-with-changes.ts`;
+
+      mockGit.raw.mockResolvedValue(churnData);
+
+      // Act - Use default thresholds (low: 0)
+      const result = await gitService.analyzeCodeChurn('/test/repo');
+
+      // Assert
+      // With default threshold low: 0, only files with 0+ changes are included
+      expect(result.files).toHaveLength(1);
+      expect(result.files[0].path).toBe('file-with-changes.ts');
+      expect(result.files[0].changes).toBe(2);
+      expect(result.files[0].risk).toBe('low');
+
+      // Verify default thresholds are reported correctly
+      expect(result.metadata.riskThresholds.low).toBe(0);
+    });
+
     test('should handle empty repository gracefully', async () => {
       // Arrange
       mockGit.raw.mockResolvedValue('');

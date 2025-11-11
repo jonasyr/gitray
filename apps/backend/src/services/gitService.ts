@@ -1257,7 +1257,7 @@ class GitService {
 
       // Convert to FileChurnData array with risk levels
       // Filter out files below the low threshold (risk === null)
-      const filesWithChurn: FileChurnData[] = Array.from(fileChurnMap.entries())
+      const filesWithChurn = Array.from(fileChurnMap.entries())
         .map(([filePath, data]) => {
           const extension = path.extname(filePath);
           const risk = this.determineRiskLevel(data.changes, thresholds);
@@ -1269,10 +1269,10 @@ class GitService {
             path: filePath,
             changes: data.changes,
             risk,
-            extension: extension || undefined,
-            firstChange: data.firstChange,
-            lastChange: data.lastChange,
-            authorCount: data.authors.size,
+            ...(extension && { extension }),
+            ...(data.firstChange && { firstChange: data.firstChange }),
+            ...(data.lastChange && { lastChange: data.lastChange }),
+            ...(data.authors.size > 0 && { authorCount: data.authors.size }),
           };
         })
         .filter((file): file is FileChurnData => file !== null);
