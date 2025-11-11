@@ -1039,10 +1039,11 @@ class GitService {
   private determineRiskLevel(
     changes: number,
     thresholds: ChurnRiskThresholds
-  ): ChurnRiskLevel {
+  ): ChurnRiskLevel | null {
     if (changes >= thresholds.high) return 'high';
     if (changes >= thresholds.medium) return 'medium';
-    return 'low';
+    if (changes >= thresholds.low) return 'low';
+    return null; // Below low threshold
   }
 
   /**
@@ -1255,22 +1256,26 @@ class GitService {
       const fileChurnMap = this.parseChurnLogOutput(raw, options);
 
       // Convert to FileChurnData array with risk levels
-      const filesWithChurn: FileChurnData[] = Array.from(
-        fileChurnMap.entries()
-      ).map(([filePath, data]) => {
-        const extension = path.extname(filePath);
-        const risk = this.determineRiskLevel(data.changes, thresholds);
+      // Filter out files below the low threshold (risk === null)
+      const filesWithChurn: FileChurnData[] = Array.from(fileChurnMap.entries())
+        .map(([filePath, data]) => {
+          const extension = path.extname(filePath);
+          const risk = this.determineRiskLevel(data.changes, thresholds);
 
-        return {
-          path: filePath,
-          changes: data.changes,
-          risk,
-          extension: extension || undefined,
-          firstChange: data.firstChange,
-          lastChange: data.lastChange,
-          authorCount: data.authors.size,
-        };
-      });
+          // Skip files below low threshold
+          if (risk === null) return null;
+
+          return {
+            path: filePath,
+            changes: data.changes,
+            risk,
+            extension: extension || undefined,
+            firstChange: data.firstChange,
+            lastChange: data.lastChange,
+            authorCount: data.authors.size,
+          };
+        })
+        .filter((file): file is FileChurnData => file !== null);
 
       // Apply filters and sorting
       const filteredFiles = this.filterAndSortChurnData(
