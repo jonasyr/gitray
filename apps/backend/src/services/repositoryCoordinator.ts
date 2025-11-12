@@ -440,14 +440,20 @@ class RepositoryCoordinator {
         refCount: handle.refCount,
       });
 
-      // FIX: Only cleanup when refCount actually reaches zero
+      // When refCount reaches zero, keep the repository cached for maxAgeHours
+      // The periodic cleanup scheduler will handle removal if needed
       if (handle.refCount === 0) {
-        logger.info('Repository reference count reached zero, cleaning up', {
-          repoUrl,
-          localPath: handle.localPath,
-        });
+        logger.debug(
+          'Repository reference count reached zero, keeping in cache',
+          {
+            repoUrl,
+            localPath: handle.localPath,
+            maxAgeHours: config.repositoryCache?.maxAgeHours || 24,
+          }
+        );
 
-        await this.cleanupRepositoryHandle(repoUrl, handle);
+        // Repository stays in cache - periodic performCleanup() will handle it
+        // based on maxAgeHours and maxRepositories settings
       }
     });
   }
@@ -707,7 +713,10 @@ class RepositoryCoordinator {
     logger.info('Repository cleanup scheduler started', { cleanupIntervalMs });
   }
 
-  private async performCleanup(): Promise<void> {
+  /**
+   * Triggers cleanup immediately (exposed for testing)
+   */
+  async performCleanup(): Promise<void> {
     const maxRepositories = config.repositoryCache?.maxRepositories || 50;
     const maxAge = (config.repositoryCache?.maxAgeHours || 24) * 60 * 60 * 1000;
 
