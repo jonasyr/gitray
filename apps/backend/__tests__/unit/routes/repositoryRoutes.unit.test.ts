@@ -6,6 +6,8 @@ import express, { Application } from 'express';
 const mockGitService = {
   getCommits: vi.fn(),
   aggregateCommitsByTime: vi.fn(),
+  getTopContributors: vi.fn(),
+  analyzeCodeChurn: vi.fn(),
 };
 
 const mockRedis = {
@@ -79,6 +81,7 @@ vi.mock('@gitray/shared-types', () => ({
     HOUR: 3600000,
   },
   CommitFilterOptions: {},
+  ChurnFilterOptions: {},
 }));
 
 describe('RepositoryRoutes Unit Tests', () => {
@@ -624,6 +627,295 @@ describe('RepositoryRoutes Unit Tests', () => {
       // ASSERT
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ commits: undefined });
+    });
+  });
+
+  describe('POST /churn - Get Code Churn Analysis', () => {
+    test('should return cached churn data when cache hit occurs', async () => {
+      // ARRANGE
+      const mockChurnData = {
+        files: [
+          {
+            path: 'src/api/auth.ts',
+            changes: 47,
+            risk: 'high',
+            extension: '.ts',
+            firstChange: '2023-01-01T12:00:00Z',
+            lastChange: '2023-12-31T12:00:00Z',
+            authorCount: 5,
+          },
+          {
+            path: 'src/components/Dashboard.tsx',
+            changes: 38,
+            risk: 'high',
+            extension: '.tsx',
+            firstChange: '2023-02-01T12:00:00Z',
+            lastChange: '2023-12-15T12:00:00Z',
+            authorCount: 3,
+          },
+        ],
+        metadata: {
+          totalFiles: 2,
+          totalChanges: 85,
+          riskThresholds: { high: 30, medium: 15, low: 0 },
+          dateRange: { from: '2023-01-01', to: '2023-12-31' },
+          highRiskCount: 2,
+          mediumRiskCount: 0,
+          lowRiskCount: 0,
+          analyzedAt: '2024-01-01T00:00:00Z',
+          processingTime: 150,
+        },
+      };
+      const repoUrl = 'https://github.com/user/repo.git';
+
+      mockRedis.get.mockResolvedValue(JSON.stringify(mockChurnData));
+
+      // ACT
+      const response = await request(app).post('/churn').send({ repoUrl });
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(response.body.churnData).toEqual({
+        ...mockChurnData,
+        metadata: { ...mockChurnData.metadata, fromCache: true },
+      });
+      expect(mockRedis.get).toHaveBeenCalledWith(`churn:${repoUrl}:{}`);
+      expect(mockWithTempRepository).not.toHaveBeenCalled();
+      expect(mockMetrics.recordEnhancedCacheOperation).toHaveBeenCalledWith(
+        'churn',
+        true,
+        expect.any(Object),
+        repoUrl,
+        mockChurnData.files.length
+      );
+      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
+        'code_churn_view',
+        'anonymous',
+        true,
+        'api_call'
+      );
+    });
+
+    test('should analyze and cache churn data when cache miss occurs', async () => {
+      // ARRANGE
+      const mockChurnData = {
+        files: [
+          {
+            path: 'src/utils/helpers.ts',
+            changes: 32,
+            risk: 'high',
+            extension: '.ts',
+            firstChange: '2023-03-01T12:00:00Z',
+            lastChange: '2023-11-20T12:00:00Z',
+            authorCount: 8,
+          },
+        ],
+        metadata: {
+          totalFiles: 1,
+          totalChanges: 32,
+          riskThresholds: { high: 30, medium: 15, low: 0 },
+          dateRange: { from: '2023-01-01', to: '2023-12-31' },
+          highRiskCount: 1,
+          mediumRiskCount: 0,
+          lowRiskCount: 0,
+          analyzedAt: '2024-01-01T00:00:00Z',
+          processingTime: 200,
+        },
+      };
+      const repoUrl = 'https://github.com/user/repo.git';
+
+      mockRedis.get.mockResolvedValue(null);
+      mockWithTempRepository.mockResolvedValue(mockChurnData);
+      mockRedis.set.mockResolvedValue('OK');
+
+      // ACT
+      const response = await request(app).post('/churn').send({ repoUrl });
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ churnData: mockChurnData });
+      expect(mockWithTempRepository).toHaveBeenCalledWith(
+        repoUrl,
+        expect.any(Function)
+      );
+      expect(mockRedis.set).toHaveBeenCalledWith(
+        `churn:${repoUrl}:{}`,
+        JSON.stringify(mockChurnData),
+        'EX',
+        3600
+      );
+      expect(mockMetrics.recordEnhancedCacheOperation).toHaveBeenCalledWith(
+        'churn',
+        false,
+        expect.any(Object),
+        repoUrl,
+        mockChurnData.files.length
+      );
+    });
+
+    test('should apply filter options to churn analysis', async () => {
+      // ARRANGE
+      const filterOptions = {
+        since: '2023-01-01',
+        until: '2023-12-31',
+        extensions: ['ts', 'tsx'],
+        minChanges: 10,
+      };
+      const mockChurnData = {
+        files: [
+          {
+            path: 'src/index.ts',
+            changes: 25,
+            risk: 'medium',
+            extension: '.ts',
+          },
+        ],
+        metadata: {
+          totalFiles: 1,
+          totalChanges: 25,
+          riskThresholds: { high: 30, medium: 15, low: 0 },
+          dateRange: { from: '2023-01-01', to: '2023-12-31' },
+          highRiskCount: 0,
+          mediumRiskCount: 1,
+          lowRiskCount: 0,
+          analyzedAt: '2024-01-01T00:00:00Z',
+          filterOptions,
+        },
+      };
+      const repoUrl = 'https://github.com/user/repo.git';
+
+      mockRedis.get.mockResolvedValue(null);
+      mockWithTempRepository.mockImplementation(async (url, callback) => {
+        return await callback('/tmp/repo');
+      });
+      mockGitService.analyzeCodeChurn.mockResolvedValue(mockChurnData);
+      mockRedis.set.mockResolvedValue('OK');
+
+      // ACT
+      const response = await request(app)
+        .post('/churn')
+        .send({ repoUrl, filterOptions });
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ churnData: mockChurnData });
+      expect(mockGitService.analyzeCodeChurn).toHaveBeenCalledWith(
+        '/tmp/repo',
+        filterOptions
+      );
+      expect(mockRedis.set).toHaveBeenCalledWith(
+        `churn:${repoUrl}:${JSON.stringify(filterOptions)}`,
+        JSON.stringify(mockChurnData),
+        'EX',
+        3600
+      );
+    });
+
+    test('should handle analysis errors and record failed feature usage', async () => {
+      // ARRANGE
+      const repoUrl = 'https://github.com/user/repo.git';
+      const analysisError = new Error('Churn analysis failed');
+
+      mockRedis.get.mockResolvedValue(null);
+      mockWithTempRepository.mockRejectedValue(analysisError);
+
+      // ACT
+      const response = await request(app).post('/churn').send({ repoUrl });
+
+      // ASSERT
+      expect(response.status).toBe(500);
+      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
+        'code_churn_view',
+        'anonymous',
+        false,
+        'api_call'
+      );
+    });
+
+    test('should handle different user types for churn metrics', async () => {
+      // ARRANGE
+      const repoUrl = 'https://github.com/user/repo.git';
+      mockMetrics.getUserType.mockReturnValue('premium');
+      mockRedis.get.mockResolvedValue(
+        JSON.stringify({ files: [], metadata: {} })
+      );
+
+      // ACT
+      await request(app).post('/churn').send({ repoUrl });
+
+      // ASSERT
+      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
+        'code_churn_view',
+        'premium',
+        true,
+        'api_call'
+      );
+    });
+
+    test('should handle cache failures gracefully and fetch from repository', async () => {
+      // ARRANGE
+      const repoUrl = 'https://github.com/user/repo.git';
+      const cacheError = new Error('Cache connection failed');
+      const mockChurnData = { files: [], metadata: {} };
+
+      mockRedis.get.mockRejectedValue(cacheError);
+      mockWithTempRepository.mockResolvedValue(mockChurnData);
+
+      // ACT
+      const response = await request(app).post('/churn').send({ repoUrl });
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(mockWithTempRepository).toHaveBeenCalled();
+    });
+
+    test('should handle cache set failures without affecting response', async () => {
+      // ARRANGE
+      const repoUrl = 'https://github.com/user/repo.git';
+      const mockChurnData = {
+        files: [{ path: 'test.ts', changes: 5, risk: 'low' }],
+        metadata: { totalFiles: 1 },
+      };
+
+      mockRedis.get.mockResolvedValue(null);
+      mockWithTempRepository.mockResolvedValue(mockChurnData);
+      mockRedis.set.mockRejectedValue(new Error('Cache write failed'));
+
+      // ACT
+      const response = await request(app).post('/churn').send({ repoUrl });
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ churnData: mockChurnData });
+    });
+
+    test('should handle empty churn results', async () => {
+      // ARRANGE
+      const repoUrl = 'https://github.com/user/empty-repo.git';
+      const emptyChurnData = {
+        files: [],
+        metadata: {
+          totalFiles: 0,
+          totalChanges: 0,
+          riskThresholds: { high: 30, medium: 15, low: 0 },
+          dateRange: { from: '2023-01-01', to: '2023-12-31' },
+          highRiskCount: 0,
+          mediumRiskCount: 0,
+          lowRiskCount: 0,
+          analyzedAt: '2024-01-01T00:00:00Z',
+        },
+      };
+
+      mockRedis.get.mockResolvedValue(null);
+      mockWithTempRepository.mockResolvedValue(emptyChurnData);
+
+      // ACT
+      const response = await request(app).post('/churn').send({ repoUrl });
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(response.body.churnData.files).toHaveLength(0);
+      expect(response.body.churnData.metadata.totalFiles).toBe(0);
     });
   });
 });

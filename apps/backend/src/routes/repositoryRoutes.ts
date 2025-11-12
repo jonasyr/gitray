@@ -9,6 +9,7 @@ import {
   HTTP_STATUS,
   CommitFilterOptions,
   TIME,
+  ChurnFilterOptions,
 } from '@gitray/shared-types';
 import {
   recordFeatureUsage,
@@ -300,6 +301,98 @@ router.post(
     } catch (error) {
       // Record failed feature usage
       recordFeatureUsage('contributors_view', userType, false, 'api_call');
+      next(error);
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// POST endpoint to get code churn analysis (file change frequency)
+// ---------------------------------------------------------------------------
+router.post(
+  '/churn',
+  setRequestPriority('normal'), // Normal priority for churn analysis
+  repoUrlValidation,
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { repoUrl, filterOptions } = req.body;
+    const userType = getUserType(req);
+
+    try {
+      const cacheKey = `churn:${repoUrl}:${JSON.stringify(filterOptions || {})}`;
+      let cached = null;
+      let churnData = null;
+
+      // Try to get from cache, but handle cache failures gracefully
+      try {
+        cached = await redis.get(cacheKey);
+        if (cached) {
+          churnData = JSON.parse(cached);
+          // Mark as from cache
+          churnData.metadata.fromCache = true;
+
+          // Record enhanced cache operation and feature usage
+          recordEnhancedCacheOperation(
+            'churn',
+            true,
+            req,
+            repoUrl,
+            churnData.files.length
+          );
+          recordFeatureUsage('code_churn_view', userType, true, 'api_call');
+          recordDataFreshness('churn', 0, 'hybrid');
+
+          res.status(HTTP_STATUS.OK).json({ churnData });
+          return;
+        }
+      } catch (cacheError) {
+        // Cache operation failed, continue to fetch from repository
+        console.warn(
+          'Cache get operation failed:',
+          (cacheError as Error).message
+        );
+      }
+
+      // Fetch churn data using the service layer
+      churnData ??= await withTempRepository(repoUrl, (tempDir) =>
+        gitService.analyzeCodeChurn(
+          tempDir,
+          filterOptions as ChurnFilterOptions
+        )
+      );
+
+      // Record cache miss and successful operation
+      recordEnhancedCacheOperation(
+        'churn',
+        false,
+        req,
+        repoUrl,
+        churnData ? churnData.files.length : 0
+      );
+      recordFeatureUsage('code_churn_view', userType, true, 'api_call');
+
+      // Try to cache the result, but don't fail if cache operation fails
+      if (churnData) {
+        try {
+          // Cache for 1 hour (code churn changes less frequently than commits)
+          await redis.set(
+            cacheKey,
+            JSON.stringify(churnData),
+            'EX',
+            TIME.HOUR / 1000
+          );
+        } catch (cacheError) {
+          console.warn(
+            'Cache set operation failed:',
+            (cacheError as Error).message
+          );
+        }
+      }
+
+      res.status(HTTP_STATUS.OK).json({ churnData });
+      return;
+    } catch (error) {
+      // Record failed feature usage
+      recordFeatureUsage('code_churn_view', userType, false, 'api_call');
       next(error);
     }
   }

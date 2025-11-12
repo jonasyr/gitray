@@ -388,3 +388,100 @@ export interface ContributorStat {
   /** Contribution percentage relative to total commits (0.0 to 1.0) */
   contributionPercentage: number;
 }
+
+// ============================================================================
+// CODE CHURN ANALYSIS - File Change Frequency and Risk Analysis
+// ============================================================================
+
+/**
+ * Risk level classification for file churn
+ */
+export type ChurnRiskLevel = 'high' | 'medium' | 'low';
+
+/**
+ * File churn data representing change frequency and risk level
+ */
+export interface FileChurnData {
+  /** Relative path from repository root */
+  path: string;
+  /** Number of times this file has been modified */
+  changes: number;
+  /** Risk level based on change frequency */
+  risk: ChurnRiskLevel;
+  /** File extension (e.g., '.ts', '.js') */
+  extension?: string;
+  /** Date of first modification */
+  firstChange?: string;
+  /** Date of last modification */
+  lastChange?: string;
+  /** Number of unique authors who modified this file */
+  authorCount?: number;
+}
+
+/**
+ * Filter options for code churn analysis
+ */
+export interface ChurnFilterOptions {
+  /** Start date for analysis period (ISO 8601 format) */
+  since?: string;
+  /** End date for analysis period (ISO 8601 format) */
+  until?: string;
+  /** Filter by specific file extensions (e.g., ['ts', 'js']) */
+  extensions?: string[];
+  /** Minimum number of changes to include in results */
+  minChanges?: number;
+  /** Filter by specific file paths or patterns */
+  paths?: string[];
+  /** Filter by specific risk levels */
+  riskLevels?: ChurnRiskLevel[];
+}
+
+/**
+ * Thresholds for determining risk levels based on change counts
+ */
+export interface ChurnRiskThresholds {
+  /** Minimum changes for high risk (default: 30) */
+  high: number;
+  /** Minimum changes for medium risk (default: 15) */
+  medium: number;
+  /** Maximum changes for low risk (anything below medium threshold) */
+  low: number;
+}
+
+/**
+ * Complete code churn analysis results
+ */
+export interface CodeChurnAnalysis {
+  /** List of files with their churn data */
+  files: FileChurnData[];
+  /** Analysis metadata */
+  metadata: {
+    /** Total number of files analyzed */
+    totalFiles: number;
+    /** Total number of changes across all files */
+    totalChanges: number;
+    /** Risk level thresholds used for this analysis */
+    riskThresholds: ChurnRiskThresholds;
+    /** Date range analyzed */
+    dateRange: {
+      from: string;
+      to: string;
+    };
+    /** Number of high risk files */
+    highRiskCount: number;
+    /** Number of medium risk files */
+    mediumRiskCount: number;
+    /** Number of low risk files */
+    lowRiskCount: number;
+    /** When the analysis was performed */
+    analyzedAt: string;
+    /** Whether streaming mode was used */
+    streamingUsed?: boolean;
+    /** Applied filter options */
+    filterOptions?: ChurnFilterOptions;
+    /** Processing time in milliseconds */
+    processingTime?: number;
+    /** Whether results were cached */
+    fromCache?: boolean;
+  };
+}
