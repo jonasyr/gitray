@@ -463,6 +463,38 @@ describe('RepositoryCoordinator', () => {
       expect(newHandle.refCount).toBe(1);
     });
 
+    test('should cleanup expired handle before creating new one to prevent directory leaks', async () => {
+      // ARRANGE
+      const repoUrl = 'https://github.com/test/expired-leak.git';
+      const handle = await repositoryCoordinator.getSharedRepository(repoUrl);
+      const oldPath = handle.localPath;
+
+      // Release the handle so refCount = 0
+      await repositoryCoordinator.releaseRepository(repoUrl);
+
+      // Mock expired repository (age > maxAgeHours)
+      handle.lastAccessed = new Date(Date.now() - 25 * 60 * 60 * 1000);
+
+      vi.clearAllMocks();
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-new-path');
+
+      // ACT - Access the expired repo before periodic cleanup runs
+      const newHandle =
+        await repositoryCoordinator.getSharedRepository(repoUrl);
+
+      // ASSERT - Old directory should be cleaned up, new one cloned
+      expect(mockGitService.cleanupRepository).toHaveBeenCalledWith(oldPath);
+      expect(mockGitService.cloneRepository).toHaveBeenCalledWith(repoUrl);
+      expect(newHandle.localPath).toBe('/tmp/repo-new-path');
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Repository handle invalid, cleaning up before refresh',
+        expect.objectContaining({
+          repoUrl,
+          localPath: oldPath,
+        })
+      );
+    });
+
     test('should invalidate repositories with missing directories', async () => {
       // ARRANGE
       const repoUrl = 'https://github.com/test/repo.git';

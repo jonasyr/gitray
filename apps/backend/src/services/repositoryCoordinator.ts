@@ -255,26 +255,40 @@ class RepositoryCoordinator {
     return withKeyLock(`repo-access:${repoUrl}`, async () => {
       // Check if we have a valid cached handle
       const existingHandle = this.sharedHandles.get(repoUrl);
-      if (existingHandle && (await this.isHandleValid(existingHandle))) {
-        // Cache hit - record enhanced metrics
-        const duration = (Date.now() - startTime) / 1000;
-        recordEnhancedCacheOperation(
-          'repository',
-          true,
-          undefined,
-          repoUrl,
-          existingHandle.commitCount
-        );
-        updateServiceHealthScore('coordination', {
-          errorRate: 0,
-          responseTime: duration,
-          cacheHitRate:
-            this.metrics.cacheHits /
-            (this.metrics.cacheHits + this.metrics.cacheMisses),
-        });
+      if (existingHandle) {
+        const isValid = await this.isHandleValid(existingHandle);
 
-        // FIX: Atomic reference count increment
-        return this.incrementReference(existingHandle);
+        if (isValid) {
+          // Cache hit - record enhanced metrics
+          const duration = (Date.now() - startTime) / 1000;
+          recordEnhancedCacheOperation(
+            'repository',
+            true,
+            undefined,
+            repoUrl,
+            existingHandle.commitCount
+          );
+          updateServiceHealthScore('coordination', {
+            errorRate: 0,
+            responseTime: duration,
+            cacheHitRate:
+              this.metrics.cacheHits /
+              (this.metrics.cacheHits + this.metrics.cacheMisses),
+          });
+
+          // FIX: Atomic reference count increment
+          return this.incrementReference(existingHandle);
+        } else {
+          // Handle is invalid (expired or directory missing)
+          // Clean it up before creating a new one to prevent directory leaks
+          logger.info('Repository handle invalid, cleaning up before refresh', {
+            repoUrl,
+            localPath: existingHandle.localPath,
+            refCount: existingHandle.refCount,
+          });
+
+          await this.cleanupRepositoryHandle(repoUrl, existingHandle);
+        }
       }
 
       // Check if clone is already in progress
