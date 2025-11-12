@@ -297,6 +297,7 @@ describe('RepositoryCoordinator', () => {
 
       // Should use the same cached directory, not clone again
       expect(handle2.localPath).toBe(firstLocalPath);
+      expect(handle2.refCount).toBe(1); // Ensure refCount is correctly reset to 1
       expect(mockGitService.cloneRepository).not.toHaveBeenCalled();
     });
 
@@ -338,13 +339,20 @@ describe('RepositoryCoordinator', () => {
       const maxAgeMs = 24 * 60 * 60 * 1000;
       vi.advanceTimersByTime(maxAgeMs + 60000);
 
-      // Manually trigger cleanup (in real code, scheduler does this)
       await repositoryCoordinator.performCleanup();
 
       // ASSERT - Repository should now be cleaned up
       expect(mockGitService.cleanupRepository).toHaveBeenCalledWith(
         handle.localPath
       );
+
+      // Verify that subsequent getSharedRepository triggers a fresh clone
+      vi.clearAllMocks();
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-456'); // New path
+      const newHandle =
+        await repositoryCoordinator.getSharedRepository(repoUrl);
+      expect(mockGitService.cloneRepository).toHaveBeenCalledWith(repoUrl);
+      expect(newHandle.localPath).toBe('/tmp/repo-456'); // Different from original
 
       vi.useRealTimers();
     });
@@ -400,6 +408,13 @@ describe('RepositoryCoordinator', () => {
 
       vi.useFakeTimers();
 
+      // Mock different paths for different repos
+      mockGitService.cloneRepository.mockImplementation(async (url: string) => {
+        if (url.includes('old-repo')) return '/tmp/repo-old';
+        if (url.includes('new-repo')) return '/tmp/repo-new';
+        return '/tmp/repo-default';
+      });
+
       // Create first repo and age it
       await repositoryCoordinator.getSharedRepository(repo1);
       await repositoryCoordinator.releaseRepository(repo1);
@@ -418,6 +433,12 @@ describe('RepositoryCoordinator', () => {
 
       // ASSERT - Only the old repo should be cleaned up, not the new one
       expect(mockGitService.cleanupRepository).toHaveBeenCalledTimes(1);
+      expect(mockGitService.cleanupRepository).toHaveBeenCalledWith(
+        '/tmp/repo-old'
+      );
+      expect(mockGitService.cleanupRepository).not.toHaveBeenCalledWith(
+        '/tmp/repo-new'
+      );
 
       vi.useRealTimers();
     });
@@ -483,6 +504,7 @@ describe('RepositoryCoordinator', () => {
   describe('Operation Coordination and Coalescing', () => {
     test('should coalesce identical operations', async () => {
       // ARRANGE
+      vi.useRealTimers(); // Ensure real timers are used for this test
       const repoUrl = 'https://github.com/test/repo.git';
       let callCount = 0;
       const mockOperation = vi.fn().mockImplementation(async () => {
