@@ -1,6 +1,6 @@
-import path from 'path';
-import { promises as fs } from 'fs';
-import os from 'os';
+import path from 'node:path';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import { getLogger } from '../services/logger';
 import { lockConfig } from '../config';
 
@@ -314,8 +314,8 @@ class LockManager {
         if (handle) {
           try {
             await this.release(handle, key);
-          } catch (releaseErr) {
-            logger.error('Lock release failed', { key, err: releaseErr });
+          } catch (error_) {
+            logger.error('Lock release failed', { key, err: error_ });
             // Don't throw release errors - operation might have succeeded
           }
         }

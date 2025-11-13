@@ -19,10 +19,10 @@
  * - Comprehensive metrics and health monitoring
  */
 
-import { promises as fs } from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import * as crypto from 'crypto';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import * as crypto from 'node:crypto';
 import { getLogger } from './logger';
 import { config } from '../config';
 import {
@@ -1130,12 +1130,13 @@ class FileAnalysisService {
       .split('\n')
       .filter((line) => line.length > 0);
 
+    const regex = /^(\d+)\s+blob\s+\w+\s+(\d+)\t(.+)$/;
     for (const line of lines) {
       // Parse ls-tree line format: mode type hash size\tpath
-      const match = line.match(/^(\d+)\s+blob\s+\w+\s+(\d+)\t(.+)$/);
+      const match = regex.exec(line);
       if (match) {
         const [, mode, sizeStr, filePath] = match;
-        const size = parseInt(sizeStr) || 0;
+        const size = Number.parseInt(sizeStr) || 0;
 
         // Only include regular files (not directories, submodules, etc.)
         if (filePath && !filePath.endsWith('/')) {
@@ -1696,7 +1697,7 @@ class FileAnalysisService {
         method: 'full-clone',
         reason:
           'Fallback due to detection failure - using most reliable method',
-        expectedPerformanceGain: 1.0, // No gain from baseline
+        expectedPerformanceGain: 1, // No gain from baseline
         fallbackMethods: ['shallow-clone'],
       };
     }
@@ -1719,7 +1720,7 @@ class FileAnalysisService {
       return {
         method: 'ls-tree-remote', // This now uses sparse clone internally
         reason: `Sparse clone optimal for ${sizeCategory} repository (${estimatedFiles} files) - 95-99% bandwidth reduction`,
-        expectedPerformanceGain: 15.0, // More realistic gain
+        expectedPerformanceGain: 15, // More realistic gain
         fallbackMethods: ['shallow-clone', 'full-clone'],
       };
     }
@@ -1745,38 +1746,38 @@ class FileAnalysisService {
   ): number {
     const gains: Record<AnalysisMethod, Record<string, number>> = {
       'ls-tree-remote': {
-        small: 15.0, // 15x faster (sparse clone)
-        medium: 18.0, // 18x faster
-        large: 20.0, // 20x faster
-        xl: 20.0, // 20x faster (not 25x - more realistic)
+        small: 15, // 15x faster (sparse clone)
+        medium: 18, // 18x faster
+        large: 20, // 20x faster
+        xl: 20, // 20x faster (not 25x - more realistic)
       },
       'shallow-clone': {
         small: 1.5, // 1.5x faster
-        medium: 3.0, // 3x faster
-        large: 6.0, // 6x faster
-        xl: 10.0, // 10x faster
+        medium: 3, // 3x faster
+        large: 6, // 6x faster
+        xl: 10, // 10x faster
       },
       'full-clone': {
-        small: 1.0, // Baseline
-        medium: 1.0, // Baseline
-        large: 1.0, // Baseline
-        xl: 1.0, // Baseline
+        small: 1, // Baseline
+        medium: 1, // Baseline
+        large: 1, // Baseline
+        xl: 1, // Baseline
       },
       'ls-tree-local': {
-        small: 2.0, // 2x faster
-        medium: 4.0, // 4x faster
-        large: 8.0, // 8x faster
-        xl: 12.0, // 12x faster
+        small: 2, // 2x faster
+        medium: 4, // 4x faster
+        large: 8, // 8x faster
+        xl: 12, // 12x faster
       },
       cached: {
-        small: 50.0, // 50x faster (instant)
-        medium: 50.0, // 50x faster
-        large: 50.0, // 50x faster
-        xl: 50.0, // 50x faster
+        small: 50, // 50x faster (instant)
+        medium: 50, // 50x faster
+        large: 50, // 50x faster
+        xl: 50, // 50x faster
       },
     };
 
-    return gains[method]?.[sizeCategory] || 1.0;
+    return gains[method]?.[sizeCategory] || 1;
   }
 
   /**
@@ -1845,7 +1846,7 @@ class FileAnalysisService {
         if (parts.length >= 5) {
           const mode = parts[0];
           const type = parts[1];
-          const size = parseInt(parts[3]) || 0;
+          const size = Number.parseInt(parts[3]) || 0;
           const filePath = parts.slice(4).join(' ');
 
           // Only include files (not directories or submodules)
@@ -2103,7 +2104,7 @@ class FileAnalysisService {
         dataSource,
         bandwidthUsed,
         processingTime,
-        cacheHitRate: 0.0, // Will be updated when cache is integrated
+        cacheHitRate: 0, // Will be updated when cache is integrated
         performanceGain: this.calculateActualPerformanceGain(
           actualMethod,
           processingTime
@@ -2973,7 +2974,7 @@ class FileAnalysisService {
             dataSource: analysisResult.dataSource,
             bandwidthUsed: analysisResult.bandwidthUsed,
             processingTime,
-            cacheHitRate: analysisResult.fileTreeCached ? 1.0 : 0.0,
+            cacheHitRate: analysisResult.fileTreeCached ? 1 : 0,
             performanceGain: this.calculateActualPerformanceGain(
               analysisResult.actualMethod,
               processingTime
@@ -3346,7 +3347,7 @@ class FileAnalysisService {
         error instanceof Error ? error : new Error(String(error))
       );
       updateServiceHealthScore('file-analysis', {
-        errorRate: 1.0,
+        errorRate: 1,
         responseTime: Date.now() - startTime,
         memoryUtilization: process.memoryUsage().rss / (1024 * 1024),
       });
@@ -3387,10 +3388,10 @@ class FileAnalysisService {
     // Baseline processing time estimate (for full clone)
     const baselineTime = 30000; // 30 seconds baseline for medium repository
 
-    if (processingTime === 0) return 1.0;
+    if (processingTime === 0) return 1;
 
     const gain = baselineTime / processingTime;
-    return Math.max(1.0, Math.min(50.0, gain)); // Cap between 1x and 50x
+    return Math.max(1, Math.min(50, gain)); // Cap between 1x and 50x
   }
 
   /**

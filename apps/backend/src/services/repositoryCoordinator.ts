@@ -1,6 +1,6 @@
 // apps/backend/src/services/repositoryCoordinator.ts - FIXED VERSION
 
-import { rm, access } from 'fs/promises';
+import { rm, access } from 'node:fs/promises';
 import { gitService } from './gitService';
 import { getLogger } from './logger';
 import { withKeyLock } from '../utils/lockManager';

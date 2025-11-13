@@ -2,8 +2,8 @@ import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import { Request } from 'express';
 import { randomBytes } from 'node:crypto';
-import path from 'path';
-import fs from 'fs';
+import path from 'node:path';
+import fs from 'node:fs';
 
 // Enhanced application logger with file rotation and structured logging
 
@@ -80,13 +80,13 @@ export const initializeLogger = () => {
     const match = regex.exec(size.toLowerCase());
     if (!match) return 10 * 1024 * 1024; // Default 10MB
     const [, num, unit] = match;
-    return parseInt(num) * (units[unit as keyof typeof units] || 1);
+    return Number.parseInt(num) * (units[unit as keyof typeof units] || 1);
   };
 
   // File transports (if enabled)
   if (process.env.LOG_TO_FILE === 'true') {
     const maxSize = parseFileSize(process.env.LOG_FILE_MAX_SIZE ?? '10m');
-    const maxFiles = parseInt(process.env.LOG_FILE_MAX_FILES ?? '10');
+    const maxFiles = Number.parseInt(process.env.LOG_FILE_MAX_FILES ?? '10');
     const datePattern = process.env.LOG_DATE_PATTERN ?? 'YYYY-MM-DD';
 
     // Combined log file (all levels) - using DailyRotateFile
@@ -118,7 +118,7 @@ export const initializeLogger = () => {
       );
     }
 
-    // Application-specific log file - using DailyRotateFile
+    // Application-specific log file and Performance log file - using DailyRotateFile
     transports.push(
       new DailyRotateFile({
         filename: path.join(logDir, 'application-%DATE%.log'),
@@ -127,11 +127,7 @@ export const initializeLogger = () => {
         maxFiles,
         zippedArchive: true,
         format: jsonFormat,
-      })
-    );
-
-    // Performance log file (for cache hits, coordination metrics, etc.) - using DailyRotateFile
-    transports.push(
+      }),
       new DailyRotateFile({
         filename: path.join(logDir, 'performance-%DATE%.log'),
         datePattern,

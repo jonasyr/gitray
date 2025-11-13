@@ -1,6 +1,6 @@
-import { rm, mkdtemp } from 'fs/promises';
-import * as path from 'path';
-import * as os from 'os';
+import { rm, mkdtemp } from 'node:fs/promises';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import simpleGit, { SimpleGit, SimpleGitOptions } from 'simple-git';
 import { config } from '../config';
 import { getLogger } from './logger';
@@ -115,10 +115,10 @@ class GitService {
 
       // Use rev-list --count for fastest possible count
       const countOutput = await localGit.raw(['rev-list', '--count', 'HEAD']);
-      const count = parseInt(countOutput.trim(), 10);
+      const count = Number.parseInt(countOutput.trim(), 10);
 
-      if (isNaN(count)) {
-        throw new Error(`Invalid commit count output: ${countOutput}`);
+      if (Number.isNaN(count)) {
+        throw new TypeError(`Invalid commit count output: ${countOutput}`);
       }
 
       logger.info(`Repository ${localRepoPath} has ${count} commits`);
@@ -402,8 +402,8 @@ class GitService {
       });
 
       // Force garbage collection if available (development/debugging)
-      if (global.gc && typeof global.gc === 'function') {
-        global.gc();
+      if (globalThis.gc && typeof globalThis.gc === 'function') {
+        globalThis.gc();
         logger.debug('Garbage collection triggered');
       }
     }
@@ -861,11 +861,11 @@ class GitService {
   private parseNumstatLine(line: string, currentCommit: any): void {
     const statParts = line.split(/\s+/);
     if (statParts.length >= 2) {
-      const added = parseInt(statParts[0], 10);
-      const deleted = parseInt(statParts[1], 10);
+      const added = Number.parseInt(statParts[0], 10);
+      const deleted = Number.parseInt(statParts[1], 10);
 
-      if (!isNaN(added)) currentCommit.linesAdded += added;
-      if (!isNaN(deleted)) currentCommit.linesDeleted += deleted;
+      if (!Number.isNaN(added)) currentCommit.linesAdded += added;
+      if (!Number.isNaN(deleted)) currentCommit.linesDeleted += deleted;
     }
   }
 
@@ -1062,8 +1062,7 @@ class GitService {
 
     // Add path filters if specified
     if (options?.paths && options.paths.length > 0) {
-      args.push('--');
-      args.push(...options.paths);
+      args.push('--', ...options.paths);
     }
 
     return args;

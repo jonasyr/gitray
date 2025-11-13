@@ -1,6 +1,6 @@
 import { RATE_LIMIT, GIT_SERVICE } from '@gitray/shared-types';
-import path from 'path';
-import os from 'os';
+import path from 'node:path';
+import os from 'node:os';
 
 /**
  * FIX: Added comprehensive configuration for HybridLRUCache
@@ -14,7 +14,7 @@ function parseEnvNumber(
 ): number {
   if (!envVar) return defaultValue;
   const parsed = Number(envVar);
-  return isNaN(parsed) ? defaultValue : parsed;
+  return Number.isNaN(parsed) ? defaultValue : parsed;
 }
 
 // Helper function to parse boolean environment variables

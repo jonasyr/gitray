@@ -17,7 +17,7 @@
  * - Comprehensive metrics and health monitoring
  */
 
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import { gitService } from './gitService';
 import { getLogger } from './logger';
 import { withSharedRepository } from './repositoryCoordinator';
@@ -1141,7 +1141,7 @@ export class RepositoryCacheManager {
           );
 
           // Update system health metrics to reflect the failure
-          updateServiceHealthScore('cache', { errorRate: 1.0 });
+          updateServiceHealthScore('cache', { errorRate: 1 });
 
           // Rollback all cache changes to maintain consistency
           await this.rollbackTransaction(transaction);
@@ -1275,8 +1275,8 @@ export class RepositoryCacheManager {
 
         // Update system health with successful filtered cache operation
         updateServiceHealthScore('cache', {
-          cacheHitRate: 1.0,
-          errorRate: 0.0,
+          cacheHitRate: 1,
+          errorRate: 0,
         });
 
         return filteredCommits;
@@ -1296,7 +1296,7 @@ export class RepositoryCacheManager {
         );
 
         // Update service health score on error
-        updateServiceHealthScore('cache', { errorRate: 1.0 });
+        updateServiceHealthScore('cache', { errorRate: 1 });
 
         // Rollback transaction on any error
         await this.rollbackTransaction(transaction);
@@ -1463,8 +1463,8 @@ export class RepositoryCacheManager {
 
         // Update system health metrics
         updateServiceHealthScore('cache', {
-          cacheHitRate: 1.0,
-          errorRate: 0.0,
+          cacheHitRate: 1,
+          errorRate: 0,
         });
 
         return contributors;
@@ -1484,7 +1484,7 @@ export class RepositoryCacheManager {
         );
 
         // Update system health metrics
-        updateServiceHealthScore('cache', { errorRate: 1.0 });
+        updateServiceHealthScore('cache', { errorRate: 1 });
 
         // Rollback transaction to maintain cache consistency
         await this.rollbackTransaction(transaction);
@@ -1646,8 +1646,8 @@ export class RepositoryCacheManager {
 
         // Update system health metrics
         updateServiceHealthScore('cache', {
-          cacheHitRate: 1.0,
-          errorRate: 0.0,
+          cacheHitRate: 1,
+          errorRate: 0,
         });
 
         return aggregatedData;
@@ -1667,7 +1667,7 @@ export class RepositoryCacheManager {
         );
 
         // Update system health metrics
-        updateServiceHealthScore('cache', { errorRate: 1.0 });
+        updateServiceHealthScore('cache', { errorRate: 1 });
 
         // Rollback transaction to maintain cache consistency
         await this.rollbackTransaction(transaction);
@@ -2346,8 +2346,8 @@ export class RepositoryCacheManager {
 
       // Update service health score on successful cache operation
       updateServiceHealthScore('cache', {
-        cacheHitRate: 1.0,
-        errorRate: 0.0,
+        cacheHitRate: 1,
+        errorRate: 0,
       });
 
       return commits;
@@ -2367,7 +2367,7 @@ export class RepositoryCacheManager {
       );
 
       // Update service health score on error
-      updateServiceHealthScore('cache', { errorRate: 1.0 });
+      updateServiceHealthScore('cache', { errorRate: 1 });
 
       // Rollback transaction on any error
       await this.rollbackTransaction(transaction);
@@ -2479,8 +2479,8 @@ export class RepositoryCacheManager {
 
       // Update service health score on successful cache operation
       updateServiceHealthScore('cache', {
-        cacheHitRate: 1.0,
-        errorRate: 0.0,
+        cacheHitRate: 1,
+        errorRate: 0,
       });
 
       return filteredCommits;
@@ -2500,7 +2500,7 @@ export class RepositoryCacheManager {
       );
 
       // Update service health score on error
-      updateServiceHealthScore('cache', { errorRate: 1.0 });
+      updateServiceHealthScore('cache', { errorRate: 1 });
 
       // Rollback transaction on any error
       await this.rollbackTransaction(transaction);

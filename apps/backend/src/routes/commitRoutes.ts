@@ -937,16 +937,16 @@ const fileAnalysisValidation = (): ValidationChain[] => [
     .custom((value) => {
       if (!value) return true;
       const categories = value.split(',');
-      const validCategories = [
+      const validCategories = new Set([
         'code',
         'documentation',
         'configuration',
         'assets',
         'other',
-      ];
+      ]);
       return (
         categories.length <= 5 &&
-        categories.every((cat: string) => validCategories.includes(cat.trim()))
+        categories.every((cat: string) => validCategories.has(cat.trim()))
       );
     })
     .withMessage('Categories must be valid file categories'),
@@ -987,7 +987,7 @@ function buildFileAnalysisFilters(
   }
 
   if (query.maxDepth !== undefined) {
-    filterOptions.maxDepth = parseInt(query.maxDepth);
+    filterOptions.maxDepth = Number.parseInt(query.maxDepth);
   }
 
   return filterOptions;
@@ -1151,8 +1151,8 @@ router.get(
             dataSource: 'filesystem-walk' as const,
             bandwidthUsed: 0, // Not tracked for fallback
             processingTime: Date.now() - startTime,
-            cacheHitRate: 0.0,
-            performanceGain: 1.0, // Baseline
+            cacheHitRate: 0,
+            performanceGain: 1, // Baseline
             bandwidthSaved: 0,
             fileTreeCached: false,
             selectionReason: 'fallback due to optimization failure',
@@ -1258,8 +1258,8 @@ router.get(
         dataSource: 'none' as const,
         bandwidthUsed: 0,
         processingTime: Date.now() - startTime,
-        cacheHitRate: 0.0,
-        performanceGain: 0.0,
+        cacheHitRate: 0,
+        performanceGain: 0,
         bandwidthSaved: 0,
         fileTreeCached: false,
         selectionReason: 'analysis failed',

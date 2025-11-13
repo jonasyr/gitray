@@ -156,7 +156,7 @@ export const distributedCacheInvalidations = new Counter({
 export const distributedCacheInvalidationLatency = new Histogram({
   name: 'distributed_cache_invalidation_duration_seconds',
   help: 'Time taken for cross-process cache invalidation',
-  buckets: [0.001, 0.01, 0.1, 0.5, 1.0, 5.0],
+  buckets: [0.001, 0.01, 0.1, 0.5, 1, 5],
 });
 
 export const tempDirectories = new Gauge({
@@ -441,7 +441,7 @@ export const cacheEfficiencyByRepo = new Histogram({
   name: 'gitray_cache_efficiency_by_repository',
   help: 'Cache efficiency patterns by repository characteristics',
   labelNames: ['repo_size', 'language', 'activity_level', 'team_size'] as const,
-  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
 });
 
 /**
@@ -451,7 +451,7 @@ export const cachePredictionAccuracy = new Histogram({
   name: 'gitray_cache_prediction_accuracy_ratio',
   help: 'Accuracy of cache prediction algorithms',
   labelNames: ['prediction_type', 'time_horizon', 'data_category'] as const,
-  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
 });
 
 // ========================================================================
@@ -716,7 +716,7 @@ export const streamingMemoryUsage = new Histogram({
 export const streamingCacheHitRate = new Histogram({
   name: 'git_streaming_cache_hit_rate',
   help: 'Cache hit rate for streaming batch operations (0.0-1.0)',
-  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
 });
 
 /**
@@ -799,7 +799,7 @@ export const fileAnalysisPerformanceGain = new Histogram({
     'repo_size',
     'cache_hit', // true, false
   ] as const,
-  buckets: [1.0, 1.5, 2.0, 3.0, 5.0, 8.0, 12.0, 20.0, 30.0, 50.0], // 1x to 50x improvement
+  buckets: [1, 1.5, 2, 3, 5, 8, 12, 20, 30, 50], // 1x to 50x improvement
 });
 
 /**
@@ -813,7 +813,7 @@ export const fileAnalysisCacheHitRate = new Histogram({
     'repo_size',
     'commit_age_hours', // fresh, old, stale
   ] as const,
-  buckets: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+  buckets: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
 });
 
 /**
@@ -827,7 +827,7 @@ export const fileAnalysisProcessingTime = new Histogram({
     'repo_size',
     'file_count_range', // small, medium, large, huge
   ] as const,
-  buckets: [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0], // 0.1s to 5min
+  buckets: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300], // 0.1s to 5min
 });
 
 /**
@@ -1051,16 +1051,16 @@ export function recordSLACompliance(
   userSegment: string = 'general'
 ): void {
   const slaTargets = {
-    api: { p95: 2.0, p99: 5.0 },
-    ui: { p95: 1.0, p99: 3.0 },
-    admin: { p95: 5.0, p99: 10.0 },
+    api: { p95: 2, p99: 5 },
+    ui: { p95: 1, p99: 3 },
+    admin: { p95: 5, p99: 10 },
   };
 
   const target =
     slaTargets[userSegment as keyof typeof slaTargets] || slaTargets.api;
-  let slaStatus = 1.0; // 100% compliance by default
+  let slaStatus = 1; // 100% compliance by default
 
-  if (responseTime > target.p99) slaStatus = 0.0;
+  if (responseTime > target.p99) slaStatus = 0;
   else if (responseTime > target.p95) slaStatus = 0.8;
 
   slaCompliance.set(
