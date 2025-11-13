@@ -331,3 +331,6 @@ apps/backend/logs/
 .gitray.log
 .shared-types.log
 *.pid
+
+.claude*
+.mcp.json
