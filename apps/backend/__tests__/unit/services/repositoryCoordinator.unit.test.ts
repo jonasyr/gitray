@@ -210,9 +210,15 @@ describe('RepositoryCoordinator', () => {
       // ACT
       await repositoryCoordinator.releaseRepository(repoUrl);
 
-      // ASSERT
-      expect(mockGitService.cleanupRepository).toHaveBeenCalledWith(
-        '/tmp/repo-123'
+      // ASSERT - Repository should stay in cache, not be cleaned up immediately
+      expect(mockGitService.cleanupRepository).not.toHaveBeenCalled();
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Repository reference count reached zero, keeping in cache',
+        expect.objectContaining({
+          repoUrl,
+          localPath: '/tmp/repo-123',
+          maxAgeHours: 24,
+        })
       );
     });
 
@@ -230,17 +236,25 @@ describe('RepositoryCoordinator', () => {
       expect(mockGitService.cleanupRepository).not.toHaveBeenCalled();
     });
 
-    test('should handle cleanup failures gracefully', async () => {
+    test('should handle cleanup failures gracefully during periodic cleanup', async () => {
       // ARRANGE
+      vi.useFakeTimers();
       const repoUrl = 'https://github.com/test/repo.git';
       await repositoryCoordinator.getSharedRepository(repoUrl);
+      await repositoryCoordinator.releaseRepository(repoUrl);
+
       mockGitService.cleanupRepository.mockRejectedValue(
         new Error('Cleanup failed')
       );
 
-      // ACT & ASSERT - Should not throw
-      await repositoryCoordinator.releaseRepository(repoUrl);
+      vi.clearAllMocks();
 
+      // ACT - Trigger cleanup after expiration
+      vi.advanceTimersByTime(25 * 60 * 60 * 1000); // Past maxAgeHours
+      await repositoryCoordinator.performCleanup();
+
+      // ASSERT - Should log error but not throw
+      // Error is logged from cleanupRepositoryHandle method
       expect(mockLogger.error).toHaveBeenCalledWith(
         'Failed to cleanup repository',
         expect.objectContaining({
@@ -248,6 +262,8 @@ describe('RepositoryCoordinator', () => {
           error: 'Cleanup failed',
         })
       );
+
+      vi.useRealTimers();
     });
 
     test('should handle release of non-existent repository', async () => {
@@ -261,6 +277,170 @@ describe('RepositoryCoordinator', () => {
         'Attempted to release non-existent repository',
         { repoUrl }
       );
+    });
+
+    test('should keep repository in cache when refCount reaches 0', async () => {
+      // ARRANGE
+      const repoUrl = 'https://github.com/test/cache-test.git';
+      const handle1 = await repositoryCoordinator.getSharedRepository(repoUrl);
+      const firstLocalPath = handle1.localPath;
+
+      // ACT - Release the repository
+      await repositoryCoordinator.releaseRepository(repoUrl);
+
+      // ASSERT - Repository should still be in cache
+      expect(mockGitService.cleanupRepository).not.toHaveBeenCalled();
+
+      // Acquire it again
+      vi.clearAllMocks();
+      const handle2 = await repositoryCoordinator.getSharedRepository(repoUrl);
+
+      // Should use the same cached directory, not clone again
+      expect(handle2.localPath).toBe(firstLocalPath);
+      expect(handle2.refCount).toBe(1); // Ensure refCount is correctly reset to 1
+      expect(mockGitService.cloneRepository).not.toHaveBeenCalled();
+    });
+
+    test('should reuse cached repository across multiple acquire/release cycles', async () => {
+      // ARRANGE
+      const repoUrl = 'https://github.com/test/multi-cycle.git';
+
+      // ACT - Multiple acquire/release cycles
+      const handle1 = await repositoryCoordinator.getSharedRepository(repoUrl);
+      const originalPath = handle1.localPath;
+      await repositoryCoordinator.releaseRepository(repoUrl);
+
+      vi.clearAllMocks();
+      const handle2 = await repositoryCoordinator.getSharedRepository(repoUrl);
+      await repositoryCoordinator.releaseRepository(repoUrl);
+
+      vi.clearAllMocks();
+      const handle3 = await repositoryCoordinator.getSharedRepository(repoUrl);
+
+      // ASSERT - Should always use the same cached directory
+      expect(handle2.localPath).toBe(originalPath);
+      expect(handle3.localPath).toBe(originalPath);
+      expect(mockGitService.cloneRepository).not.toHaveBeenCalled();
+      expect(mockGitService.cleanupRepository).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Periodic Cleanup and Cache Expiration', () => {
+    test('should cleanup repository after maxAgeHours expires', async () => {
+      // ARRANGE
+      vi.useFakeTimers();
+      const repoUrl = 'https://github.com/test/expired-repo.git';
+      const handle = await repositoryCoordinator.getSharedRepository(repoUrl);
+      await repositoryCoordinator.releaseRepository(repoUrl);
+
+      vi.clearAllMocks();
+
+      // ACT - Advance time past maxAgeHours (24 hours + 1 minute)
+      const maxAgeMs = 24 * 60 * 60 * 1000;
+      vi.advanceTimersByTime(maxAgeMs + 60000);
+
+      await repositoryCoordinator.performCleanup();
+
+      // ASSERT - Repository should now be cleaned up
+      expect(mockGitService.cleanupRepository).toHaveBeenCalledWith(
+        handle.localPath
+      );
+
+      // Verify that subsequent getSharedRepository triggers a fresh clone
+      vi.clearAllMocks();
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-456'); // New path
+      const newHandle =
+        await repositoryCoordinator.getSharedRepository(repoUrl);
+      expect(mockGitService.cloneRepository).toHaveBeenCalledWith(repoUrl);
+      expect(newHandle.localPath).toBe('/tmp/repo-456'); // Different from original
+
+      vi.useRealTimers();
+    });
+
+    test('should not cleanup repository before maxAgeHours expires', async () => {
+      // ARRANGE
+      vi.useFakeTimers();
+      const repoUrl = 'https://github.com/test/not-expired.git';
+      await repositoryCoordinator.getSharedRepository(repoUrl);
+      await repositoryCoordinator.releaseRepository(repoUrl);
+
+      vi.clearAllMocks();
+
+      // ACT - Advance time to just before maxAgeHours (23 hours)
+      const notExpiredMs = 23 * 60 * 60 * 1000;
+      vi.advanceTimersByTime(notExpiredMs);
+
+      await repositoryCoordinator.performCleanup();
+
+      // ASSERT - Repository should still be cached
+      expect(mockGitService.cleanupRepository).not.toHaveBeenCalled();
+
+      vi.useRealTimers();
+    });
+
+    test('should not cleanup repository with active references', async () => {
+      // ARRANGE
+      vi.useFakeTimers();
+      const repoUrl = 'https://github.com/test/active-refs.git';
+      await repositoryCoordinator.getSharedRepository(repoUrl);
+      // Don't release - refCount = 1
+
+      vi.clearAllMocks();
+
+      // ACT - Advance time past maxAgeHours
+      vi.advanceTimersByTime(25 * 60 * 60 * 1000);
+      await repositoryCoordinator.performCleanup();
+
+      // ASSERT - Should not cleanup because refCount > 0
+      expect(mockGitService.cleanupRepository).not.toHaveBeenCalled();
+
+      vi.useRealTimers();
+    });
+
+    test('should respect maxRepositories configuration during cleanup', async () => {
+      // ARRANGE
+      // The default maxRepositories is 50, so we can't easily trigger cleanup
+      // by exceeding it in a test. This test verifies the logic works correctly
+      // when there are multiple repos and one is expired.
+
+      const repo1 = 'https://github.com/test/old-repo.git';
+      const repo2 = 'https://github.com/test/new-repo.git';
+
+      vi.useFakeTimers();
+
+      // Mock different paths for different repos
+      mockGitService.cloneRepository.mockImplementation(async (url: string) => {
+        if (url.includes('old-repo')) return '/tmp/repo-old';
+        if (url.includes('new-repo')) return '/tmp/repo-new';
+        return '/tmp/repo-default';
+      });
+
+      // Create first repo and age it
+      await repositoryCoordinator.getSharedRepository(repo1);
+      await repositoryCoordinator.releaseRepository(repo1);
+
+      // Advance time to make first repo old
+      vi.advanceTimersByTime(25 * 60 * 60 * 1000); // 25 hours
+
+      // Create second repo (fresh)
+      await repositoryCoordinator.getSharedRepository(repo2);
+      await repositoryCoordinator.releaseRepository(repo2);
+
+      vi.clearAllMocks();
+
+      // ACT - Trigger cleanup
+      await repositoryCoordinator.performCleanup();
+
+      // ASSERT - Only the old repo should be cleaned up, not the new one
+      expect(mockGitService.cleanupRepository).toHaveBeenCalledTimes(1);
+      expect(mockGitService.cleanupRepository).toHaveBeenCalledWith(
+        '/tmp/repo-old'
+      );
+      expect(mockGitService.cleanupRepository).not.toHaveBeenCalledWith(
+        '/tmp/repo-new'
+      );
+
+      vi.useRealTimers();
     });
   });
 
@@ -281,6 +461,38 @@ describe('RepositoryCoordinator', () => {
       // ASSERT
       expect(mockGitService.cloneRepository).toHaveBeenCalled(); // New clone
       expect(newHandle.refCount).toBe(1);
+    });
+
+    test('should cleanup expired handle before creating new one to prevent directory leaks', async () => {
+      // ARRANGE
+      const repoUrl = 'https://github.com/test/expired-leak.git';
+      const handle = await repositoryCoordinator.getSharedRepository(repoUrl);
+      const oldPath = handle.localPath;
+
+      // Release the handle so refCount = 0
+      await repositoryCoordinator.releaseRepository(repoUrl);
+
+      // Mock expired repository (age > maxAgeHours)
+      handle.lastAccessed = new Date(Date.now() - 25 * 60 * 60 * 1000);
+
+      vi.clearAllMocks();
+      mockGitService.cloneRepository.mockResolvedValue('/tmp/repo-new-path');
+
+      // ACT - Access the expired repo before periodic cleanup runs
+      const newHandle =
+        await repositoryCoordinator.getSharedRepository(repoUrl);
+
+      // ASSERT - Old directory should be cleaned up, new one cloned
+      expect(mockGitService.cleanupRepository).toHaveBeenCalledWith(oldPath);
+      expect(mockGitService.cloneRepository).toHaveBeenCalledWith(repoUrl);
+      expect(newHandle.localPath).toBe('/tmp/repo-new-path');
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        'Repository handle invalid, cleaning up before refresh',
+        expect.objectContaining({
+          repoUrl,
+          localPath: oldPath,
+        })
+      );
     });
 
     test('should invalidate repositories with missing directories', async () => {
@@ -324,6 +536,7 @@ describe('RepositoryCoordinator', () => {
   describe('Operation Coordination and Coalescing', () => {
     test('should coalesce identical operations', async () => {
       // ARRANGE
+      vi.useRealTimers(); // Ensure real timers are used for this test
       const repoUrl = 'https://github.com/test/repo.git';
       let callCount = 0;
       const mockOperation = vi.fn().mockImplementation(async () => {
@@ -418,7 +631,8 @@ describe('RepositoryCoordinator', () => {
       // ASSERT
       expect(result).toBe('callback-result');
       expect(mockCallback).toHaveBeenCalledWith('/tmp/repo-123');
-      expect(mockGitService.cleanupRepository).toHaveBeenCalled(); // Auto-released
+      // Repository stays in cache after release, not immediately cleaned up
+      expect(mockGitService.cleanupRepository).not.toHaveBeenCalled();
     });
 
     test('should release repository even on callback failure', async () => {
@@ -432,7 +646,8 @@ describe('RepositoryCoordinator', () => {
         repositoryCoordinator.withRepository(repoUrl, mockCallback)
       ).rejects.toThrow('Callback failed');
 
-      expect(mockGitService.cleanupRepository).toHaveBeenCalled(); // Still released
+      // Repository stays in cache after release, not immediately cleaned up
+      expect(mockGitService.cleanupRepository).not.toHaveBeenCalled();
     });
   });
 
@@ -599,21 +814,11 @@ describe('RepositoryCoordinator', () => {
       ).rejects.toThrow('Lock acquisition failed');
     });
 
-    test('should handle concurrent access during cleanup', async () => {
+    test('should handle concurrent release operations safely', async () => {
       // ARRANGE
       const repoUrl = 'https://github.com/test/repo.git';
       await repositoryCoordinator.getSharedRepository(repoUrl);
-
-      // Mock lock to simulate concurrent access
-      let lockCallCount = 0;
-      mockWithKeyLock.mockImplementation(async (key, fn) => {
-        lockCallCount++;
-        if (lockCallCount === 2) {
-          // Simulate handle being cleaned up during second call
-          return undefined;
-        }
-        return fn();
-      });
+      await repositoryCoordinator.getSharedRepository(repoUrl); // refCount = 2
 
       // ACT - Release twice concurrently
       const promises = [
@@ -621,9 +826,9 @@ describe('RepositoryCoordinator', () => {
         repositoryCoordinator.releaseRepository(repoUrl),
       ];
 
-      // ASSERT - Should not throw
+      // ASSERT - Should not throw and not cleanup (stays in cache)
       await Promise.allSettled(promises);
-      expect(mockGitService.cleanupRepository).toHaveBeenCalledTimes(1);
+      expect(mockGitService.cleanupRepository).not.toHaveBeenCalled();
     });
 
     test('should handle memory pressure during operations', async () => {
@@ -767,8 +972,8 @@ describe('RepositoryCoordinator', () => {
           withSharedRepository(repoUrl, mockCallback)
         ).rejects.toThrow('Callback error');
 
-        // Repository should still be cleaned up
-        expect(mockGitService.cleanupRepository).toHaveBeenCalled();
+        // Repository should be released but stays in cache (not immediately cleaned up)
+        expect(mockGitService.cleanupRepository).not.toHaveBeenCalled();
       });
     });
 

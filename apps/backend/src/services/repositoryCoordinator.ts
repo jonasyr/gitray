@@ -255,26 +255,40 @@ class RepositoryCoordinator {
     return withKeyLock(`repo-access:${repoUrl}`, async () => {
       // Check if we have a valid cached handle
       const existingHandle = this.sharedHandles.get(repoUrl);
-      if (existingHandle && (await this.isHandleValid(existingHandle))) {
-        // Cache hit - record enhanced metrics
-        const duration = (Date.now() - startTime) / 1000;
-        recordEnhancedCacheOperation(
-          'repository',
-          true,
-          undefined,
-          repoUrl,
-          existingHandle.commitCount
-        );
-        updateServiceHealthScore('coordination', {
-          errorRate: 0,
-          responseTime: duration,
-          cacheHitRate:
-            this.metrics.cacheHits /
-            (this.metrics.cacheHits + this.metrics.cacheMisses),
-        });
+      if (existingHandle) {
+        const isValid = await this.isHandleValid(existingHandle);
 
-        // FIX: Atomic reference count increment
-        return this.incrementReference(existingHandle);
+        if (isValid) {
+          // Cache hit - record enhanced metrics
+          const duration = (Date.now() - startTime) / 1000;
+          recordEnhancedCacheOperation(
+            'repository',
+            true,
+            undefined,
+            repoUrl,
+            existingHandle.commitCount
+          );
+          updateServiceHealthScore('coordination', {
+            errorRate: 0,
+            responseTime: duration,
+            cacheHitRate:
+              this.metrics.cacheHits /
+              (this.metrics.cacheHits + this.metrics.cacheMisses),
+          });
+
+          // FIX: Atomic reference count increment
+          return this.incrementReference(existingHandle);
+        } else {
+          // Handle is invalid (expired or directory missing)
+          // Clean it up before creating a new one to prevent directory leaks
+          logger.info('Repository handle invalid, cleaning up before refresh', {
+            repoUrl,
+            localPath: existingHandle.localPath,
+            refCount: existingHandle.refCount,
+          });
+
+          await this.cleanupRepositoryHandle(repoUrl, existingHandle);
+        }
       }
 
       // Check if clone is already in progress
@@ -440,14 +454,20 @@ class RepositoryCoordinator {
         refCount: handle.refCount,
       });
 
-      // FIX: Only cleanup when refCount actually reaches zero
+      // When refCount reaches zero, keep the repository cached for maxAgeHours
+      // The periodic cleanup scheduler will handle removal if needed
       if (handle.refCount === 0) {
-        logger.info('Repository reference count reached zero, cleaning up', {
-          repoUrl,
-          localPath: handle.localPath,
-        });
+        logger.debug(
+          'Repository reference count reached zero, keeping in cache',
+          {
+            repoUrl,
+            localPath: handle.localPath,
+            maxAgeHours: config.repositoryCache?.maxAgeHours || 24,
+          }
+        );
 
-        await this.cleanupRepositoryHandle(repoUrl, handle);
+        // Repository stays in cache - periodic performCleanup() will handle it
+        // based on maxAgeHours and maxRepositories settings
       }
     });
   }
@@ -707,7 +727,10 @@ class RepositoryCoordinator {
     logger.info('Repository cleanup scheduler started', { cleanupIntervalMs });
   }
 
-  private async performCleanup(): Promise<void> {
+  /**
+   * Triggers cleanup immediately (exposed for testing)
+   */
+  async performCleanup(): Promise<void> {
     const maxRepositories = config.repositoryCache?.maxRepositories || 50;
     const maxAge = (config.repositoryCache?.maxAgeHours || 24) * 60 * 60 * 1000;
 
