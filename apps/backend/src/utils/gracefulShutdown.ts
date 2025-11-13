@@ -1,4 +1,4 @@
-import { Server } from 'http';
+import { Server } from 'node:http';
 import { getLogger } from '../services/logger';
 import redis from '../services/cache';
 import { runCleanupQueue } from './cleanupScheduler';

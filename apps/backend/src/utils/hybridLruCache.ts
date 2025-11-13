@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { randomBytes } from 'crypto';
+import { randomBytes } from 'node:crypto';
 import Redis, { RedisOptions } from 'ioredis';
 import { getLogger } from '../services/logger';
 import { withKeyLock } from './lockManager';
@@ -962,8 +962,8 @@ export class HybridLRUCache<V> {
     try {
       this.addToMemoryWithPressureCheck(key, value);
       return true;
-    } catch (syncErr) {
-      errors.push(originalErr, syncErr as Error);
+    } catch (error_) {
+      errors.push(originalErr, error_ as Error);
       return false;
     }
   }

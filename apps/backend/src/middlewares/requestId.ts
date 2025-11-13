@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { randomBytes } from 'crypto';
+import { randomBytes } from 'node:crypto';
 
 // Middleware that assigns a unique ID to every incoming request
 

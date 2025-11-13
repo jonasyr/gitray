@@ -1,7 +1,7 @@
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import { Request } from 'express';
-import { randomBytes } from 'crypto';
+import { randomBytes } from 'node:crypto';
 import path from 'path';
 import fs from 'fs';
 

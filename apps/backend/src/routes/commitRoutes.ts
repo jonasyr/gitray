@@ -192,8 +192,8 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     const logger = createRequestLogger(req);
     const { repoUrl, useStreaming } = req.query as Record<string, string>;
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 100;
+    const page = Number.parseInt(req.query.page as string) || 1;
+    const limit = Number.parseInt(req.query.limit as string) || 100;
     const forceStreaming = useStreaming === 'true';
     const skip = (page - 1) * limit;
 

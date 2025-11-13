@@ -2174,7 +2174,7 @@ export class RepositoryCacheManager {
   private parseFilterDate(dateString: string, filterType: string): Date | null {
     try {
       const date = new Date(dateString);
-      if (isNaN(date.getTime())) {
+      if (Number.isNaN(date.getTime())) {
         logger.warn(`Invalid ${filterType} filter, ignoring`, {
           [filterType]: dateString,
         });
