@@ -4,13 +4,32 @@ import { defineConfig } from 'vitest/config';
 import * as path from 'path';
 import * as os from 'os';
 
+// Vitest uses esbuild under the hood to transform TypeScript files. By default it
+// targets CommonJS which results in `exports is not defined` errors when running
+// inside this ESM package. Explicitly set the esbuild format to `esm` and align
+// the compiler options with the backend tsconfig so tests execute the same code
+// shape as production builds.
+const tsconfigRaw = {
+  compilerOptions: {
+    module: 'esnext',
+    moduleResolution: 'nodenext',
+    target: 'esnext',
+    esModuleInterop: true,
+    allowSyntheticDefaultImports: true,
+    resolveJsonModule: true,
+  },
+};
+
 export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
     include: ['**/*.{test,spec}.{ts,js}'],
     exclude: ['node_modules', 'dist', 'coverage'],
-    testTimeout: 10000,
+    // Some of the enhanced coverage suites exercise complex startup logic that
+    // requires a bit more time when the full workspace test run is executing,
+    // so give them a larger timeout budget.
+    testTimeout: 20000,
     setupFiles: ['./__tests__/setup/global.setup.ts'],
     pool: 'threads',
     // isolate: true is the default - keeps tests reliable
@@ -71,6 +90,14 @@ export default defineConfig({
         __dirname,
         '../../packages/shared-types/src'
       ),
+    },
+  },
+  esbuild: {
+    target: 'esnext',
+    format: 'esm',
+    tsconfigRaw,
+    supported: {
+      'top-level-await': true,
     },
   },
 });

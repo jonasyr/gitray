@@ -489,14 +489,13 @@ export async function startApplication() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   // Start the application with error handling
   logger.info('📋 About to call startApplication()...');
-  startApplication()
-    .then(() => {
-      logger.info('✅ Application started successfully!');
-    })
-    .catch((error) => {
-      logger.error('❌ Failed to start application:', { error });
-      process.exit(1);
-    });
+  try {
+    await startApplication();
+    logger.info('✅ Application started successfully!');
+  } catch (error) {
+    logger.error('❌ Failed to start application:', { error });
+    process.exit(1);
+  }
 }
 
 /**

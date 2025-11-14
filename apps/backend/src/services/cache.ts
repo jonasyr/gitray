@@ -119,7 +119,7 @@ async function initHybridCache(): Promise<void> {
 
 // Initialize both cache systems
 initRedis();
-void initHybridCache();
+await initHybridCache();
 
 /**
  * Attempts to retrieve value from HybridLRUCache
