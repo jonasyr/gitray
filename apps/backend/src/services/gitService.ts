@@ -84,6 +84,11 @@ interface BatchProcessingResult {
   batchTime: number;
 }
 
+interface CommitMetadata {
+  date: string;
+  author: string;
+}
+
 /**
  * ENHANCED GITSERVICE WITH STREAMING CAPABILITIES
  */
@@ -1097,66 +1102,126 @@ class GitService {
     >();
 
     const lines = output.split('\n');
-    let currentCommitDate: string | null = null;
-    let currentAuthor: string | null = null;
+    let currentCommit: CommitMetadata | null = null;
 
     for (const line of lines) {
       const trimmedLine = line.trim();
-      if (!trimmedLine) continue;
-
-      // Check if this is a commit header line
-      if (trimmedLine.includes('|')) {
-        const parts = trimmedLine.split('|');
-        if (parts.length >= 3) {
-          currentCommitDate = parts[1];
-          currentAuthor = parts[2];
-          continue;
-        }
+      if (!trimmedLine) {
+        continue;
       }
 
-      // This is a file path
-      if (currentCommitDate && currentAuthor && trimmedLine) {
-        const filePath = trimmedLine;
-
-        // Apply extension filter if specified
-        if (options?.extensions && options.extensions.length > 0) {
-          const fileExt = path.extname(filePath).substring(1); // Remove leading dot
-          if (!options.extensions.includes(fileExt)) {
-            continue;
-          }
-        }
-
-        // Initialize or update file churn data
-        if (!fileChurnMap.has(filePath)) {
-          fileChurnMap.set(filePath, {
-            changes: 0,
-            firstChange: currentCommitDate,
-            lastChange: currentCommitDate,
-            authors: new Set(),
-          });
-        }
-
-        const fileData = fileChurnMap.get(filePath)!;
-        fileData.changes += 1;
-        fileData.authors.add(currentAuthor);
-
-        // Update date range (git log is in reverse chronological order)
-        if (
-          !fileData.lastChange ||
-          new Date(currentCommitDate) > new Date(fileData.lastChange)
-        ) {
-          fileData.lastChange = currentCommitDate;
-        }
-        if (
-          !fileData.firstChange ||
-          new Date(currentCommitDate) < new Date(fileData.firstChange)
-        ) {
-          fileData.firstChange = currentCommitDate;
-        }
+      const metadata = this.extractCommitMetadata(trimmedLine);
+      if (metadata) {
+        currentCommit = metadata;
+        continue;
       }
+
+      if (!currentCommit) {
+        continue;
+      }
+
+      this.recordChurnForFile({
+        commit: currentCommit,
+        fileChurnMap,
+        filePath: trimmedLine,
+        options,
+      });
     }
 
     return fileChurnMap;
+  }
+
+  private extractCommitMetadata(line: string): CommitMetadata | null {
+    if (!line.includes('|')) {
+      return null;
+    }
+
+    const parts = line.split('|');
+    if (parts.length < 3) {
+      return null;
+    }
+
+    return {
+      date: parts[1],
+      author: parts[2],
+    };
+  }
+
+  private shouldIncludeFileForChurn(
+    filePath: string,
+    options?: ChurnFilterOptions
+  ): boolean {
+    if (!options?.extensions || options.extensions.length === 0) {
+      return true;
+    }
+
+    const fileExt = path.extname(filePath).substring(1);
+    return options.extensions.includes(fileExt);
+  }
+
+  private recordChurnForFile({
+    commit,
+    fileChurnMap,
+    filePath,
+    options,
+  }: {
+    commit: CommitMetadata;
+    fileChurnMap: Map<
+      string,
+      {
+        changes: number;
+        firstChange?: string;
+        lastChange?: string;
+        authors: Set<string>;
+      }
+    >;
+    filePath: string;
+    options?: ChurnFilterOptions;
+  }): void {
+    if (!this.shouldIncludeFileForChurn(filePath, options)) {
+      return;
+    }
+
+    if (!fileChurnMap.has(filePath)) {
+      fileChurnMap.set(filePath, {
+        changes: 0,
+        firstChange: commit.date,
+        lastChange: commit.date,
+        authors: new Set(),
+      });
+    }
+
+    const fileData = fileChurnMap.get(filePath)!;
+    fileData.changes += 1;
+    fileData.authors.add(commit.author);
+    fileData.lastChange = this.getMostRecentDate(
+      fileData.lastChange,
+      commit.date
+    );
+    fileData.firstChange = this.getOldestDate(
+      fileData.firstChange,
+      commit.date
+    );
+  }
+
+  private getMostRecentDate(
+    current: string | undefined,
+    candidate: string
+  ): string {
+    if (!current) {
+      return candidate;
+    }
+    return new Date(candidate) > new Date(current) ? candidate : current;
+  }
+
+  private getOldestDate(
+    current: string | undefined,
+    candidate: string
+  ): string {
+    if (!current) {
+      return candidate;
+    }
+    return new Date(candidate) < new Date(current) ? candidate : current;
   }
 
   /**
