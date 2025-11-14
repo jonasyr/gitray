@@ -646,21 +646,26 @@ function validateSystemCompatibility(result: ValidationResult): void {
 /**
  * Log validation results and handle errors
  */
+function logValidationMessages(
+  level: 'error' | 'warn',
+  header: string,
+  messages: string[]
+): void {
+  if (messages.length === 0) return;
+  const logger = level === 'error' ? console.error : console.warn;
+  logger(header);
+  for (const message of messages) {
+    logger(`  - ${message}`);
+  }
+}
+
 function handleValidationResults(result: ValidationResult): void {
+  logValidationMessages('error', 'Configuration errors found:', result.errors);
   if (result.errors.length > 0) {
-    console.error('Configuration errors found:');
-    for (const error of result.errors) {
-      console.error(`  - ${error}`);
-    }
     throw new Error('Invalid configuration detected');
   }
 
-  if (result.warnings.length > 0) {
-    console.warn('Configuration warnings:');
-    for (const warning of result.warnings) {
-      console.warn(`  - ${warning}`);
-    }
-  }
+  logValidationMessages('warn', 'Configuration warnings:', result.warnings);
 }
 
 /**

@@ -824,18 +824,19 @@ class GitService {
    */
   private buildCommitStatsArgs(options?: CommitFilterOptions): string[] {
     const args = ['log', '--pretty=format:%H|%cI|%an|%ae|%s', '--numstat'];
+    if (!options) return args;
 
-    if (options?.fromDate) args.push(`--since=${options.fromDate}`);
-    if (options?.toDate) args.push(`--until=${options.toDate}`);
-    if (options?.authors && options.authors.length > 0) {
-      for (const author of options.authors) {
-        args.push(`--author=${author}`);
-      }
-    } else if (options?.author) {
-      args.push(`--author=${options.author}`);
+    const { fromDate, toDate, authors, author, fileExtension } = options;
+    if (fromDate) args.push(`--since=${fromDate}`);
+    if (toDate) args.push(`--until=${toDate}`);
+
+    const authorFilters = authors?.length ? authors : author ? [author] : [];
+    for (const authorFilter of authorFilters) {
+      args.push(`--author=${authorFilter}`);
     }
-    if (options?.fileExtension) {
-      args.push('--', `**/*.${options.fileExtension}`);
+
+    if (fileExtension) {
+      args.push('--', `**/*.${fileExtension}`);
     }
 
     return args;
