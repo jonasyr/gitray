@@ -36,6 +36,8 @@ import {
   ERROR_MESSAGES,
   HTTP_STATUS,
   FileAnalysisFilterOptions,
+  FileTypeDistribution,
+  PerformanceMetrics,
 } from '@gitray/shared-types';
 import { config } from '../config';
 import { fileAnalysisService } from '../services/fileAnalysisService';
@@ -1074,6 +1076,179 @@ function recordFileAnalysisMetrics(
   }
 }
 
+type RequestLogger = ReturnType<typeof createRequestLogger>;
+
+interface AnalysisExecutionResult {
+  analysisResult: FileTypeDistribution;
+  performanceMetrics: PerformanceMetrics;
+  usingOptimizedMethods: boolean;
+}
+
+async function attemptOptimizedFileAnalysis(
+  repoUrl: string,
+  filterOptions: FileAnalysisFilterOptions,
+  logger: RequestLogger
+): Promise<AnalysisExecutionResult> {
+  logger.info('Attempting optimized file analysis', { repoUrl });
+  const optimizedResult = await fileAnalysisService.analyzeRepositoryOptimized(
+    repoUrl,
+    filterOptions
+  );
+
+  logger.info('Optimized file analysis succeeded', {
+    repoUrl,
+    method: optimizedResult.performanceMetrics.analysisMethod,
+    bandwidthSaved: optimizedResult.performanceMetrics.bandwidthSaved,
+    performanceGain: optimizedResult.performanceMetrics.performanceGain,
+    cacheHit: optimizedResult.performanceMetrics.fileTreeCached,
+  });
+
+  return {
+    analysisResult: optimizedResult.result,
+    performanceMetrics: optimizedResult.performanceMetrics,
+    usingOptimizedMethods: true,
+  };
+}
+
+async function performFallbackFileAnalysis(
+  repoUrl: string,
+  filterOptions: FileAnalysisFilterOptions,
+  startTime: number,
+  logger: RequestLogger,
+  optimizedError: unknown
+): Promise<AnalysisExecutionResult> {
+  const analysisResult = await withTempRepositoryStreaming(
+    repoUrl,
+    async (tempDir) => {
+      return await fileAnalysisService.analyzeRepository(
+        tempDir,
+        filterOptions
+      );
+    },
+    { operationType: 'file-analysis' }
+  );
+
+  const performanceMetrics: PerformanceMetrics = {
+    analysisMethod: 'full-clone',
+    dataSource: 'filesystem-walk',
+    bandwidthUsed: 0,
+    processingTime: Date.now() - startTime,
+    cacheHitRate: 0,
+    performanceGain: 1,
+    bandwidthSaved: 0,
+    fileTreeCached: false,
+    selectionReason: 'fallback due to optimization failure',
+  };
+
+  logger.info('Fallback file analysis succeeded', {
+    repoUrl,
+    method: 'full-clone',
+    optimizedErrorType:
+      optimizedError instanceof Error
+        ? optimizedError.constructor.name
+        : 'Unknown',
+  });
+
+  return {
+    analysisResult,
+    performanceMetrics,
+    usingOptimizedMethods: false,
+  };
+}
+
+function handleFileAnalysisCascadeFailure(
+  repoUrl: string,
+  optimizedError: unknown,
+  fallbackError: unknown,
+  startTime: number,
+  logger: RequestLogger
+): never {
+  logger.error('Both optimized and fallback file analysis failed', {
+    repoUrl,
+    optimizedError:
+      optimizedError instanceof Error
+        ? optimizedError.message
+        : String(optimizedError),
+    fallbackError:
+      fallbackError instanceof Error
+        ? fallbackError.message
+        : String(fallbackError),
+    totalTime: Date.now() - startTime,
+  });
+
+  recordDetailedError(
+    'file-analysis-cascade-failure',
+    new Error(
+      `All file analysis methods failed. Optimized: ${
+        optimizedError instanceof Error
+          ? optimizedError.message
+          : String(optimizedError)
+      }. Fallback: ${
+        fallbackError instanceof Error
+          ? fallbackError.message
+          : String(fallbackError)
+      }`
+    ),
+    {
+      userImpact: 'blocking',
+      recoveryAction: 'retry',
+      severity: 'critical',
+    }
+  );
+
+  logger.error('File analysis cascade failure - all methods exhausted', {
+    repoUrl,
+    totalAttempts: 2,
+    failureTypes: ['optimized', 'fallback'],
+    requiresManualIntervention: true,
+  });
+
+  throw fallbackError instanceof Error
+    ? fallbackError
+    : new Error(String(fallbackError));
+}
+
+async function executeFileAnalysis(
+  repoUrl: string,
+  filterOptions: FileAnalysisFilterOptions,
+  startTime: number,
+  logger: RequestLogger
+): Promise<AnalysisExecutionResult> {
+  try {
+    return await attemptOptimizedFileAnalysis(repoUrl, filterOptions, logger);
+  } catch (optimizedError) {
+    logger.warn(
+      'Optimized analysis failed, falling back to traditional method',
+      {
+        repoUrl,
+        optimizedError:
+          optimizedError instanceof Error
+            ? optimizedError.message
+            : String(optimizedError),
+        fallbackMethod: 'withTempRepositoryStreaming',
+      }
+    );
+
+    try {
+      return await performFallbackFileAnalysis(
+        repoUrl,
+        filterOptions,
+        startTime,
+        logger,
+        optimizedError
+      );
+    } catch (fallbackError) {
+      handleFileAnalysisCascadeFailure(
+        repoUrl,
+        optimizedError,
+        fallbackError,
+        startTime,
+        logger
+      );
+    }
+  }
+}
+
 router.get(
   '/file-analysis',
   [...fileAnalysisValidation()],
@@ -1095,128 +1270,8 @@ router.get(
         coordinationEnabled: config.repositoryCache?.enabled,
       });
 
-      // Perform analysis using optimized methods with fallback to coordinated repository access
-      let analysisResult;
-      let performanceMetrics;
-      let usingOptimizedMethods = false;
-
-      try {
-        // First, try the optimized analysis methods (ls-tree-remote, shallow-clone, caching)
-        logger.info('Attempting optimized file analysis', { repoUrl });
-        const optimizedResult =
-          await fileAnalysisService.analyzeRepositoryOptimized(
-            repoUrl,
-            filterOptions
-          );
-        analysisResult = optimizedResult.result;
-        performanceMetrics = optimizedResult.performanceMetrics;
-        usingOptimizedMethods = true;
-
-        logger.info('Optimized file analysis succeeded', {
-          repoUrl,
-          method: performanceMetrics.analysisMethod,
-          bandwidthSaved: performanceMetrics.bandwidthSaved,
-          performanceGain: performanceMetrics.performanceGain,
-          cacheHit: performanceMetrics.fileTreeCached,
-        });
-      } catch (optimizedError) {
-        // Fallback to traditional coordinated repository access with improved error handling
-        logger.warn(
-          'Optimized analysis failed, falling back to traditional method',
-          {
-            repoUrl,
-            optimizedError:
-              optimizedError instanceof Error
-                ? optimizedError.message
-                : String(optimizedError),
-            fallbackMethod: 'withTempRepositoryStreaming',
-          }
-        );
-
-        try {
-          analysisResult = await withTempRepositoryStreaming(
-            repoUrl,
-            async (tempDir) => {
-              return await fileAnalysisService.analyzeRepository(
-                tempDir,
-                filterOptions
-              );
-            },
-            { operationType: 'file-analysis' }
-          );
-
-          // Create fallback performance metrics
-          performanceMetrics = {
-            analysisMethod: 'full-clone' as const,
-            dataSource: 'filesystem-walk' as const,
-            bandwidthUsed: 0, // Not tracked for fallback
-            processingTime: Date.now() - startTime,
-            cacheHitRate: 0,
-            performanceGain: 1, // Baseline
-            bandwidthSaved: 0,
-            fileTreeCached: false,
-            selectionReason: 'fallback due to optimization failure',
-          };
-
-          logger.info('Fallback file analysis succeeded', {
-            repoUrl,
-            method: 'full-clone',
-            optimizedErrorType:
-              optimizedError instanceof Error
-                ? optimizedError.constructor.name
-                : 'Unknown',
-          });
-        } catch (fallbackError) {
-          // Both optimized and fallback failed - this is a critical error
-          logger.error('Both optimized and fallback file analysis failed', {
-            repoUrl,
-            optimizedError:
-              optimizedError instanceof Error
-                ? optimizedError.message
-                : String(optimizedError),
-            fallbackError:
-              fallbackError instanceof Error
-                ? fallbackError.message
-                : String(fallbackError),
-            totalTime: Date.now() - startTime,
-          });
-
-          // Record cascade failure for monitoring
-          recordDetailedError(
-            'file-analysis-cascade-failure',
-            new Error(
-              `All file analysis methods failed. Optimized: ${
-                optimizedError instanceof Error
-                  ? optimizedError.message
-                  : String(optimizedError)
-              }. Fallback: ${
-                fallbackError instanceof Error
-                  ? fallbackError.message
-                  : String(fallbackError)
-              }`
-            ),
-            {
-              userImpact: 'blocking',
-              recoveryAction: 'retry',
-              severity: 'critical',
-            }
-          );
-
-          // Log the cascade failure for monitoring
-          logger.error(
-            'File analysis cascade failure - all methods exhausted',
-            {
-              repoUrl,
-              totalAttempts: 2,
-              failureTypes: ['optimized', 'fallback'],
-              requiresManualIntervention: true,
-            }
-          );
-
-          // Re-throw the fallback error (more likely to be informative)
-          throw fallbackError;
-        }
-      }
+      const { analysisResult, performanceMetrics, usingOptimizedMethods } =
+        await executeFileAnalysis(repoUrl, filterOptions, startTime, logger);
 
       // Build enhanced result with performance metrics
       const enhancedResult = {

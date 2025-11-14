@@ -578,84 +578,107 @@ class FileAnalysisService {
     oldCommitHash?: string
   ): Promise<void> {
     const startTime = Date.now();
+    const shortCommitHash = oldCommitHash?.substring(0, 8);
 
     try {
       logger.debug('Invalidating file tree cache', {
         repoUrl,
-        oldCommitHash: oldCommitHash?.substring(0, 8),
+        oldCommitHash: shortCommitHash,
       });
 
-      // If we have the old commit hash, invalidate that specific entry
       if (oldCommitHash) {
-        const oldCacheKey = this.generateFileTreeCacheKey(
+        await this.invalidateSpecificCacheEntry(
           repoUrl,
-          oldCommitHash
+          oldCommitHash,
+          shortCommitHash
         );
-
-        try {
-          await this.fileTreeCache.del(oldCacheKey);
-          logger.debug('Specific file tree cache entry invalidated', {
-            repoUrl,
-            oldCommitHash: oldCommitHash.substring(0, 8),
-            cacheKey: oldCacheKey,
-          });
-        } catch (error) {
-          logger.warn('Failed to invalidate specific file tree cache entry', {
-            repoUrl,
-            oldCommitHash: oldCommitHash.substring(0, 8),
-            cacheKey: oldCacheKey,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
       } else {
-        // Full invalidation: Remove all entries for this repository
-        const repoHash = this.hashUrl(repoUrl);
-        const pattern = `file_tree:${repoHash}:*`;
-
-        try {
-          await this.invalidateByPattern(pattern);
-          logger.info('Full file tree cache invalidation completed', {
-            repoUrl,
-            pattern,
-            reason: 'No specific commit hash provided',
-          });
-        } catch (error) {
-          logger.warn('Failed to perform full cache invalidation', {
-            repoUrl,
-            pattern,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
+        await this.invalidateFullRepositoryCache(repoUrl);
       }
 
       const invalidationTime = Date.now() - startTime;
 
       logger.info('File tree cache invalidation completed', {
         repoUrl,
-        oldCommitHash: oldCommitHash?.substring(0, 8),
+        oldCommitHash: shortCommitHash,
         invalidationTime,
       });
     } catch (error) {
-      const invalidationTime = Date.now() - startTime;
-
-      logger.error('File tree cache invalidation failed', {
+      this.handleCacheInvalidationFailure(
         repoUrl,
-        oldCommitHash: oldCommitHash?.substring(0, 8),
-        error: error instanceof Error ? error.message : String(error),
-        invalidationTime,
-      });
-
-      // Record invalidation failure but don't throw - it's not critical
-      recordDetailedError(
-        'file-tree-cache-invalidation-error',
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          userImpact: 'degraded', // Stale cache entries might persist
-          recoveryAction: 'retry',
-          severity: 'warning',
-        }
+        shortCommitHash,
+        error,
+        Date.now() - startTime
       );
     }
+  }
+
+  private async invalidateSpecificCacheEntry(
+    repoUrl: string,
+    oldCommitHash: string,
+    shortCommitHash?: string
+  ): Promise<void> {
+    const oldCacheKey = this.generateFileTreeCacheKey(repoUrl, oldCommitHash);
+
+    try {
+      await this.fileTreeCache.del(oldCacheKey);
+      logger.debug('Specific file tree cache entry invalidated', {
+        repoUrl,
+        oldCommitHash: shortCommitHash,
+        cacheKey: oldCacheKey,
+      });
+    } catch (error) {
+      logger.warn('Failed to invalidate specific file tree cache entry', {
+        repoUrl,
+        oldCommitHash: shortCommitHash,
+        cacheKey: oldCacheKey,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async invalidateFullRepositoryCache(repoUrl: string): Promise<void> {
+    const repoHash = this.hashUrl(repoUrl);
+    const pattern = `file_tree:${repoHash}:*`;
+
+    try {
+      await this.invalidateByPattern(pattern);
+      logger.info('Full file tree cache invalidation completed', {
+        repoUrl,
+        pattern,
+        reason: 'No specific commit hash provided',
+      });
+    } catch (error) {
+      logger.warn('Failed to perform full cache invalidation', {
+        repoUrl,
+        pattern,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private handleCacheInvalidationFailure(
+    repoUrl: string,
+    shortCommitHash: string | undefined,
+    error: unknown,
+    invalidationTime: number
+  ): void {
+    logger.error('File tree cache invalidation failed', {
+      repoUrl,
+      oldCommitHash: shortCommitHash,
+      error: error instanceof Error ? error.message : String(error),
+      invalidationTime,
+    });
+
+    recordDetailedError(
+      'file-tree-cache-invalidation-error',
+      error instanceof Error ? error : new Error(String(error)),
+      {
+        userImpact: 'degraded',
+        recoveryAction: 'retry',
+        severity: 'warning',
+      }
+    );
   }
 
   /**
