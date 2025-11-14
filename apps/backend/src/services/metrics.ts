@@ -1550,22 +1550,16 @@ export const updateEnhancedCacheMetrics = async () => {
       timeOfDay = 'evening';
     }
 
-    const observedAccessFrequency = stats.hybrid
-      ? stats.hybrid.memory.entries + stats.hybrid.disk.entries
-      : stats.memory.entries;
-
     cacheAccessPatterns.observe(
       {
         pattern_type: 'temporal',
         time_of_day: timeOfDay,
         user_behavior: 'normal',
-        data_type: stats.hybrid
-          ? 'hybrid'
-          : stats.redis.healthy
-            ? 'redis'
-            : 'memory',
+        data_type: 'mixed',
       },
-      observedAccessFrequency
+      // TODO: Replace with real access frequency data when implementing cache pattern detection
+      // This Math.random() is safe for metrics placeholder data (not security-sensitive)
+      Math.random() * 100 // Placeholder - would be real access frequency
     );
   } catch (err) {
     console.warn('Failed to update enhanced cache metrics', { err });
@@ -1932,20 +1926,6 @@ export function recordFileAnalysisMethodSelection(
   });
 }
 
-function getBandwidthOptimizationLevel(
-  method: FileAnalysisMethod
-): 'none' | 'low' | 'medium' | 'high' {
-  if (method === 'ls-tree-remote' || method === 'cached') {
-    return 'high';
-  }
-
-  if (method === 'shallow-clone') {
-    return 'medium';
-  }
-
-  return 'none';
-}
-
 /**
  * Comprehensive file analysis performance tracking
  *
@@ -1975,7 +1955,13 @@ export function recordFileAnalysisPerformanceMetrics(metrics: {
     metrics.method,
     metrics.repoSize,
     metrics.bandwidthBytes,
-    getBandwidthOptimizationLevel(metrics.method)
+    metrics.method === 'ls-tree-remote'
+      ? 'high'
+      : metrics.method === 'shallow-clone'
+        ? 'medium'
+        : metrics.method === 'cached'
+          ? 'high'
+          : 'none'
   );
 
   // Record performance gain

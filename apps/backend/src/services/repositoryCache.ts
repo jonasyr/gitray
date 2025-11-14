@@ -1758,7 +1758,7 @@ export class RepositoryCacheManager {
         this.generateFilteredCommitsKey(repoUrl, { skip: 0, limit: 100 }),
         // Common aggregated cache patterns
         this.generateAggregatedDataKey(repoUrl, {}),
-        this.generateAggregatedDataKey(repoUrl),
+        this.generateAggregatedDataKey(repoUrl, undefined),
       ];
 
       for (const key of baseKeys) {
@@ -2519,11 +2519,9 @@ export class RepositoryCacheManager {
 export const repositoryCache = new RepositoryCacheManager();
 
 // Initialize the repository cache asynchronously
-try {
-  await repositoryCache.initialize();
-} catch (err) {
+void repositoryCache.initialize().catch((err) => {
   logger.error('Failed to initialize repository cache', { err });
-}
+});
 
 /**
  * High-level helper functions for easy cache integration.
