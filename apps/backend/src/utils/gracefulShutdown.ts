@@ -76,7 +76,9 @@ export function setupGracefulShutdown(
       if (cleanupCallbacks.length > 0) {
         logger.info('Running additional cleanup callbacks...');
         try {
-          cleanupCallbacks.forEach((callback) => callback());
+          for (const callback of cleanupCallbacks) {
+            callback();
+          }
           logger.info('Additional cleanup callbacks completed');
         } catch (error_) {
           logger.error('Additional cleanup failed', { err: error_ });

@@ -7,6 +7,19 @@ import {
 } from 'prom-client';
 import { Request, Response, NextFunction } from 'express';
 
+type UserType = 'api' | 'ui' | 'admin' | 'unknown';
+type RepositoryVisibility = 'public' | 'private' | 'unknown';
+type KnownRepositoryVisibility = Exclude<RepositoryVisibility, 'unknown'>;
+type TeamSizeCategory = 'small' | 'medium' | 'large';
+type CacheTierLevel = 'memory' | 'disk' | 'redis' | 'hybrid';
+type ExtendedRepositorySizeCategory = 'small' | 'medium' | 'large' | 'huge';
+type RepositorySizeBucket = 'small' | 'medium' | 'large' | 'xl';
+type FileAnalysisMethod =
+  | 'ls-tree-remote'
+  | 'shallow-clone'
+  | 'full-clone'
+  | 'cached';
+
 // Initialize default Prometheus metrics
 collectDefaultMetrics({ register });
 
@@ -17,7 +30,7 @@ collectDefaultMetrics({ register });
 /**
  * Helper to categorize user types from request headers
  */
-export function getUserType(req: Request): 'api' | 'ui' | 'admin' | 'unknown' {
+export function getUserType(req: Request): UserType {
   if (!req?.headers) return 'unknown';
 
   const userAgent = req.headers['user-agent']?.toLowerCase() ?? '';
@@ -35,9 +48,7 @@ export function getUserType(req: Request): 'api' | 'ui' | 'admin' | 'unknown' {
 /**
  * Helper to determine repository type
  */
-export function getRepositoryType(
-  repoUrl: string
-): 'public' | 'private' | 'unknown' {
+export function getRepositoryType(repoUrl: string): RepositoryVisibility {
   if (repoUrl.includes('github.com') || repoUrl.includes('gitlab.com'))
     return 'public';
   if (repoUrl.includes('localhost') || repoUrl.includes('127.0.0.1'))
@@ -51,7 +62,7 @@ export function getRepositoryType(
 export function getTeamSizeCategory(
   commitCount: number,
   days: number = 30
-): 'small' | 'medium' | 'large' {
+): TeamSizeCategory {
   const commitsPerDay = commitCount / days;
   if (commitsPerDay < 2) return 'small';
   if (commitsPerDay < 10) return 'medium';
@@ -61,7 +72,7 @@ export function getTeamSizeCategory(
 /**
  * Helper to determine cache tier
  */
-export function getCacheTier(): 'memory' | 'disk' | 'redis' | 'hybrid' {
+export function getCacheTier(): CacheTierLevel {
   // This would be enhanced based on actual cache implementation details
   return 'hybrid'; // Default for now
 }
@@ -482,11 +493,13 @@ export const transactionRollbacks = new Counter({
 });
 
 type RollbackOutcome = 'success' | 'failed' | 'verified' | 'retry';
+type CacheTierName = 'raw' | 'filtered' | 'aggregated';
+type CacheOperationType = 'set' | 'delete' | 'update';
 
 export function recordTransactionRollback(
   outcome: RollbackOutcome,
-  cacheTier: 'raw' | 'filtered' | 'aggregated',
-  operationType: 'set' | 'delete' | 'update',
+  cacheTier: CacheTierName,
+  operationType: CacheOperationType,
   retryCount: number = 0
 ): void {
   let retryRange: string;
@@ -1004,7 +1017,7 @@ export function recordDetailedError(
   context: {
     userImpact?: 'blocking' | 'degraded' | 'none';
     recoveryAction?: 'retry' | 'fallback' | 'manual';
-    repoType?: 'public' | 'private';
+    repoType?: KnownRepositoryVisibility;
     severity?: 'critical' | 'warning' | 'info';
   } = {}
 ): void {
@@ -1168,7 +1181,7 @@ export function recordDataFreshness(
  */
 export function getRepositorySizeCategory(
   commitCount: number
-): 'small' | 'medium' | 'large' | 'huge' {
+): ExtendedRepositorySizeCategory {
   if (commitCount < 1000) return 'small';
   if (commitCount < 10000) return 'medium';
   if (commitCount < 100000) return 'large';
@@ -1766,12 +1779,9 @@ export const updateAllEnhancedMetrics = async () => {
 // FILE ANALYSIS PERFORMANCE RECORDING FUNCTIONS - Phase 2.5 Integration
 // ========================================================================
 
-/**
- * Record file analysis method usage and effectiveness
- */
 export function recordFileAnalysisMethodUsage(
-  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
-  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  method: FileAnalysisMethod,
+  repoSize: RepositorySizeBucket,
   success: boolean
 ): void {
   fileAnalysisMethodUsage.inc({
@@ -1785,8 +1795,8 @@ export function recordFileAnalysisMethodUsage(
  * Record bandwidth usage for file analysis
  */
 export function recordFileAnalysisBandwidth(
-  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
-  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  method: FileAnalysisMethod,
+  repoSize: RepositorySizeBucket,
   bandwidthBytes: number,
   optimizationLevel: 'none' | 'low' | 'medium' | 'high' = 'medium'
 ): void {
@@ -1804,8 +1814,8 @@ export function recordFileAnalysisBandwidth(
  * Record performance gain achieved
  */
 export function recordFileAnalysisPerformanceGain(
-  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
-  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  method: FileAnalysisMethod,
+  repoSize: RepositorySizeBucket,
   performanceGainRatio: number,
   cacheHit: boolean
 ): void {
@@ -1824,7 +1834,7 @@ export function recordFileAnalysisPerformanceGain(
  */
 export function recordFileAnalysisCacheHitRate(
   cacheType: 'file-tree' | 'analysis-result',
-  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  repoSize: RepositorySizeBucket,
   hitRate: number,
   commitAgeHours: number
 ): void {
@@ -1851,8 +1861,8 @@ export function recordFileAnalysisCacheHitRate(
  * Record processing time for file analysis
  */
 export function recordFileAnalysisProcessingTime(
-  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
-  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  method: FileAnalysisMethod,
+  repoSize: RepositorySizeBucket,
   processingTimeSeconds: number,
   fileCount: number
 ): void {
@@ -1882,7 +1892,7 @@ export function recordFileAnalysisProcessingTime(
  */
 export function recordFileTreeCacheOperation(
   operation: 'hit' | 'miss' | 'store' | 'invalidate',
-  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  repoSize: RepositorySizeBucket,
   commitHashAgeHours: number
 ): void {
   let commitHashAgeCategory: string;
@@ -1905,7 +1915,7 @@ export function recordFileTreeCacheOperation(
  * Record file analysis method selection reasoning
  */
 export function recordFileAnalysisMethodSelection(
-  selectedMethod: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
+  selectedMethod: FileAnalysisMethod,
   reason: 'optimal' | 'fallback' | 'forced' | 'cache-hit',
   repoCharacteristics: 'supports-ls-tree' | 'requires-shallow' | 'large-size'
 ): void {
@@ -1922,8 +1932,8 @@ export function recordFileAnalysisMethodSelection(
  * This function combines multiple metrics for a complete performance picture
  */
 export function recordFileAnalysisPerformanceMetrics(metrics: {
-  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached';
-  repoSize: 'small' | 'medium' | 'large' | 'xl';
+  method: FileAnalysisMethod;
+  repoSize: RepositorySizeBucket;
   success: boolean;
   bandwidthBytes: number;
   performanceGainRatio: number;

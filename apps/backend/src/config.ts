@@ -649,13 +649,17 @@ function validateSystemCompatibility(result: ValidationResult): void {
 function handleValidationResults(result: ValidationResult): void {
   if (result.errors.length > 0) {
     console.error('Configuration errors found:');
-    result.errors.forEach((error) => console.error(`  - ${error}`));
+    for (const error of result.errors) {
+      console.error(`  - ${error}`);
+    }
     throw new Error('Invalid configuration detected');
   }
 
   if (result.warnings.length > 0) {
     console.warn('Configuration warnings:');
-    result.warnings.forEach((warning) => console.warn(`  - ${warning}`));
+    for (const warning of result.warnings) {
+      console.warn(`  - ${warning}`);
+    }
   }
 }
 

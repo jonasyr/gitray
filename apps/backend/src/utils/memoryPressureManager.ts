@@ -449,7 +449,8 @@ class MemoryPressureManager {
     priority?: 'low' | 'normal' | 'high';
     userAgent?: string;
   }): { shouldThrottle: boolean; reason?: string; retryAfter?: number } {
-    if (!this.config.enableRequestThrottling) {
+    const throttlingEnabled = this.config.enableRequestThrottling ?? false;
+    if (throttlingEnabled === false) {
       return { shouldThrottle: false };
     }
 
@@ -556,20 +557,21 @@ class MemoryPressureManager {
 
     this.monitoringInterval = setInterval(() => {
       // Prevent overlapping memory checks if previous check is still running
-      if (!this.isCheckingMemory) {
-        this.isCheckingMemory = true;
-
-        try {
-          this.checkMemoryPressure();
-        } catch (error) {
-          logger.error('Memory pressure check failed', { error });
-        } finally {
-          this.isCheckingMemory = false;
-        }
-      } else {
+      if (this.isCheckingMemory) {
         logger.debug(
           'Skipping memory check - previous check still in progress'
         );
+        return;
+      }
+
+      this.isCheckingMemory = true;
+
+      try {
+        this.checkMemoryPressure();
+      } catch (error) {
+        logger.error('Memory pressure check failed', { error });
+      } finally {
+        this.isCheckingMemory = false;
       }
     }, this.config.checkIntervalMs);
 

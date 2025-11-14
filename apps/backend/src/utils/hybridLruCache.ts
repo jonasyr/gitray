@@ -242,9 +242,9 @@ export class HybridLRUCache<V> {
           const entriesToSort = [...validEntries];
           entriesToSort.sort((a, b) => a.mtime - b.mtime);
           const sortedEntries = entriesToSort;
-          sortedEntries.forEach(({ key, filePath }) => {
+          for (const { key, filePath } of sortedEntries) {
             this.disk.set(key, filePath);
-          });
+          }
 
           logger.debug('Disk index loaded successfully', {
             totalFiles: files.length,

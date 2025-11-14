@@ -2563,13 +2563,13 @@ class FileAnalysisService {
     const dirMap: Record<string, FileInfo[]> = {};
 
     // Group files by directory
-    files.forEach((file) => {
+    for (const file of files) {
       const dir = path.dirname(file.path);
       if (!dirMap[dir]) {
         dirMap[dir] = [];
       }
       dirMap[dir].push(file);
-    });
+    }
 
     // Build directory tree
     const directories: DirectoryDistribution[] = [];
@@ -2584,9 +2584,9 @@ class FileAnalysisService {
         other: [],
       };
 
-      dirFiles.forEach((file) => {
+      for (const file of dirFiles) {
         categoryGroups[file.category].push(file);
-      });
+      }
 
       const categories: Record<FileCategory, FileTypeStats> = {
         code: { count: 0, percentage: 0, size: 0, averageSize: 0 },
@@ -2605,12 +2605,12 @@ class FileAnalysisService {
 
       // Calculate extension statistics
       const extensionGroups: Record<string, FileInfo[]> = {};
-      dirFiles.forEach((file) => {
+      for (const file of dirFiles) {
         if (!extensionGroups[file.extension]) {
           extensionGroups[file.extension] = [];
         }
         extensionGroups[file.extension].push(file);
-      });
+      }
 
       const extensions: Record<string, FileTypeStats> = {};
       for (const [ext, extFiles] of Object.entries(extensionGroups)) {
@@ -2761,9 +2761,9 @@ class FileAnalysisService {
       other: [],
     };
 
-    fileInfos.forEach((file) => {
+    for (const file of fileInfos) {
       categoryGroups[file.category].push(file);
-    });
+    }
 
     const categories: Record<FileCategory, FileTypeStats> = {
       code: { count: 0, percentage: 0, size: 0, averageSize: 0 },
@@ -2791,12 +2791,12 @@ class FileAnalysisService {
     totalFiles: number
   ): Record<string, FileTypeStats> {
     const extensionGroups: Record<string, FileInfo[]> = {};
-    fileInfos.forEach((file) => {
+    for (const file of fileInfos) {
       if (!extensionGroups[file.extension]) {
         extensionGroups[file.extension] = [];
       }
       extensionGroups[file.extension].push(file);
-    });
+    }
 
     const extensions: Record<string, FileTypeStats> = {};
     for (const [ext, extFiles] of Object.entries(extensionGroups)) {

@@ -823,7 +823,9 @@ class GitService {
     if (options?.fromDate) args.push(`--since=${options.fromDate}`);
     if (options?.toDate) args.push(`--until=${options.toDate}`);
     if (options?.authors && options.authors.length > 0) {
-      options.authors.forEach((author) => args.push(`--author=${author}`));
+      for (const author of options.authors) {
+        args.push(`--author=${author}`);
+      }
     } else if (options?.author) {
       args.push(`--author=${options.author}`);
     }
@@ -1435,13 +1437,15 @@ class GitService {
     endDate: Date
   ): Map<string, CommitAggregation> {
     const buckets = new Map<string, CommitAggregation>();
-    eachDayOfInterval({
+    const interval = eachDayOfInterval({
       start: startOfDay(startDate),
       end: startOfDay(endDate),
-    }).forEach((d) => {
-      const key = format(d, 'yyyy-MM-dd');
-      buckets.set(key, { periodStart: key, commitCount: 0, authors: [] });
     });
+
+    for (const day of interval) {
+      const key = format(day, 'yyyy-MM-dd');
+      buckets.set(key, { periodStart: key, commitCount: 0, authors: [] });
+    }
     return buckets;
   }
 
@@ -1450,18 +1454,20 @@ class GitService {
     buckets: Map<string, CommitAggregation>
   ): number {
     let max = 0;
-    commits.forEach((c) => {
-      const key = format(parseISO(c.date), 'yyyy-MM-dd');
+    for (const commit of commits) {
+      const key = format(parseISO(commit.date), 'yyyy-MM-dd');
       const bucket = buckets.get(key);
-      if (!bucket) return;
+      if (!bucket) {
+        continue;
+      }
       bucket.commitCount += 1;
-      if (!bucket.authors!.includes(c.authorName)) {
-        bucket.authors!.push(c.authorName);
+      if (!bucket.authors!.includes(commit.authorName)) {
+        bucket.authors!.push(commit.authorName);
       }
       if (bucket.commitCount > max) {
         max = bucket.commitCount;
       }
-    });
+    }
     return max;
   }
 

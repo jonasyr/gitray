@@ -119,12 +119,13 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
   // Count commits per author in that range
   const authorCommitCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    commits.forEach((c) => {
-      const d = new Date(c.date);
-      if (d >= startDate && d <= endDate) {
-        counts.set(c.authorName, (counts.get(c.authorName) ?? 0) + 1);
+    for (const commit of commits) {
+      const commitDate = new Date(commit.date);
+      if (commitDate >= startDate && commitDate <= endDate) {
+        const previousCount = counts.get(commit.authorName) ?? 0;
+        counts.set(commit.authorName, previousCount + 1);
       }
-    });
+    }
     return counts;
   }, [commits, startDate, endDate]);
 

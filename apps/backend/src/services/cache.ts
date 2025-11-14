@@ -357,7 +357,9 @@ async function tryRedisEmergencyEvict(): Promise<EvictionResult> {
     result.evictedEntries = deletedCount;
 
     // Also clear corresponding memory cache entries
-    keysForEviction.forEach((key) => memoryCache.delete(key));
+    for (const key of keysForEviction) {
+      memoryCache.delete(key);
+    }
 
     logger.info('Redis emergency eviction completed', {
       totalKeys,
@@ -401,7 +403,9 @@ function tryMemoryEmergencyEvict(): EvictionResult {
   const keysToEvict = Math.ceil(beforeSize * 0.5); // Evict 50% of memory cache
   const memoryKeys = Array.from(memoryCache.keys()).slice(0, keysToEvict);
 
-  memoryKeys.forEach((key) => memoryCache.delete(key));
+  for (const key of memoryKeys) {
+    memoryCache.delete(key);
+  }
   result.evictedEntries = memoryKeys.length;
   result.success = true;
 
