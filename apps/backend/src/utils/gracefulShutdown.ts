@@ -1,4 +1,4 @@
-import { Server } from 'http';
+import { Server } from 'node:http';
 import { getLogger } from '../services/logger';
 import redis from '../services/cache';
 import { runCleanupQueue } from './cleanupScheduler';
@@ -58,8 +58,8 @@ export function setupGracefulShutdown(
       try {
         await shutdownLockManager();
         logger.info('Lock manager shutdown completed');
-      } catch (lockErr) {
-        logger.error('Lock manager shutdown failed', { err: lockErr });
+      } catch (error_) {
+        logger.error('Lock manager shutdown failed', { err: error_ });
         // Continue with other shutdowns
       }
 
@@ -67,8 +67,8 @@ export function setupGracefulShutdown(
       try {
         await redis.quit();
         logger.info('Cache connections closed');
-      } catch (cacheErr) {
-        logger.error('Cache shutdown failed', { err: cacheErr });
+      } catch (error_) {
+        logger.error('Cache shutdown failed', { err: error_ });
         // Continue with other shutdowns
       }
 
@@ -76,10 +76,12 @@ export function setupGracefulShutdown(
       if (cleanupCallbacks.length > 0) {
         logger.info('Running additional cleanup callbacks...');
         try {
-          cleanupCallbacks.forEach((callback) => callback());
+          for (const callback of cleanupCallbacks) {
+            callback();
+          }
           logger.info('Additional cleanup callbacks completed');
-        } catch (cleanupErr) {
-          logger.error('Additional cleanup failed', { err: cleanupErr });
+        } catch (error_) {
+          logger.error('Additional cleanup failed', { err: error_ });
         }
       }
 
@@ -95,8 +97,8 @@ export function setupGracefulShutdown(
           cache: getCacheStats(),
           locks: getLockMetrics(),
         });
-      } catch (statsErr) {
-        logger.debug('Could not get final statistics', { err: statsErr });
+      } catch (error_) {
+        logger.debug('Could not get final statistics', { err: error_ });
       }
 
       process.exit(0);

@@ -19,10 +19,10 @@
  * - Comprehensive metrics and health monitoring
  */
 
-import { promises as fs } from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import * as crypto from 'crypto';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import * as crypto from 'node:crypto';
 import { getLogger } from './logger';
 import { config } from '../config';
 import {
@@ -56,6 +56,11 @@ import {
 import simpleGit, { SimpleGit } from 'simple-git';
 
 const logger = getLogger();
+
+type RepoCharacteristicLabel =
+  | 'supports-ls-tree'
+  | 'requires-shallow'
+  | 'large-size';
 
 /**
  * File category mapping based on extensions
@@ -524,45 +529,42 @@ class FileAnalysisService {
     cacheKey: string,
     task: () => Promise<InFlightAnalysisResult>
   ): Promise<InFlightAnalysisResult> {
-    // Use a while loop for atomic check-and-set
-    while (true) {
-      const existingAnalysis = this.analysisLocks.get(cacheKey);
-      if (existingAnalysis) {
-        // Wait for existing analysis to complete
-        return existingAnalysis;
+    const existingAnalysis = this.analysisLocks.get(cacheKey);
+    if (existingAnalysis) {
+      // Wait for existing analysis to complete
+      return existingAnalysis;
+    }
+
+    // Create promise before setting to avoid race condition
+    let resolveFn!: (value: InFlightAnalysisResult) => void;
+    let rejectFn!: (reason?: unknown) => void;
+
+    const pendingPromise = new Promise<InFlightAnalysisResult>(
+      (resolve, reject) => {
+        resolveFn = resolve;
+        rejectFn = reject;
       }
+    );
 
-      // Create promise before setting to avoid race condition
-      let resolveFn!: (value: InFlightAnalysisResult) => void;
-      let rejectFn!: (reason?: unknown) => void;
+    // Atomic check-and-set using Map's behavior
+    const raceCheck = this.analysisLocks.get(cacheKey);
+    if (raceCheck) {
+      // Another request won the race, wait for it
+      return raceCheck;
+    }
 
-      const pendingPromise = new Promise<InFlightAnalysisResult>(
-        (resolve, reject) => {
-          resolveFn = resolve;
-          rejectFn = reject;
-        }
-      );
+    // We won the race, set our promise
+    this.analysisLocks.set(cacheKey, pendingPromise);
 
-      // Atomic check-and-set using Map's behavior
-      const raceCheck = this.analysisLocks.get(cacheKey);
-      if (raceCheck) {
-        // Another request won the race, wait for it
-        return raceCheck;
-      }
-
-      // We won the race, set our promise
-      this.analysisLocks.set(cacheKey, pendingPromise);
-
-      try {
-        const result = await task();
-        resolveFn(result);
-        return result;
-      } catch (error) {
-        rejectFn(error);
-        throw error;
-      } finally {
-        this.analysisLocks.delete(cacheKey);
-      }
+    try {
+      const result = await task();
+      resolveFn(result);
+      return result;
+    } catch (error) {
+      rejectFn(error);
+      throw error;
+    } finally {
+      this.analysisLocks.delete(cacheKey);
     }
   }
 
@@ -576,84 +578,107 @@ class FileAnalysisService {
     oldCommitHash?: string
   ): Promise<void> {
     const startTime = Date.now();
+    const shortCommitHash = oldCommitHash?.substring(0, 8);
 
     try {
       logger.debug('Invalidating file tree cache', {
         repoUrl,
-        oldCommitHash: oldCommitHash?.substring(0, 8),
+        oldCommitHash: shortCommitHash,
       });
 
-      // If we have the old commit hash, invalidate that specific entry
       if (oldCommitHash) {
-        const oldCacheKey = this.generateFileTreeCacheKey(
+        await this.invalidateSpecificCacheEntry(
           repoUrl,
-          oldCommitHash
+          oldCommitHash,
+          shortCommitHash
         );
-
-        try {
-          await this.fileTreeCache.del(oldCacheKey);
-          logger.debug('Specific file tree cache entry invalidated', {
-            repoUrl,
-            oldCommitHash: oldCommitHash.substring(0, 8),
-            cacheKey: oldCacheKey,
-          });
-        } catch (error) {
-          logger.warn('Failed to invalidate specific file tree cache entry', {
-            repoUrl,
-            oldCommitHash: oldCommitHash.substring(0, 8),
-            cacheKey: oldCacheKey,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
       } else {
-        // Full invalidation: Remove all entries for this repository
-        const repoHash = this.hashUrl(repoUrl);
-        const pattern = `file_tree:${repoHash}:*`;
-
-        try {
-          await this.invalidateByPattern(pattern);
-          logger.info('Full file tree cache invalidation completed', {
-            repoUrl,
-            pattern,
-            reason: 'No specific commit hash provided',
-          });
-        } catch (error) {
-          logger.warn('Failed to perform full cache invalidation', {
-            repoUrl,
-            pattern,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
+        await this.invalidateFullRepositoryCache(repoUrl);
       }
 
       const invalidationTime = Date.now() - startTime;
 
       logger.info('File tree cache invalidation completed', {
         repoUrl,
-        oldCommitHash: oldCommitHash?.substring(0, 8),
+        oldCommitHash: shortCommitHash,
         invalidationTime,
       });
     } catch (error) {
-      const invalidationTime = Date.now() - startTime;
-
-      logger.error('File tree cache invalidation failed', {
+      this.handleCacheInvalidationFailure(
         repoUrl,
-        oldCommitHash: oldCommitHash?.substring(0, 8),
-        error: error instanceof Error ? error.message : String(error),
-        invalidationTime,
-      });
-
-      // Record invalidation failure but don't throw - it's not critical
-      recordDetailedError(
-        'file-tree-cache-invalidation-error',
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          userImpact: 'degraded', // Stale cache entries might persist
-          recoveryAction: 'retry',
-          severity: 'warning',
-        }
+        shortCommitHash,
+        error,
+        Date.now() - startTime
       );
     }
+  }
+
+  private async invalidateSpecificCacheEntry(
+    repoUrl: string,
+    oldCommitHash: string,
+    shortCommitHash?: string
+  ): Promise<void> {
+    const oldCacheKey = this.generateFileTreeCacheKey(repoUrl, oldCommitHash);
+
+    try {
+      await this.fileTreeCache.del(oldCacheKey);
+      logger.debug('Specific file tree cache entry invalidated', {
+        repoUrl,
+        oldCommitHash: shortCommitHash,
+        cacheKey: oldCacheKey,
+      });
+    } catch (error) {
+      logger.warn('Failed to invalidate specific file tree cache entry', {
+        repoUrl,
+        oldCommitHash: shortCommitHash,
+        cacheKey: oldCacheKey,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async invalidateFullRepositoryCache(repoUrl: string): Promise<void> {
+    const repoHash = this.hashUrl(repoUrl);
+    const pattern = `file_tree:${repoHash}:*`;
+
+    try {
+      await this.invalidateByPattern(pattern);
+      logger.info('Full file tree cache invalidation completed', {
+        repoUrl,
+        pattern,
+        reason: 'No specific commit hash provided',
+      });
+    } catch (error) {
+      logger.warn('Failed to perform full cache invalidation', {
+        repoUrl,
+        pattern,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private handleCacheInvalidationFailure(
+    repoUrl: string,
+    shortCommitHash: string | undefined,
+    error: unknown,
+    invalidationTime: number
+  ): void {
+    logger.error('File tree cache invalidation failed', {
+      repoUrl,
+      oldCommitHash: shortCommitHash,
+      error: error instanceof Error ? error.message : String(error),
+      invalidationTime,
+    });
+
+    recordDetailedError(
+      'file-tree-cache-invalidation-error',
+      error instanceof Error ? error : new Error(String(error)),
+      {
+        userImpact: 'degraded',
+        recoveryAction: 'retry',
+        severity: 'warning',
+      }
+    );
   }
 
   /**
@@ -1130,12 +1155,13 @@ class FileAnalysisService {
       .split('\n')
       .filter((line) => line.length > 0);
 
+    const regex = /^(\d+)\s+blob\s+\w+\s+(\d+)\t(.+)$/;
     for (const line of lines) {
       // Parse ls-tree line format: mode type hash size\tpath
-      const match = line.match(/^(\d+)\s+blob\s+\w+\s+(\d+)\t(.+)$/);
+      const match = regex.exec(line);
       if (match) {
         const [, mode, sizeStr, filePath] = match;
-        const size = parseInt(sizeStr) || 0;
+        const size = Number.parseInt(sizeStr) || 0;
 
         // Only include regular files (not directories, submodules, etc.)
         if (filePath && !filePath.endsWith('/')) {
@@ -1696,7 +1722,7 @@ class FileAnalysisService {
         method: 'full-clone',
         reason:
           'Fallback due to detection failure - using most reliable method',
-        expectedPerformanceGain: 1.0, // No gain from baseline
+        expectedPerformanceGain: 1, // No gain from baseline
         fallbackMethods: ['shallow-clone'],
       };
     }
@@ -1719,7 +1745,7 @@ class FileAnalysisService {
       return {
         method: 'ls-tree-remote', // This now uses sparse clone internally
         reason: `Sparse clone optimal for ${sizeCategory} repository (${estimatedFiles} files) - 95-99% bandwidth reduction`,
-        expectedPerformanceGain: 15.0, // More realistic gain
+        expectedPerformanceGain: 15, // More realistic gain
         fallbackMethods: ['shallow-clone', 'full-clone'],
       };
     }
@@ -1745,38 +1771,38 @@ class FileAnalysisService {
   ): number {
     const gains: Record<AnalysisMethod, Record<string, number>> = {
       'ls-tree-remote': {
-        small: 15.0, // 15x faster (sparse clone)
-        medium: 18.0, // 18x faster
-        large: 20.0, // 20x faster
-        xl: 20.0, // 20x faster (not 25x - more realistic)
+        small: 15, // 15x faster (sparse clone)
+        medium: 18, // 18x faster
+        large: 20, // 20x faster
+        xl: 20, // 20x faster (not 25x - more realistic)
       },
       'shallow-clone': {
         small: 1.5, // 1.5x faster
-        medium: 3.0, // 3x faster
-        large: 6.0, // 6x faster
-        xl: 10.0, // 10x faster
+        medium: 3, // 3x faster
+        large: 6, // 6x faster
+        xl: 10, // 10x faster
       },
       'full-clone': {
-        small: 1.0, // Baseline
-        medium: 1.0, // Baseline
-        large: 1.0, // Baseline
-        xl: 1.0, // Baseline
+        small: 1, // Baseline
+        medium: 1, // Baseline
+        large: 1, // Baseline
+        xl: 1, // Baseline
       },
       'ls-tree-local': {
-        small: 2.0, // 2x faster
-        medium: 4.0, // 4x faster
-        large: 8.0, // 8x faster
-        xl: 12.0, // 12x faster
+        small: 2, // 2x faster
+        medium: 4, // 4x faster
+        large: 8, // 8x faster
+        xl: 12, // 12x faster
       },
       cached: {
-        small: 50.0, // 50x faster (instant)
-        medium: 50.0, // 50x faster
-        large: 50.0, // 50x faster
-        xl: 50.0, // 50x faster
+        small: 50, // 50x faster (instant)
+        medium: 50, // 50x faster
+        large: 50, // 50x faster
+        xl: 50, // 50x faster
       },
     };
 
-    return gains[method]?.[sizeCategory] || 1.0;
+    return gains[method]?.[sizeCategory] || 1;
   }
 
   /**
@@ -1845,7 +1871,7 @@ class FileAnalysisService {
         if (parts.length >= 5) {
           const mode = parts[0];
           const type = parts[1];
-          const size = parseInt(parts[3]) || 0;
+          const size = Number.parseInt(parts[3]) || 0;
           const filePath = parts.slice(4).join(' ');
 
           // Only include files (not directories or submodules)
@@ -2103,7 +2129,7 @@ class FileAnalysisService {
         dataSource,
         bandwidthUsed,
         processingTime,
-        cacheHitRate: 0.0, // Will be updated when cache is integrated
+        cacheHitRate: 0, // Will be updated when cache is integrated
         performanceGain: this.calculateActualPerformanceGain(
           actualMethod,
           processingTime
@@ -2562,13 +2588,13 @@ class FileAnalysisService {
     const dirMap: Record<string, FileInfo[]> = {};
 
     // Group files by directory
-    files.forEach((file) => {
+    for (const file of files) {
       const dir = path.dirname(file.path);
       if (!dirMap[dir]) {
         dirMap[dir] = [];
       }
       dirMap[dir].push(file);
-    });
+    }
 
     // Build directory tree
     const directories: DirectoryDistribution[] = [];
@@ -2583,9 +2609,9 @@ class FileAnalysisService {
         other: [],
       };
 
-      dirFiles.forEach((file) => {
+      for (const file of dirFiles) {
         categoryGroups[file.category].push(file);
-      });
+      }
 
       const categories: Record<FileCategory, FileTypeStats> = {
         code: { count: 0, percentage: 0, size: 0, averageSize: 0 },
@@ -2604,12 +2630,12 @@ class FileAnalysisService {
 
       // Calculate extension statistics
       const extensionGroups: Record<string, FileInfo[]> = {};
-      dirFiles.forEach((file) => {
+      for (const file of dirFiles) {
         if (!extensionGroups[file.extension]) {
           extensionGroups[file.extension] = [];
         }
         extensionGroups[file.extension].push(file);
-      });
+      }
 
       const extensions: Record<string, FileTypeStats> = {};
       for (const [ext, extFiles] of Object.entries(extensionGroups)) {
@@ -2760,9 +2786,9 @@ class FileAnalysisService {
       other: [],
     };
 
-    fileInfos.forEach((file) => {
+    for (const file of fileInfos) {
       categoryGroups[file.category].push(file);
-    });
+    }
 
     const categories: Record<FileCategory, FileTypeStats> = {
       code: { count: 0, percentage: 0, size: 0, averageSize: 0 },
@@ -2790,12 +2816,12 @@ class FileAnalysisService {
     totalFiles: number
   ): Record<string, FileTypeStats> {
     const extensionGroups: Record<string, FileInfo[]> = {};
-    fileInfos.forEach((file) => {
+    for (const file of fileInfos) {
       if (!extensionGroups[file.extension]) {
         extensionGroups[file.extension] = [];
       }
       extensionGroups[file.extension].push(file);
-    });
+    }
 
     const extensions: Record<string, FileTypeStats> = {};
     for (const [ext, extFiles] of Object.entries(extensionGroups)) {
@@ -2973,7 +2999,7 @@ class FileAnalysisService {
             dataSource: analysisResult.dataSource,
             bandwidthUsed: analysisResult.bandwidthUsed,
             processingTime,
-            cacheHitRate: analysisResult.fileTreeCached ? 1.0 : 0.0,
+            cacheHitRate: analysisResult.fileTreeCached ? 1 : 0,
             performanceGain: this.calculateActualPerformanceGain(
               analysisResult.actualMethod,
               processingTime
@@ -2997,12 +3023,9 @@ class FileAnalysisService {
           const repoSize = this.categorizeRepositorySize(
             analysisResult.result.metadata.totalFiles
           );
-          const repoCharacteristics =
-            methodDecision.method === 'ls-tree-remote'
-              ? 'supports-ls-tree'
-              : methodDecision.method === 'shallow-clone'
-                ? 'requires-shallow'
-                : 'large-size';
+          const repoCharacteristics = this.mapMethodToRepoCharacteristic(
+            methodDecision.method
+          );
 
           recordFileAnalysisPerformanceMetrics({
             method: analysisResult.actualMethod as
@@ -3346,7 +3369,7 @@ class FileAnalysisService {
         error instanceof Error ? error : new Error(String(error))
       );
       updateServiceHealthScore('file-analysis', {
-        errorRate: 1.0,
+        errorRate: 1,
         responseTime: Date.now() - startTime,
         memoryUtilization: process.memoryUsage().rss / (1024 * 1024),
       });
@@ -3387,10 +3410,10 @@ class FileAnalysisService {
     // Baseline processing time estimate (for full clone)
     const baselineTime = 30000; // 30 seconds baseline for medium repository
 
-    if (processingTime === 0) return 1.0;
+    if (processingTime === 0) return 1;
 
     const gain = baselineTime / processingTime;
-    return Math.max(1.0, Math.min(50.0, gain)); // Cap between 1x and 50x
+    return Math.max(1, Math.min(50, gain)); // Cap between 1x and 50x
   }
 
   /**
@@ -3409,6 +3432,24 @@ class FileAnalysisService {
     return Math.max(0, saved);
   }
 
+  private mapMethodToRepoCharacteristic(
+    method: AnalysisMethod
+  ): RepoCharacteristicLabel {
+    if (
+      method === 'ls-tree-remote' ||
+      method === 'ls-tree-local' ||
+      method === 'cached'
+    ) {
+      return 'supports-ls-tree';
+    }
+
+    if (method === 'shallow-clone') {
+      return 'requires-shallow';
+    }
+
+    return 'large-size';
+  }
+
   /**
    * Build analysis result from processed file information
    */
@@ -3416,27 +3457,7 @@ class FileAnalysisService {
     fileInfos: FileInfo[],
     commitHash: string
   ): FileTypeDistribution {
-    const totalFiles = fileInfos.length;
-
-    // Calculate statistics using existing methods
-    const categories = this.calculateCategoryStatistics(fileInfos, totalFiles);
-    const extensions = this.calculateExtensionStatistics(fileInfos, totalFiles);
-    const directories = this.buildDirectoryDistribution(fileInfos);
-    const totalSize = fileInfos.reduce((sum, file) => sum + file.size, 0);
-
-    return {
-      categories,
-      extensions,
-      directories,
-      metadata: {
-        totalFiles,
-        totalSize,
-        analyzedAt: new Date().toISOString(),
-        repositorySize: getRepositorySizeCategory(totalFiles),
-        commitHash,
-        streamingUsed: false, // Optimized methods don't use streaming
-      },
-    };
+    return this.buildAnalysisResultFromFileInfos(fileInfos, commitHash);
   }
 
   /**

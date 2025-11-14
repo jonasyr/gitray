@@ -35,6 +35,7 @@ collaboration.
 
 - **Activity Heatmaps**: GitHub-style contribution calendars with customizable time periods
 - **Commit Analysis**: Detailed commit statistics and author breakdowns
+- **Code Churn Analysis**: Track code changes and stability patterns with risk level indicators
 - **Interactive Filtering**: Filter by authors, date ranges, and commit patterns
 - **Responsive Design**: Optimized for desktop and mobile viewing
 
@@ -276,6 +277,9 @@ curl "http://localhost:3001/api/commits/heatmap?repoUrl=https://github.com/usern
 # Get repository info
 curl "http://localhost:3001/api/commits/info?repoUrl=https://github.com/username/repo.git"
 
+# Get code churn analysis
+curl "http://localhost:3001/api/repositories/churn?repoUrl=https://github.com/username/repo.git"
+
 # Health check
 curl "http://localhost:3001/health"
 
@@ -499,6 +503,32 @@ describe('GitService', () => {
 // Response: CommitHeatmapData
 ```
 
+##### GET /api/repositories/churn
+
+```typescript
+// Query parameters
+{
+  repoUrl: string;           // Repository URL
+  fromDate?: string;         // Start date (ISO 8601)
+  toDate?: string;           // End date (ISO 8601)
+  extensions?: string[];     // File extensions to include (e.g., ['.ts', '.js'])
+  riskLevels?: string[];     // Risk levels to include ('high', 'medium', 'low')
+}
+
+// Response: CodeChurnAnalysis
+{
+  totalCommits: number;
+  totalFilesChanged: number;
+  averageChurnPerCommit: number;
+  fileChurn: FileChurnData[];
+  riskDistribution: {
+    high: number;
+    medium: number;
+    low: number;
+  };
+}
+```
+
 #### Commit Operations
 
 ##### GET /api/commits/heatmap
@@ -691,7 +721,7 @@ For large repositories:
 - [ ] **File Type Distribution Analysis**: Breakdown of repository file types
 - [ ] **Git Graph Timeline Visualization**: Interactive commit history graphs
 - [ ] **Contributor Analysis Dashboard**: Detailed team contribution metrics
-- [ ] **Code Churn Analysis**: Track code changes and stability patterns
+- [x] **Code Churn Analysis**: Track code changes and stability patterns (API implemented)
 
 ### User Experience Improvements
 

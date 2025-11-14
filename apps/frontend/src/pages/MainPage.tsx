@@ -53,6 +53,9 @@ const MainPage: React.FC = () => {
     }
   };
 
+  const canShowVisualizations =
+    isLoading === false && error == null && commits.length > 0;
+
   return (
     <div className="bg-gray-900 min-h-screen flex flex-col text-white">
       {/* Header with Logo and Login/Signup Buttons */}
@@ -98,15 +101,15 @@ const MainPage: React.FC = () => {
           </div>
         )}
 
-        {!isLoading && !error && commits.length > 0 && (
+        {canShowVisualizations && (
           <>
             {/* Visualization selector */}
             <div className="flex flex-wrap gap-2 mt-6 mb-2 justify-center">
               <button
                 className={`px-4 py-2 rounded-md font-medium ${
-                  !showHeatmap
-                    ? 'bg-green-600 text-white'
-                    : 'bg-gray-700 text-gray-300'
+                  showHeatmap
+                    ? 'bg-gray-700 text-gray-300'
+                    : 'bg-green-600 text-white'
                 }`}
                 onClick={() => setShowHeatmap(false)}
               >

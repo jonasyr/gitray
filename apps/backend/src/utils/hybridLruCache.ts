@@ -1,6 +1,6 @@
-import fs from 'fs/promises';
-import path from 'path';
-import { randomBytes } from 'crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import Redis, { RedisOptions } from 'ioredis';
 import { getLogger } from '../services/logger';
 import { withKeyLock } from './lockManager';
@@ -242,9 +242,9 @@ export class HybridLRUCache<V> {
           const entriesToSort = [...validEntries];
           entriesToSort.sort((a, b) => a.mtime - b.mtime);
           const sortedEntries = entriesToSort;
-          sortedEntries.forEach(({ key, filePath }) => {
+          for (const { key, filePath } of sortedEntries) {
             this.disk.set(key, filePath);
-          });
+          }
 
           logger.debug('Disk index loaded successfully', {
             totalFiles: files.length,
@@ -718,11 +718,11 @@ export class HybridLRUCache<V> {
                   let value: V;
                   try {
                     value = this.fromJSON(data);
-                  } catch (parseErr) {
+                  } catch (error_) {
                     logger.warn('Failed to parse disk cache file', {
                       key,
                       filePath,
-                      parseErr,
+                      parseErr: error_,
                     });
                     this.disk.delete(key);
                     // Try to clean up the corrupted file
@@ -751,13 +751,13 @@ export class HybridLRUCache<V> {
                   });
 
                   return value;
-                } catch (readErr) {
+                } catch (error_) {
                   // File might have been deleted, corrupted, or is inaccessible
                   this.disk.delete(key);
 
                   const errorCode =
-                    readErr instanceof Error && 'code' in readErr
-                      ? (readErr as any).code
+                    error_ instanceof Error && 'code' in error_
+                      ? (error_ as any).code
                       : 'unknown';
 
                   if (errorCode === 'ENOENT') {
@@ -770,7 +770,7 @@ export class HybridLRUCache<V> {
                       key,
                       filePath,
                       errorCode,
-                      err: readErr,
+                      err: error_,
                     });
                   }
 
@@ -779,10 +779,10 @@ export class HybridLRUCache<V> {
               },
               this.lockTimeoutMs
             );
-          } catch (lockErr) {
+          } catch (error_) {
             logger.warn('Failed to acquire lock for disk read', {
               key,
-              err: lockErr,
+              err: error_,
             });
             return null;
           }
@@ -913,8 +913,8 @@ export class HybridLRUCache<V> {
       } else {
         await this.redis!.set(key, syncJson);
       }
-    } catch (syncErr) {
-      this.handleRedisConnectionError(syncErr as Error, errors);
+    } catch (error_) {
+      this.handleRedisConnectionError(error_ as Error, errors);
     }
   }
 
@@ -962,8 +962,8 @@ export class HybridLRUCache<V> {
     try {
       this.addToMemoryWithPressureCheck(key, value);
       return true;
-    } catch (syncErr) {
-      errors.push(originalErr, syncErr as Error);
+    } catch (error_) {
+      errors.push(originalErr, error_ as Error);
       return false;
     }
   }
@@ -1043,7 +1043,7 @@ export class HybridLRUCache<V> {
     updateServiceHealthScore('cache', {
       errorRate: 0,
       responseTime: 0.1, // Assume fast local cache operation
-      cacheHitRate: 1.0, // Successful set operation
+      cacheHitRate: 1, // Successful set operation
     });
   }
 
@@ -1085,10 +1085,10 @@ export class HybridLRUCache<V> {
                 key,
                 filePath,
               });
-            } catch (unlinkErr) {
+            } catch (error_) {
               const errorCode =
-                unlinkErr instanceof Error && 'code' in unlinkErr
-                  ? (unlinkErr as any).code
+                error_ instanceof Error && 'code' in error_
+                  ? (error_ as any).code
                   : 'unknown';
 
               if (errorCode === 'ENOENT') {
@@ -1103,9 +1103,9 @@ export class HybridLRUCache<V> {
                   key,
                   filePath,
                   errorCode,
-                  err: unlinkErr,
+                  err: error_,
                 });
-                throw unlinkErr;
+                throw error_;
               }
             }
           },

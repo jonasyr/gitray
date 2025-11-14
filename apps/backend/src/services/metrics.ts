@@ -7,6 +7,19 @@ import {
 } from 'prom-client';
 import { Request, Response, NextFunction } from 'express';
 
+type UserType = 'api' | 'ui' | 'admin' | 'unknown';
+type RepositoryVisibility = 'public' | 'private' | 'unknown';
+type KnownRepositoryVisibility = Exclude<RepositoryVisibility, 'unknown'>;
+type TeamSizeCategory = 'small' | 'medium' | 'large';
+type CacheTierLevel = 'memory' | 'disk' | 'redis' | 'hybrid';
+type ExtendedRepositorySizeCategory = 'small' | 'medium' | 'large' | 'huge';
+type RepositorySizeBucket = 'small' | 'medium' | 'large' | 'xl';
+type FileAnalysisMethod =
+  | 'ls-tree-remote'
+  | 'shallow-clone'
+  | 'full-clone'
+  | 'cached';
+
 // Initialize default Prometheus metrics
 collectDefaultMetrics({ register });
 
@@ -17,7 +30,7 @@ collectDefaultMetrics({ register });
 /**
  * Helper to categorize user types from request headers
  */
-export function getUserType(req: Request): 'api' | 'ui' | 'admin' | 'unknown' {
+export function getUserType(req: Request): UserType {
   if (!req?.headers) return 'unknown';
 
   const userAgent = req.headers['user-agent']?.toLowerCase() ?? '';
@@ -35,9 +48,7 @@ export function getUserType(req: Request): 'api' | 'ui' | 'admin' | 'unknown' {
 /**
  * Helper to determine repository type
  */
-export function getRepositoryType(
-  repoUrl: string
-): 'public' | 'private' | 'unknown' {
+export function getRepositoryType(repoUrl: string): RepositoryVisibility {
   if (repoUrl.includes('github.com') || repoUrl.includes('gitlab.com'))
     return 'public';
   if (repoUrl.includes('localhost') || repoUrl.includes('127.0.0.1'))
@@ -51,7 +62,7 @@ export function getRepositoryType(
 export function getTeamSizeCategory(
   commitCount: number,
   days: number = 30
-): 'small' | 'medium' | 'large' {
+): TeamSizeCategory {
   const commitsPerDay = commitCount / days;
   if (commitsPerDay < 2) return 'small';
   if (commitsPerDay < 10) return 'medium';
@@ -61,7 +72,7 @@ export function getTeamSizeCategory(
 /**
  * Helper to determine cache tier
  */
-export function getCacheTier(): 'memory' | 'disk' | 'redis' | 'hybrid' {
+export function getCacheTier(): CacheTierLevel {
   // This would be enhanced based on actual cache implementation details
   return 'hybrid'; // Default for now
 }
@@ -156,7 +167,7 @@ export const distributedCacheInvalidations = new Counter({
 export const distributedCacheInvalidationLatency = new Histogram({
   name: 'distributed_cache_invalidation_duration_seconds',
   help: 'Time taken for cross-process cache invalidation',
-  buckets: [0.001, 0.01, 0.1, 0.5, 1.0, 5.0],
+  buckets: [0.001, 0.01, 0.1, 0.5, 1, 5],
 });
 
 export const tempDirectories = new Gauge({
@@ -441,7 +452,7 @@ export const cacheEfficiencyByRepo = new Histogram({
   name: 'gitray_cache_efficiency_by_repository',
   help: 'Cache efficiency patterns by repository characteristics',
   labelNames: ['repo_size', 'language', 'activity_level', 'team_size'] as const,
-  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
 });
 
 /**
@@ -451,7 +462,7 @@ export const cachePredictionAccuracy = new Histogram({
   name: 'gitray_cache_prediction_accuracy_ratio',
   help: 'Accuracy of cache prediction algorithms',
   labelNames: ['prediction_type', 'time_horizon', 'data_category'] as const,
-  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
 });
 
 // ========================================================================
@@ -482,11 +493,13 @@ export const transactionRollbacks = new Counter({
 });
 
 type RollbackOutcome = 'success' | 'failed' | 'verified' | 'retry';
+type CacheTierName = 'raw' | 'filtered' | 'aggregated';
+type CacheOperationType = 'set' | 'delete' | 'update';
 
 export function recordTransactionRollback(
   outcome: RollbackOutcome,
-  cacheTier: 'raw' | 'filtered' | 'aggregated',
-  operationType: 'set' | 'delete' | 'update',
+  cacheTier: CacheTierName,
+  operationType: CacheOperationType,
   retryCount: number = 0
 ): void {
   let retryRange: string;
@@ -716,7 +729,7 @@ export const streamingMemoryUsage = new Histogram({
 export const streamingCacheHitRate = new Histogram({
   name: 'git_streaming_cache_hit_rate',
   help: 'Cache hit rate for streaming batch operations (0.0-1.0)',
-  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
 });
 
 /**
@@ -799,7 +812,7 @@ export const fileAnalysisPerformanceGain = new Histogram({
     'repo_size',
     'cache_hit', // true, false
   ] as const,
-  buckets: [1.0, 1.5, 2.0, 3.0, 5.0, 8.0, 12.0, 20.0, 30.0, 50.0], // 1x to 50x improvement
+  buckets: [1, 1.5, 2, 3, 5, 8, 12, 20, 30, 50], // 1x to 50x improvement
 });
 
 /**
@@ -813,7 +826,7 @@ export const fileAnalysisCacheHitRate = new Histogram({
     'repo_size',
     'commit_age_hours', // fresh, old, stale
   ] as const,
-  buckets: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+  buckets: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
 });
 
 /**
@@ -827,7 +840,7 @@ export const fileAnalysisProcessingTime = new Histogram({
     'repo_size',
     'file_count_range', // small, medium, large, huge
   ] as const,
-  buckets: [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0], // 0.1s to 5min
+  buckets: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300], // 0.1s to 5min
 });
 
 /**
@@ -1004,7 +1017,7 @@ export function recordDetailedError(
   context: {
     userImpact?: 'blocking' | 'degraded' | 'none';
     recoveryAction?: 'retry' | 'fallback' | 'manual';
-    repoType?: 'public' | 'private';
+    repoType?: KnownRepositoryVisibility;
     severity?: 'critical' | 'warning' | 'info';
   } = {}
 ): void {
@@ -1051,16 +1064,16 @@ export function recordSLACompliance(
   userSegment: string = 'general'
 ): void {
   const slaTargets = {
-    api: { p95: 2.0, p99: 5.0 },
-    ui: { p95: 1.0, p99: 3.0 },
-    admin: { p95: 5.0, p99: 10.0 },
+    api: { p95: 2, p99: 5 },
+    ui: { p95: 1, p99: 3 },
+    admin: { p95: 5, p99: 10 },
   };
 
   const target =
     slaTargets[userSegment as keyof typeof slaTargets] || slaTargets.api;
-  let slaStatus = 1.0; // 100% compliance by default
+  let slaStatus = 1; // 100% compliance by default
 
-  if (responseTime > target.p99) slaStatus = 0.0;
+  if (responseTime > target.p99) slaStatus = 0;
   else if (responseTime > target.p95) slaStatus = 0.8;
 
   slaCompliance.set(
@@ -1168,7 +1181,7 @@ export function recordDataFreshness(
  */
 export function getRepositorySizeCategory(
   commitCount: number
-): 'small' | 'medium' | 'large' | 'huge' {
+): ExtendedRepositorySizeCategory {
   if (commitCount < 1000) return 'small';
   if (commitCount < 10000) return 'medium';
   if (commitCount < 100000) return 'large';
@@ -1537,16 +1550,22 @@ export const updateEnhancedCacheMetrics = async () => {
       timeOfDay = 'evening';
     }
 
+    const observedAccessFrequency = stats.hybrid
+      ? stats.hybrid.memory.entries + stats.hybrid.disk.entries
+      : stats.memory.entries;
+
     cacheAccessPatterns.observe(
       {
         pattern_type: 'temporal',
         time_of_day: timeOfDay,
         user_behavior: 'normal',
-        data_type: 'mixed',
+        data_type: stats.hybrid
+          ? 'hybrid'
+          : stats.redis.healthy
+            ? 'redis'
+            : 'memory',
       },
-      // TODO: Replace with real access frequency data when implementing cache pattern detection
-      // This Math.random() is safe for metrics placeholder data (not security-sensitive)
-      Math.random() * 100 // Placeholder - would be real access frequency
+      observedAccessFrequency
     );
   } catch (err) {
     console.warn('Failed to update enhanced cache metrics', { err });
@@ -1766,12 +1785,9 @@ export const updateAllEnhancedMetrics = async () => {
 // FILE ANALYSIS PERFORMANCE RECORDING FUNCTIONS - Phase 2.5 Integration
 // ========================================================================
 
-/**
- * Record file analysis method usage and effectiveness
- */
 export function recordFileAnalysisMethodUsage(
-  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
-  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  method: FileAnalysisMethod,
+  repoSize: RepositorySizeBucket,
   success: boolean
 ): void {
   fileAnalysisMethodUsage.inc({
@@ -1785,8 +1801,8 @@ export function recordFileAnalysisMethodUsage(
  * Record bandwidth usage for file analysis
  */
 export function recordFileAnalysisBandwidth(
-  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
-  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  method: FileAnalysisMethod,
+  repoSize: RepositorySizeBucket,
   bandwidthBytes: number,
   optimizationLevel: 'none' | 'low' | 'medium' | 'high' = 'medium'
 ): void {
@@ -1804,8 +1820,8 @@ export function recordFileAnalysisBandwidth(
  * Record performance gain achieved
  */
 export function recordFileAnalysisPerformanceGain(
-  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
-  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  method: FileAnalysisMethod,
+  repoSize: RepositorySizeBucket,
   performanceGainRatio: number,
   cacheHit: boolean
 ): void {
@@ -1824,7 +1840,7 @@ export function recordFileAnalysisPerformanceGain(
  */
 export function recordFileAnalysisCacheHitRate(
   cacheType: 'file-tree' | 'analysis-result',
-  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  repoSize: RepositorySizeBucket,
   hitRate: number,
   commitAgeHours: number
 ): void {
@@ -1851,8 +1867,8 @@ export function recordFileAnalysisCacheHitRate(
  * Record processing time for file analysis
  */
 export function recordFileAnalysisProcessingTime(
-  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
-  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  method: FileAnalysisMethod,
+  repoSize: RepositorySizeBucket,
   processingTimeSeconds: number,
   fileCount: number
 ): void {
@@ -1882,7 +1898,7 @@ export function recordFileAnalysisProcessingTime(
  */
 export function recordFileTreeCacheOperation(
   operation: 'hit' | 'miss' | 'store' | 'invalidate',
-  repoSize: 'small' | 'medium' | 'large' | 'xl',
+  repoSize: RepositorySizeBucket,
   commitHashAgeHours: number
 ): void {
   let commitHashAgeCategory: string;
@@ -1905,7 +1921,7 @@ export function recordFileTreeCacheOperation(
  * Record file analysis method selection reasoning
  */
 export function recordFileAnalysisMethodSelection(
-  selectedMethod: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached',
+  selectedMethod: FileAnalysisMethod,
   reason: 'optimal' | 'fallback' | 'forced' | 'cache-hit',
   repoCharacteristics: 'supports-ls-tree' | 'requires-shallow' | 'large-size'
 ): void {
@@ -1916,14 +1932,28 @@ export function recordFileAnalysisMethodSelection(
   });
 }
 
+function getBandwidthOptimizationLevel(
+  method: FileAnalysisMethod
+): 'none' | 'low' | 'medium' | 'high' {
+  if (method === 'ls-tree-remote' || method === 'cached') {
+    return 'high';
+  }
+
+  if (method === 'shallow-clone') {
+    return 'medium';
+  }
+
+  return 'none';
+}
+
 /**
  * Comprehensive file analysis performance tracking
  *
  * This function combines multiple metrics for a complete performance picture
  */
 export function recordFileAnalysisPerformanceMetrics(metrics: {
-  method: 'ls-tree-remote' | 'shallow-clone' | 'full-clone' | 'cached';
-  repoSize: 'small' | 'medium' | 'large' | 'xl';
+  method: FileAnalysisMethod;
+  repoSize: RepositorySizeBucket;
   success: boolean;
   bandwidthBytes: number;
   performanceGainRatio: number;
@@ -1945,13 +1975,7 @@ export function recordFileAnalysisPerformanceMetrics(metrics: {
     metrics.method,
     metrics.repoSize,
     metrics.bandwidthBytes,
-    metrics.method === 'ls-tree-remote'
-      ? 'high'
-      : metrics.method === 'shallow-clone'
-        ? 'medium'
-        : metrics.method === 'cached'
-          ? 'high'
-          : 'none'
+    getBandwidthOptimizationLevel(metrics.method)
   );
 
   // Record performance gain

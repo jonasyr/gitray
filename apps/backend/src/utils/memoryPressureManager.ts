@@ -1,5 +1,5 @@
 // apps/backend/src/utils/memoryPressureManager.ts
-import os from 'os';
+import os from 'node:os';
 import { getLogger } from '../services/logger';
 import {
   memoryPressureLevel,
@@ -449,7 +449,8 @@ class MemoryPressureManager {
     priority?: 'low' | 'normal' | 'high';
     userAgent?: string;
   }): { shouldThrottle: boolean; reason?: string; retryAfter?: number } {
-    if (!this.config.enableRequestThrottling) {
+    const throttlingEnabled = this.config.enableRequestThrottling ?? false;
+    if (throttlingEnabled === false) {
       return { shouldThrottle: false };
     }
 
@@ -505,8 +506,8 @@ class MemoryPressureManager {
 
     try {
       // 1. Force garbage collection if available
-      if (global.gc && typeof global.gc === 'function') {
-        global.gc();
+      if (globalThis.gc && typeof globalThis.gc === 'function') {
+        globalThis.gc();
         this.metrics.gcTriggered++;
         gcTriggered.inc();
         logger.debug('Forced garbage collection triggered');
@@ -556,20 +557,21 @@ class MemoryPressureManager {
 
     this.monitoringInterval = setInterval(() => {
       // Prevent overlapping memory checks if previous check is still running
-      if (!this.isCheckingMemory) {
-        this.isCheckingMemory = true;
-
-        try {
-          this.checkMemoryPressure();
-        } catch (error) {
-          logger.error('Memory pressure check failed', { error });
-        } finally {
-          this.isCheckingMemory = false;
-        }
-      } else {
+      if (this.isCheckingMemory) {
         logger.debug(
           'Skipping memory check - previous check still in progress'
         );
+        return;
+      }
+
+      this.isCheckingMemory = true;
+
+      try {
+        this.checkMemoryPressure();
+      } catch (error) {
+        logger.error('Memory pressure check failed', { error });
+      } finally {
+        this.isCheckingMemory = false;
       }
     }, this.config.checkIntervalMs);
 
@@ -617,8 +619,8 @@ class MemoryPressureManager {
     this.alertIfCooldownExpired('CRITICAL', stats);
 
     // Trigger GC more frequently
-    if (global.gc && typeof global.gc === 'function') {
-      global.gc();
+    if (globalThis.gc && typeof globalThis.gc === 'function') {
+      globalThis.gc();
       this.metrics.gcTriggered++;
     }
   }
@@ -627,13 +629,13 @@ class MemoryPressureManager {
     this.alertIfCooldownExpired('WARNING', stats);
 
     // Proactive GC
-    if (global.gc && typeof global.gc === 'function') {
+    if (globalThis.gc && typeof globalThis.gc === 'function') {
       // Only trigger GC occasionally during warning state
       // SAFE: Math.random() used for performance optimization (probabilistic GC triggering)
       // This prevents deterministic GC patterns and load balancing across instances
       if (Math.random() < 0.1) {
         // 10% chance per check
-        global.gc();
+        globalThis.gc();
         this.metrics.gcTriggered++;
       }
     }

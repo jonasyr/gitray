@@ -1,5 +1,5 @@
-import { Worker, isMainThread, parentPort } from 'worker_threads';
-import { cpus } from 'os';
+import { Worker, isMainThread, parentPort } from 'node:worker_threads';
+import { cpus } from 'node:os';
 
 if (!isMainThread) {
   // Worker thread code

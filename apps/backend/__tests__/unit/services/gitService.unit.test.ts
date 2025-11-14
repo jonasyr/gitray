@@ -1667,13 +1667,6 @@ file1.ts`;
         ).join('\n\n');
       };
 
-      const churnData = [
-        generateChurnData('high-risk.ts', 35), // 35 changes >= 30 (high)
-        generateChurnData('medium-risk.js', 20), // 20 changes >= 15 (medium)
-        generateChurnData('low-risk.py', 5), // 5 changes >= 1 (low)
-        generateChurnData('below-threshold.md', 0), // 0 changes < 1 (filtered out)
-      ].join('\n\n');
-
       // Add one commit for the below-threshold file to ensure it has 0 changes after parsing
       // Actually, let's test with a custom threshold instead
       const churnDataWithBelowThreshold = [

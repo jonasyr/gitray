@@ -52,7 +52,7 @@ export async function validateStartupEnvironment() {
   const issues: string[] = [];
 
   // Check if port is a valid number
-  if (isNaN(config.port) || config.port < 1 || config.port > 65535) {
+  if (Number.isNaN(config.port) || config.port < 1 || config.port > 65535) {
     issues.push(`Invalid port number: ${config.port}. Must be between 1-65535`);
   }
 
@@ -73,8 +73,8 @@ export async function validateStartupEnvironment() {
 
   for (const dir of requiredDirs) {
     try {
-      const fsSync = await import('fs');
-      const fsAsync = await import('fs/promises');
+      const fsSync = await import('node:fs');
+      const fsAsync = await import('node:fs/promises');
       if (!fsSync.existsSync(dir)) {
         await fsAsync.mkdir(dir, { recursive: true });
         logger.info(`Created directory: ${dir}`);
@@ -88,7 +88,7 @@ export async function validateStartupEnvironment() {
   if (config.hybridCache.enableRedis) {
     try {
       // Try to connect to Redis to validate configuration
-      const net = await import('net');
+      const net = await import('node:net');
       const socket = new net.Socket();
 
       await new Promise<void>((resolve, reject) => {
@@ -489,14 +489,13 @@ export async function startApplication() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   // Start the application with error handling
   logger.info('📋 About to call startApplication()...');
-  startApplication()
-    .then(() => {
-      logger.info('✅ Application started successfully!');
-    })
-    .catch((error) => {
-      logger.error('❌ Failed to start application:', { error });
-      process.exit(1);
-    });
+  try {
+    await startApplication();
+    logger.info('✅ Application started successfully!');
+  } catch (error) {
+    logger.error('❌ Failed to start application:', { error });
+    process.exit(1);
+  }
 }
 
 /**

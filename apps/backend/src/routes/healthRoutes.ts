@@ -13,7 +13,7 @@ import {
 } from '../utils/memoryPressureManager';
 
 // Health check endpoints used by Kubernetes and monitoring tools
-import os from 'os';
+import os from 'node:os';
 
 const router = express.Router();
 const logger = getLogger();

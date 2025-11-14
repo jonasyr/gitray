@@ -17,7 +17,7 @@
  * - Comprehensive metrics and health monitoring
  */
 
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import { gitService } from './gitService';
 import { getLogger } from './logger';
 import { withSharedRepository } from './repositoryCoordinator';
@@ -48,6 +48,16 @@ import {
   CommitHeatmapData,
   TransactionRollbackError,
 } from '@gitray/shared-types';
+
+type ContributorAggregation = {
+  login: string;
+  commitCount: number;
+  linesAdded: number;
+  linesDeleted: number;
+  contributionPercentage: number;
+};
+
+type AggregatedCacheValue = CommitHeatmapData | ContributorAggregation[];
 
 /**
  * UNIFIED REPOSITORY CACHE MANAGER - FIXED VERSION
@@ -137,6 +147,7 @@ export interface CacheStats {
  * Cache tier types for rollback operations
  */
 type CacheType = 'raw' | 'filtered' | 'aggregated';
+type CacheOperation = 'set' | 'del';
 
 /**
  * Enhanced rollback operation with verification capabilities.
@@ -172,8 +183,8 @@ interface CacheTransaction {
 
   /** Sequential log of all cache operations performed within this transaction */
   operations: Array<{
-    cache: 'raw' | 'filtered' | 'aggregated';
-    operation: 'set' | 'del';
+    cache: CacheType;
+    operation: CacheOperation;
     key: string;
     originalValue?: any;
     newValue?: any;
@@ -208,16 +219,7 @@ export class RepositoryCacheManager {
   private readonly filteredCommitsCache: HybridLRUCache<Commit[]>;
 
   /** Tertiary cache tier: Aggregated visualization data with lowest memory priority */
-  private readonly aggregatedDataCache: HybridLRUCache<
-    | CommitHeatmapData
-    | Array<{
-        login: string;
-        commitCount: number;
-        linesAdded: number;
-        linesDeleted: number;
-        contributionPercentage: number;
-      }>
-  >;
+  private readonly aggregatedDataCache: HybridLRUCache<AggregatedCacheValue>;
 
   /** Active transaction tracking for ensuring atomic cache updates */
   private readonly activeTransactions = new Map<string, CacheTransaction>();
@@ -301,16 +303,7 @@ export class RepositoryCacheManager {
      * since they're often specific to particular visualization requests.
      * Now supports both CommitHeatmapData and ContributorStat[] types.
      */
-    this.aggregatedDataCache = new HybridLRUCache<
-      | CommitHeatmapData
-      | Array<{
-          login: string;
-          commitCount: number;
-          linesAdded: number;
-          linesDeleted: number;
-          contributionPercentage: number;
-        }>
-    >({
+    this.aggregatedDataCache = new HybridLRUCache<AggregatedCacheValue>({
       maxEntries: Math.floor(baseConfig.maxEntries * 0.2), // 20% of total entries
       memoryLimitBytes: Math.floor(baseConfig.memoryLimitBytes * 0.15), // 15% of memory budget
       diskPath: `${baseConfig.diskPath}/aggregated-data`,
@@ -768,7 +761,7 @@ export class RepositoryCacheManager {
    */
   private async transactionalSet<T>(
     cache: HybridLRUCache<T>,
-    cacheType: 'raw' | 'filtered' | 'aggregated',
+    cacheType: CacheType,
     key: string,
     value: T,
     ttl: number,
@@ -795,7 +788,27 @@ export class RepositoryCacheManager {
     });
 
     // Prepare enhanced rollback operation with verification
-    if (originalValue !== null) {
+    if (originalValue === null) {
+      // Delete the newly created key if rollback is needed
+      const rollbackOp: RollbackOperation = {
+        execute: async () => {
+          await cache.del(key);
+        },
+        verify: async () => {
+          try {
+            const value = await cache.get(key);
+            return value === null || value === undefined;
+          } catch {
+            // If get() throws, the key likely doesn't exist, which is what we want
+            return true;
+          }
+        },
+        description: `Delete newly created ${cacheType} cache key '${key}'`,
+        cacheType,
+        key,
+      };
+      transaction.rollbackOperations.push(rollbackOp);
+    } else {
       // Restore original value if rollback is needed
       const rollbackOp: RollbackOperation = {
         execute: async () => {
@@ -813,26 +826,6 @@ export class RepositoryCacheManager {
           }
         },
         description: `Restore ${cacheType} cache key '${key}' to original value`,
-        cacheType,
-        key,
-      };
-      transaction.rollbackOperations.push(rollbackOp);
-    } else {
-      // Delete the newly created key if rollback is needed
-      const rollbackOp: RollbackOperation = {
-        execute: async () => {
-          await cache.del(key);
-        },
-        verify: async () => {
-          try {
-            const value = await cache.get(key);
-            return value === null || value === undefined;
-          } catch {
-            // If get() throws, the key likely doesn't exist, which is what we want
-            return true;
-          }
-        },
-        description: `Delete newly created ${cacheType} cache key '${key}'`,
         cacheType,
         key,
       };
@@ -857,7 +850,7 @@ export class RepositoryCacheManager {
    */
   private async transactionalDel<T>(
     cache: HybridLRUCache<T>,
-    cacheType: 'raw' | 'filtered' | 'aggregated',
+    cacheType: CacheType,
     key: string,
     transaction: CacheTransaction
   ): Promise<void> {
@@ -1141,7 +1134,7 @@ export class RepositoryCacheManager {
           );
 
           // Update system health metrics to reflect the failure
-          updateServiceHealthScore('cache', { errorRate: 1.0 });
+          updateServiceHealthScore('cache', { errorRate: 1 });
 
           // Rollback all cache changes to maintain consistency
           await this.rollbackTransaction(transaction);
@@ -1275,8 +1268,8 @@ export class RepositoryCacheManager {
 
         // Update system health with successful filtered cache operation
         updateServiceHealthScore('cache', {
-          cacheHitRate: 1.0,
-          errorRate: 0.0,
+          cacheHitRate: 1,
+          errorRate: 0,
         });
 
         return filteredCommits;
@@ -1296,7 +1289,7 @@ export class RepositoryCacheManager {
         );
 
         // Update service health score on error
-        updateServiceHealthScore('cache', { errorRate: 1.0 });
+        updateServiceHealthScore('cache', { errorRate: 1 });
 
         // Rollback transaction on any error
         await this.rollbackTransaction(transaction);
@@ -1463,8 +1456,8 @@ export class RepositoryCacheManager {
 
         // Update system health metrics
         updateServiceHealthScore('cache', {
-          cacheHitRate: 1.0,
-          errorRate: 0.0,
+          cacheHitRate: 1,
+          errorRate: 0,
         });
 
         return contributors;
@@ -1484,7 +1477,7 @@ export class RepositoryCacheManager {
         );
 
         // Update system health metrics
-        updateServiceHealthScore('cache', { errorRate: 1.0 });
+        updateServiceHealthScore('cache', { errorRate: 1 });
 
         // Rollback transaction to maintain cache consistency
         await this.rollbackTransaction(transaction);
@@ -1603,7 +1596,13 @@ export class RepositoryCacheManager {
         let aggregatedData: CommitHeatmapData;
 
         // Defensive programming: Handle null commits gracefully
-        if (!commits) {
+        if (commits) {
+          // Generate visualization data from filtered commits
+          aggregatedData = await gitService.aggregateCommitsByTime(
+            commits,
+            filterOptions
+          );
+        } else {
           logger.warn(
             'getOrParseFilteredCommits returned null, using empty array',
             { repoUrl }
@@ -1611,12 +1610,6 @@ export class RepositoryCacheManager {
           // Generate empty aggregated data structure
           aggregatedData = await gitService.aggregateCommitsByTime(
             [],
-            filterOptions
-          );
-        } else {
-          // Generate visualization data from filtered commits
-          aggregatedData = await gitService.aggregateCommitsByTime(
-            commits,
             filterOptions
           );
         }
@@ -1646,8 +1639,8 @@ export class RepositoryCacheManager {
 
         // Update system health metrics
         updateServiceHealthScore('cache', {
-          cacheHitRate: 1.0,
-          errorRate: 0.0,
+          cacheHitRate: 1,
+          errorRate: 0,
         });
 
         return aggregatedData;
@@ -1667,7 +1660,7 @@ export class RepositoryCacheManager {
         );
 
         // Update system health metrics
-        updateServiceHealthScore('cache', { errorRate: 1.0 });
+        updateServiceHealthScore('cache', { errorRate: 1 });
 
         // Rollback transaction to maintain cache consistency
         await this.rollbackTransaction(transaction);
@@ -1765,7 +1758,7 @@ export class RepositoryCacheManager {
         this.generateFilteredCommitsKey(repoUrl, { skip: 0, limit: 100 }),
         // Common aggregated cache patterns
         this.generateAggregatedDataKey(repoUrl, {}),
-        this.generateAggregatedDataKey(repoUrl, undefined),
+        this.generateAggregatedDataKey(repoUrl),
       ];
 
       for (const key of baseKeys) {
@@ -2174,7 +2167,7 @@ export class RepositoryCacheManager {
   private parseFilterDate(dateString: string, filterType: string): Date | null {
     try {
       const date = new Date(dateString);
-      if (isNaN(date.getTime())) {
+      if (Number.isNaN(date.getTime())) {
         logger.warn(`Invalid ${filterType} filter, ignoring`, {
           [filterType]: dateString,
         });
@@ -2346,8 +2339,8 @@ export class RepositoryCacheManager {
 
       // Update service health score on successful cache operation
       updateServiceHealthScore('cache', {
-        cacheHitRate: 1.0,
-        errorRate: 0.0,
+        cacheHitRate: 1,
+        errorRate: 0,
       });
 
       return commits;
@@ -2367,7 +2360,7 @@ export class RepositoryCacheManager {
       );
 
       // Update service health score on error
-      updateServiceHealthScore('cache', { errorRate: 1.0 });
+      updateServiceHealthScore('cache', { errorRate: 1 });
 
       // Rollback transaction on any error
       await this.rollbackTransaction(transaction);
@@ -2479,8 +2472,8 @@ export class RepositoryCacheManager {
 
       // Update service health score on successful cache operation
       updateServiceHealthScore('cache', {
-        cacheHitRate: 1.0,
-        errorRate: 0.0,
+        cacheHitRate: 1,
+        errorRate: 0,
       });
 
       return filteredCommits;
@@ -2500,7 +2493,7 @@ export class RepositoryCacheManager {
       );
 
       // Update service health score on error
-      updateServiceHealthScore('cache', { errorRate: 1.0 });
+      updateServiceHealthScore('cache', { errorRate: 1 });
 
       // Rollback transaction on any error
       await this.rollbackTransaction(transaction);
@@ -2526,9 +2519,11 @@ export class RepositoryCacheManager {
 export const repositoryCache = new RepositoryCacheManager();
 
 // Initialize the repository cache asynchronously
-void repositoryCache.initialize().catch((err) => {
+try {
+  await repositoryCache.initialize();
+} catch (err) {
   logger.error('Failed to initialize repository cache', { err });
-});
+}
 
 /**
  * High-level helper functions for easy cache integration.

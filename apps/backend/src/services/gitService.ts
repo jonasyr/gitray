@@ -1,6 +1,6 @@
-import { rm, mkdtemp } from 'fs/promises';
-import * as path from 'path';
-import * as os from 'os';
+import { rm, mkdtemp } from 'node:fs/promises';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import simpleGit, { SimpleGit, SimpleGitOptions } from 'simple-git';
 import { config } from '../config';
 import { getLogger } from './logger';
@@ -84,6 +84,11 @@ interface BatchProcessingResult {
   batchTime: number;
 }
 
+interface CommitMetadata {
+  date: string;
+  author: string;
+}
+
 /**
  * ENHANCED GITSERVICE WITH STREAMING CAPABILITIES
  */
@@ -115,10 +120,10 @@ class GitService {
 
       // Use rev-list --count for fastest possible count
       const countOutput = await localGit.raw(['rev-list', '--count', 'HEAD']);
-      const count = parseInt(countOutput.trim(), 10);
+      const count = Number.parseInt(countOutput.trim(), 10);
 
-      if (isNaN(count)) {
-        throw new Error(`Invalid commit count output: ${countOutput}`);
+      if (Number.isNaN(count)) {
+        throw new TypeError(`Invalid commit count output: ${countOutput}`);
       }
 
       logger.info(`Repository ${localRepoPath} has ${count} commits`);
@@ -402,8 +407,8 @@ class GitService {
       });
 
       // Force garbage collection if available (development/debugging)
-      if (global.gc && typeof global.gc === 'function') {
-        global.gc();
+      if (globalThis.gc && typeof globalThis.gc === 'function') {
+        globalThis.gc();
         logger.debug('Garbage collection triggered');
       }
     }
@@ -819,16 +824,19 @@ class GitService {
    */
   private buildCommitStatsArgs(options?: CommitFilterOptions): string[] {
     const args = ['log', '--pretty=format:%H|%cI|%an|%ae|%s', '--numstat'];
+    if (!options) return args;
 
-    if (options?.fromDate) args.push(`--since=${options.fromDate}`);
-    if (options?.toDate) args.push(`--until=${options.toDate}`);
-    if (options?.authors && options.authors.length > 0) {
-      options.authors.forEach((author) => args.push(`--author=${author}`));
-    } else if (options?.author) {
-      args.push(`--author=${options.author}`);
+    const { fromDate, toDate, authors, author, fileExtension } = options;
+    if (fromDate) args.push(`--since=${fromDate}`);
+    if (toDate) args.push(`--until=${toDate}`);
+
+    const authorFilters = authors?.length ? authors : author ? [author] : [];
+    for (const authorFilter of authorFilters) {
+      args.push(`--author=${authorFilter}`);
     }
-    if (options?.fileExtension) {
-      args.push('--', `**/*.${options.fileExtension}`);
+
+    if (fileExtension) {
+      args.push('--', `**/*.${fileExtension}`);
     }
 
     return args;
@@ -861,11 +869,11 @@ class GitService {
   private parseNumstatLine(line: string, currentCommit: any): void {
     const statParts = line.split(/\s+/);
     if (statParts.length >= 2) {
-      const added = parseInt(statParts[0], 10);
-      const deleted = parseInt(statParts[1], 10);
+      const added = Number.parseInt(statParts[0], 10);
+      const deleted = Number.parseInt(statParts[1], 10);
 
-      if (!isNaN(added)) currentCommit.linesAdded += added;
-      if (!isNaN(deleted)) currentCommit.linesDeleted += deleted;
+      if (!Number.isNaN(added)) currentCommit.linesAdded += added;
+      if (!Number.isNaN(deleted)) currentCommit.linesDeleted += deleted;
     }
   }
 
@@ -1062,8 +1070,7 @@ class GitService {
 
     // Add path filters if specified
     if (options?.paths && options.paths.length > 0) {
-      args.push('--');
-      args.push(...options.paths);
+      args.push('--', ...options.paths);
     }
 
     return args;
@@ -1096,66 +1103,126 @@ class GitService {
     >();
 
     const lines = output.split('\n');
-    let currentCommitDate: string | null = null;
-    let currentAuthor: string | null = null;
+    let currentCommit: CommitMetadata | null = null;
 
     for (const line of lines) {
       const trimmedLine = line.trim();
-      if (!trimmedLine) continue;
-
-      // Check if this is a commit header line
-      if (trimmedLine.includes('|')) {
-        const parts = trimmedLine.split('|');
-        if (parts.length >= 3) {
-          currentCommitDate = parts[1];
-          currentAuthor = parts[2];
-          continue;
-        }
+      if (!trimmedLine) {
+        continue;
       }
 
-      // This is a file path
-      if (currentCommitDate && currentAuthor && trimmedLine) {
-        const filePath = trimmedLine;
-
-        // Apply extension filter if specified
-        if (options?.extensions && options.extensions.length > 0) {
-          const fileExt = path.extname(filePath).substring(1); // Remove leading dot
-          if (!options.extensions.includes(fileExt)) {
-            continue;
-          }
-        }
-
-        // Initialize or update file churn data
-        if (!fileChurnMap.has(filePath)) {
-          fileChurnMap.set(filePath, {
-            changes: 0,
-            firstChange: currentCommitDate,
-            lastChange: currentCommitDate,
-            authors: new Set(),
-          });
-        }
-
-        const fileData = fileChurnMap.get(filePath)!;
-        fileData.changes += 1;
-        fileData.authors.add(currentAuthor);
-
-        // Update date range (git log is in reverse chronological order)
-        if (
-          !fileData.lastChange ||
-          new Date(currentCommitDate) > new Date(fileData.lastChange)
-        ) {
-          fileData.lastChange = currentCommitDate;
-        }
-        if (
-          !fileData.firstChange ||
-          new Date(currentCommitDate) < new Date(fileData.firstChange)
-        ) {
-          fileData.firstChange = currentCommitDate;
-        }
+      const metadata = this.extractCommitMetadata(trimmedLine);
+      if (metadata) {
+        currentCommit = metadata;
+        continue;
       }
+
+      if (!currentCommit) {
+        continue;
+      }
+
+      this.recordChurnForFile({
+        commit: currentCommit,
+        fileChurnMap,
+        filePath: trimmedLine,
+        options,
+      });
     }
 
     return fileChurnMap;
+  }
+
+  private extractCommitMetadata(line: string): CommitMetadata | null {
+    if (!line.includes('|')) {
+      return null;
+    }
+
+    const parts = line.split('|');
+    if (parts.length < 3) {
+      return null;
+    }
+
+    return {
+      date: parts[1],
+      author: parts[2],
+    };
+  }
+
+  private shouldIncludeFileForChurn(
+    filePath: string,
+    options?: ChurnFilterOptions
+  ): boolean {
+    if (!options?.extensions || options.extensions.length === 0) {
+      return true;
+    }
+
+    const fileExt = path.extname(filePath).substring(1);
+    return options.extensions.includes(fileExt);
+  }
+
+  private recordChurnForFile({
+    commit,
+    fileChurnMap,
+    filePath,
+    options,
+  }: {
+    commit: CommitMetadata;
+    fileChurnMap: Map<
+      string,
+      {
+        changes: number;
+        firstChange?: string;
+        lastChange?: string;
+        authors: Set<string>;
+      }
+    >;
+    filePath: string;
+    options?: ChurnFilterOptions;
+  }): void {
+    if (!this.shouldIncludeFileForChurn(filePath, options)) {
+      return;
+    }
+
+    if (!fileChurnMap.has(filePath)) {
+      fileChurnMap.set(filePath, {
+        changes: 0,
+        firstChange: commit.date,
+        lastChange: commit.date,
+        authors: new Set(),
+      });
+    }
+
+    const fileData = fileChurnMap.get(filePath)!;
+    fileData.changes += 1;
+    fileData.authors.add(commit.author);
+    fileData.lastChange = this.getMostRecentDate(
+      fileData.lastChange,
+      commit.date
+    );
+    fileData.firstChange = this.getOldestDate(
+      fileData.firstChange,
+      commit.date
+    );
+  }
+
+  private getMostRecentDate(
+    current: string | undefined,
+    candidate: string
+  ): string {
+    if (!current) {
+      return candidate;
+    }
+    return new Date(candidate) > new Date(current) ? candidate : current;
+  }
+
+  private getOldestDate(
+    current: string | undefined,
+    candidate: string
+  ): string {
+    if (!current) {
+      return candidate;
+    }
+    return new Date(candidate) < new Date(current) ? candidate : current;
   }
 
   /**
@@ -1436,13 +1503,15 @@ class GitService {
     endDate: Date
   ): Map<string, CommitAggregation> {
     const buckets = new Map<string, CommitAggregation>();
-    eachDayOfInterval({
+    const interval = eachDayOfInterval({
       start: startOfDay(startDate),
       end: startOfDay(endDate),
-    }).forEach((d) => {
-      const key = format(d, 'yyyy-MM-dd');
-      buckets.set(key, { periodStart: key, commitCount: 0, authors: [] });
     });
+
+    for (const day of interval) {
+      const key = format(day, 'yyyy-MM-dd');
+      buckets.set(key, { periodStart: key, commitCount: 0, authors: [] });
+    }
     return buckets;
   }
 
@@ -1451,18 +1520,20 @@ class GitService {
     buckets: Map<string, CommitAggregation>
   ): number {
     let max = 0;
-    commits.forEach((c) => {
-      const key = format(parseISO(c.date), 'yyyy-MM-dd');
+    for (const commit of commits) {
+      const key = format(parseISO(commit.date), 'yyyy-MM-dd');
       const bucket = buckets.get(key);
-      if (!bucket) return;
+      if (!bucket) {
+        continue;
+      }
       bucket.commitCount += 1;
-      if (!bucket.authors!.includes(c.authorName)) {
-        bucket.authors!.push(c.authorName);
+      if (!bucket.authors!.includes(commit.authorName)) {
+        bucket.authors!.push(commit.authorName);
       }
       if (bucket.commitCount > max) {
         max = bucket.commitCount;
       }
-    });
+    }
     return max;
   }
 
