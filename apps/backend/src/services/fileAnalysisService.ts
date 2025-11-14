@@ -57,6 +57,11 @@ import simpleGit, { SimpleGit } from 'simple-git';
 
 const logger = getLogger();
 
+type RepoCharacteristicLabel =
+  | 'supports-ls-tree'
+  | 'requires-shallow'
+  | 'large-size';
+
 /**
  * File category mapping based on extensions
  */
@@ -524,45 +529,42 @@ class FileAnalysisService {
     cacheKey: string,
     task: () => Promise<InFlightAnalysisResult>
   ): Promise<InFlightAnalysisResult> {
-    // Use a while loop for atomic check-and-set
-    while (true) {
-      const existingAnalysis = this.analysisLocks.get(cacheKey);
-      if (existingAnalysis) {
-        // Wait for existing analysis to complete
-        return existingAnalysis;
+    const existingAnalysis = this.analysisLocks.get(cacheKey);
+    if (existingAnalysis) {
+      // Wait for existing analysis to complete
+      return existingAnalysis;
+    }
+
+    // Create promise before setting to avoid race condition
+    let resolveFn!: (value: InFlightAnalysisResult) => void;
+    let rejectFn!: (reason?: unknown) => void;
+
+    const pendingPromise = new Promise<InFlightAnalysisResult>(
+      (resolve, reject) => {
+        resolveFn = resolve;
+        rejectFn = reject;
       }
+    );
 
-      // Create promise before setting to avoid race condition
-      let resolveFn!: (value: InFlightAnalysisResult) => void;
-      let rejectFn!: (reason?: unknown) => void;
+    // Atomic check-and-set using Map's behavior
+    const raceCheck = this.analysisLocks.get(cacheKey);
+    if (raceCheck) {
+      // Another request won the race, wait for it
+      return raceCheck;
+    }
 
-      const pendingPromise = new Promise<InFlightAnalysisResult>(
-        (resolve, reject) => {
-          resolveFn = resolve;
-          rejectFn = reject;
-        }
-      );
+    // We won the race, set our promise
+    this.analysisLocks.set(cacheKey, pendingPromise);
 
-      // Atomic check-and-set using Map's behavior
-      const raceCheck = this.analysisLocks.get(cacheKey);
-      if (raceCheck) {
-        // Another request won the race, wait for it
-        return raceCheck;
-      }
-
-      // We won the race, set our promise
-      this.analysisLocks.set(cacheKey, pendingPromise);
-
-      try {
-        const result = await task();
-        resolveFn(result);
-        return result;
-      } catch (error) {
-        rejectFn(error);
-        throw error;
-      } finally {
-        this.analysisLocks.delete(cacheKey);
-      }
+    try {
+      const result = await task();
+      resolveFn(result);
+      return result;
+    } catch (error) {
+      rejectFn(error);
+      throw error;
+    } finally {
+      this.analysisLocks.delete(cacheKey);
     }
   }
 
@@ -2998,12 +3000,9 @@ class FileAnalysisService {
           const repoSize = this.categorizeRepositorySize(
             analysisResult.result.metadata.totalFiles
           );
-          const repoCharacteristics =
-            methodDecision.method === 'ls-tree-remote'
-              ? 'supports-ls-tree'
-              : methodDecision.method === 'shallow-clone'
-                ? 'requires-shallow'
-                : 'large-size';
+          const repoCharacteristics = this.mapMethodToRepoCharacteristic(
+            methodDecision.method
+          );
 
           recordFileAnalysisPerformanceMetrics({
             method: analysisResult.actualMethod as
@@ -3410,6 +3409,24 @@ class FileAnalysisService {
     return Math.max(0, saved);
   }
 
+  private mapMethodToRepoCharacteristic(
+    method: AnalysisMethod
+  ): RepoCharacteristicLabel {
+    if (
+      method === 'ls-tree-remote' ||
+      method === 'ls-tree-local' ||
+      method === 'cached'
+    ) {
+      return 'supports-ls-tree';
+    }
+
+    if (method === 'shallow-clone') {
+      return 'requires-shallow';
+    }
+
+    return 'large-size';
+  }
+
   /**
    * Build analysis result from processed file information
    */
@@ -3417,27 +3434,7 @@ class FileAnalysisService {
     fileInfos: FileInfo[],
     commitHash: string
   ): FileTypeDistribution {
-    const totalFiles = fileInfos.length;
-
-    // Calculate statistics using existing methods
-    const categories = this.calculateCategoryStatistics(fileInfos, totalFiles);
-    const extensions = this.calculateExtensionStatistics(fileInfos, totalFiles);
-    const directories = this.buildDirectoryDistribution(fileInfos);
-    const totalSize = fileInfos.reduce((sum, file) => sum + file.size, 0);
-
-    return {
-      categories,
-      extensions,
-      directories,
-      metadata: {
-        totalFiles,
-        totalSize,
-        analyzedAt: new Date().toISOString(),
-        repositorySize: getRepositorySizeCategory(totalFiles),
-        commitHash,
-        streamingUsed: false, // Optimized methods don't use streaming
-      },
-    };
+    return this.buildAnalysisResultFromFileInfos(fileInfos, commitHash);
   }
 
   /**
