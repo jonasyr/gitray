@@ -17,6 +17,7 @@ export default tseslint.config(
     // Files to ignore
     ignores: [
       'eslint.config.mjs', // Config file itself
+      'apps/frontend/**/*',
       'apps/frontend/postcss.config.cjs',
       'apps/frontend/tailwind.config.cjs',
       'prettier.config.js',

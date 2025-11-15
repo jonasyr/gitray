@@ -14,10 +14,12 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
+    "types": ["vite/client"],
 
     /* Path mapping */
     "baseUrl": ".",
     "paths": {
+      "@/*": ["./src/*"],
       "@gitray/shared-types": ["../../packages/shared-types/src"],
       "@gitray/shared-types/*": ["../../packages/shared-types/src/*"]
     },
@@ -29,9 +31,8 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "types": ["vitest/globals", "@testing-library/jest-dom"]
+    "allowSyntheticDefaultImports": true
   },
-  "include": ["src", "__tests__"],
+  "include": ["src"],
   "references": [{ "path": "../../packages/shared-types" }]
 }

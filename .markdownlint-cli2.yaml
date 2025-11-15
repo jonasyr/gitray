@@ -38,7 +38,8 @@ gitignore: true
 globs:
   - '**/*.{md,markdown}'
 
-# 5) Ignore patterns - exclude prompts folder and Serena memories
+# 5) Ignore patterns - exclude prompts folder, Serena memories, and new frontend docs
 ignores:
   - 'prompts/**/*.{md,markdown}'
   - '.serena/memories/**/*.{md,markdown}'
+  - 'apps/frontend/src/**/*.{md,markdown}'
