@@ -334,3 +334,4 @@ apps/backend/logs/
 
 .claude*
 .mcp.json
+.serena

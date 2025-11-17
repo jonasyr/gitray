@@ -15,6 +15,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import { HTTP_STATUS } from '@gitray/shared-types';
 import { config, validateConfig } from './config';
 import { initializeLogger } from './services/logger';
 import routes from './routes';
@@ -189,8 +190,6 @@ export async function startApplication() {
     app.use('/api/repositories', repositoryRoutes);
     app.use('/api/commits', commitRoutes);
 
-    app.use(errorHandler);
-
     // Add coordination health endpoint
     app.get(
       '/health/coordination',
@@ -236,6 +235,17 @@ export async function startApplication() {
         }
       }
     );
+
+    // 404 handler - MUST come after ALL routes but before error handler
+    // Security: Returns JSON instead of HTML to prevent XSS via path reflection
+    app.use((req: Request, res: Response) => {
+      res.status(HTTP_STATUS.NOT_FOUND).json({
+        error: 'Not Found',
+        code: 'NOT_FOUND',
+      });
+    });
+
+    app.use(errorHandler);
 
     // Start the server with proper error handling
     logger.info('🔧 Starting Express server...');
