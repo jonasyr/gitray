@@ -3,11 +3,10 @@ import { vi } from 'vitest';
 
 // Global mock variables that can be used across all test files
 declare global {
-  // eslint-disable-next-line no-var
   var mockLogger: any;
-  // eslint-disable-next-line no-var
+
   var getLogger: any;
-  // eslint-disable-next-line no-var
+
   var mockMetrics: any;
 }
 

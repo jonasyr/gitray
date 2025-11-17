@@ -40,8 +40,8 @@ export type SerializationResponse = SerializationResult | SerializationError;
 
 export interface SerializationTask<T> {
   data: T;
-  resolve: (result: SerializationResult) => void;
-  reject: (error: Error) => void;
+  resolve: (_result: SerializationResult) => void;
+  reject: (_error: Error) => void;
 }
 
 /**

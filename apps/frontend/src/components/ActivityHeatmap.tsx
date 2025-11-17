@@ -51,7 +51,6 @@ const customStyles: StylesConfig<
 > = {
   control: (
     base: CSSObjectWithLabel,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _props: ControlProps<AuthorOption, true, GroupBase<AuthorOption>>
   ) => ({
     ...base,
@@ -296,13 +295,13 @@ const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
                 showWeekdayLabels
                 cellSize={cellSize}
                 gutterSize={2}
-                classForValue={classForValue as (v?: HeatmapValue) => string}
+                classForValue={classForValue as (_v?: HeatmapValue) => string}
                 titleForValue={
-                  titleForValue as (v?: HeatmapValue) => string | null
+                  titleForValue as (_v?: HeatmapValue) => string | null
                 }
-                onClick={(v: HeatmapValue | undefined) =>
-                  v &&
-                  window.open(`${repoUrl}/commits?until=${v.date}`, '_blank')
+                onClick={(_v: HeatmapValue | undefined) =>
+                  _v &&
+                  window.open(`${repoUrl}/commits?until=${_v.date}`, '_blank')
                 }
               />
             </div>

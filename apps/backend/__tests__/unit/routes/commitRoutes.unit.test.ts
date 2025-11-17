@@ -127,8 +127,7 @@ describe('CommitRoutes Unit Tests', () => {
     app.use('/api/commits', commitRoutes);
 
     // Add a simple error handler for testing
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    app.use((err: any, req: any, res: any, next: any) => {
+    app.use((err: any, _req: any, res: any, _next: any) => {
       res.status(err.status || 500).json({
         error: err.message || 'Internal server error',
         code: err.code || 'INTERNAL_ERROR',

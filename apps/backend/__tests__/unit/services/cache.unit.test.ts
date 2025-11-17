@@ -314,7 +314,7 @@ describe('Cache Service - Error Recovery', () => {
 
   test('should handle redis connection events and update health status', async () => {
     // ARRANGE
-    let errorHandler: (err: Error) => void;
+    let errorHandler: ((err: Error) => void) | undefined;
 
     // Setup the Redis mock to capture event handlers during cache initialization
     mockRedis.on.mockImplementation((event, callback) => {
@@ -326,7 +326,8 @@ describe('Cache Service - Error Recovery', () => {
     await ctx.importCache();
 
     // ACT & ASSERT - Simulate error event using the captured error handler
-    if (errorHandler!) {
+    expect(errorHandler).toBeDefined();
+    if (errorHandler) {
       errorHandler(new Error('Connection lost'));
       // The error handler should have called disconnect
       expect(mockRedis.disconnect).toHaveBeenCalled();

@@ -135,8 +135,8 @@ export const ERROR_MESSAGES = {
 export class GitrayError extends Error {
   constructor(
     message: string,
-    public statusCode: number = HTTP_STATUS.INTERNAL_SERVER_ERROR,
-    public code?: string
+    public readonly statusCode: number = HTTP_STATUS.INTERNAL_SERVER_ERROR,
+    public readonly code?: string
   ) {
     super(message);
     this.name = 'GitrayError';
@@ -146,7 +146,7 @@ export class GitrayError extends Error {
 export class ValidationError extends GitrayError {
   constructor(
     message: string,
-    public errors?: any[]
+    public readonly errors?: any[]
   ) {
     super(message, HTTP_STATUS.BAD_REQUEST, 'VALIDATION_ERROR');
     this.name = 'ValidationError';
@@ -156,7 +156,7 @@ export class ValidationError extends GitrayError {
 export class RepositoryError extends GitrayError {
   constructor(
     message: string,
-    public repoUrl?: string
+    public readonly repoUrl?: string
   ) {
     super(message, HTTP_STATUS.BAD_REQUEST, 'REPOSITORY_ERROR');
     this.name = 'RepositoryError';
@@ -166,8 +166,8 @@ export class RepositoryError extends GitrayError {
 export class TransactionRollbackError extends GitrayError {
   constructor(
     message: string,
-    public transactionId?: string,
-    public failedOperations?: string[]
+    public readonly transactionId?: string,
+    public readonly failedOperations?: string[]
   ) {
     super(
       message,

@@ -3389,11 +3389,11 @@ class FileAnalysisService {
     fileCount: number
   ): number {
     // Bandwidth estimates in bytes
-    const estimates: Record<AnalysisMethod, (files: number) => number> = {
-      'ls-tree-remote': (files) => files * 100, // ~100 bytes per file for ls-tree output
-      'shallow-clone': (files) => files * 200 + 1024 * 1024, // ~200 bytes per file + 1MB overhead
-      'full-clone': (files) => files * 15 * 1024, // ~15KB average file size
-      'ls-tree-local': (files) => files * 100, // Same as remote ls-tree
+    const estimates: Record<AnalysisMethod, (_files: number) => number> = {
+      'ls-tree-remote': (_files) => _files * 100, // ~100 bytes per file for ls-tree output
+      'shallow-clone': (_files) => _files * 200 + 1024 * 1024, // ~200 bytes per file + 1MB overhead
+      'full-clone': (_files) => _files * 15 * 1024, // ~15KB average file size
+      'ls-tree-local': (_files) => _files * 100, // Same as remote ls-tree
       cached: () => 0, // No bandwidth used for cached results
     };
 

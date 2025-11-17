@@ -61,7 +61,7 @@ export interface RepositoryOperationOptions {
  */
 export async function withTempRepository<T>(
   repoUrl: string,
-  callback: (tempDir: string) => Promise<T>,
+  callback: (_tempDir: string) => Promise<T>,
   options?: RepositoryOperationOptions
 ): Promise<T> {
   // Check if repository coordination is enabled
@@ -164,7 +164,7 @@ export async function withTempRepository<T>(
  */
 export async function withTempRepositoryStreaming<T>(
   repoUrl: string,
-  callback: (tempDir: string, commitCount: number) => Promise<T>,
+  callback: (_tempDir: string, _commitCount: number) => Promise<T>,
   options?: RepositoryOperationOptions & {
     streamingOptions?: {
       batchSize?: number;
@@ -372,7 +372,7 @@ export function getRepositoryStatus() {
  */
 async function withTempRepositoryLegacy<T>(
   repoUrl: string,
-  callback: (tempDir: string) => Promise<T>,
+  callback: (_tempDir: string) => Promise<T>,
   options?: RepositoryOperationOptions
 ): Promise<T> {
   let tempDir: string | undefined;
@@ -457,7 +457,7 @@ async function withTempRepositoryLegacy<T>(
  */
 async function withTempRepositoryStreamingLegacy<T>(
   repoUrl: string,
-  callback: (tempDir: string, commitCount: number) => Promise<T>,
+  callback: (_tempDir: string, _commitCount: number) => Promise<T>,
   options?: RepositoryOperationOptions
 ): Promise<T> {
   let tempDir: string | undefined;

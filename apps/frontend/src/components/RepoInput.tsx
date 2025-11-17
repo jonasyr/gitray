@@ -6,7 +6,7 @@ import React, { useState } from 'react';
  */
 
 interface RepoInputProps {
-  onVisualize: (repoUrl: string) => void;
+  onVisualize: (_repoUrl: string) => void;
 }
 
 /**
