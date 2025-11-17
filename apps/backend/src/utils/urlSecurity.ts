@@ -18,12 +18,15 @@ function parseAllowedHosts(): string[] {
 
 /**
  * Normalize hostname to prevent bypass via trailing dots or other tricks
+ * Uses a safe regex-free approach to prevent ReDoS
  */
 function normalizeHostname(hostname: string): string {
-  return hostname
-    .toLowerCase()
-    .replace(/\.+$/, '') // Remove trailing dots
-    .trim();
+  let normalized = hostname.toLowerCase().trim();
+  // Remove trailing dots without regex to prevent ReDoS
+  while (normalized.endsWith('.')) {
+    normalized = normalized.slice(0, -1);
+  }
+  return normalized;
 }
 
 /**
