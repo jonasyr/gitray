@@ -41,6 +41,7 @@ import {
 } from '@gitray/shared-types';
 import { config } from '../config';
 import { fileAnalysisService } from '../services/fileAnalysisService';
+import { isSecureGitUrl } from '../middlewares/validation';
 
 // Router serving commit related data with unified caching
 const router = express.Router();
@@ -87,31 +88,8 @@ const repoUrlValidation = (): ValidationChain[] => [
       require_valid_protocol: true,
     })
     .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
-    .matches(/\.git$|github\.com|gitlab\.com|bitbucket\.org/)
-    .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
-    // Additional security: prevent URL injection attacks
-    .custom((value) => {
-      try {
-        const url = new URL(value);
-        // Prevent localhost/private network access in production
-        if (process.env.NODE_ENV === 'production') {
-          const hostname = url.hostname.toLowerCase();
-          if (
-            hostname === 'localhost' ||
-            hostname === '127.0.0.1' ||
-            hostname.startsWith('192.168.') ||
-            hostname.startsWith('10.') ||
-            hostname.startsWith('172.')
-          ) {
-            return false;
-          }
-        }
-        return true;
-      } catch {
-        return false;
-      }
-    })
-    .withMessage('Invalid repository URL'),
+    .custom(isSecureGitUrl)
+    .withMessage('Invalid or potentially unsafe repository URL'),
 ];
 
 const paginationValidation = (): ValidationChain[] => [
@@ -479,7 +457,9 @@ router.get(
   [
     query('repoUrl')
       .isURL({ protocols: ['http', 'https'] })
-      .withMessage(ERROR_MESSAGES.INVALID_REPO_URL),
+      .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
+      .custom(isSecureGitUrl)
+      .withMessage('Invalid or potentially unsafe repository URL'),
     handleValidationErrors,
   ],
   async (req: Request, res: Response, next: NextFunction) => {
@@ -574,7 +554,9 @@ router.post(
   [
     body('repoUrl')
       .isURL({ protocols: ['http', 'https'] })
-      .withMessage(ERROR_MESSAGES.INVALID_REPO_URL),
+      .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
+      .custom(isSecureGitUrl)
+      .withMessage('Invalid or potentially unsafe repository URL'),
     handleValidationErrors,
   ],
   async (req: Request, res: Response) => {
@@ -651,8 +633,8 @@ const streamingOptionsValidation = [
       require_valid_protocol: true,
     })
     .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
-    .matches(/\.git$|github\.com|gitlab\.com|bitbucket\.org/)
-    .withMessage(ERROR_MESSAGES.INVALID_REPO_URL),
+    .custom(isSecureGitUrl)
+    .withMessage('Invalid or potentially unsafe repository URL'),
   body('batchSize')
     .optional()
     .isInt({ min: 1, max: 10000 })
@@ -919,8 +901,8 @@ const fileAnalysisValidation = (): ValidationChain[] => [
       require_valid_protocol: true,
     })
     .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
-    .matches(/\.git$|github\.com|gitlab\.com|bitbucket\.org/)
-    .withMessage(ERROR_MESSAGES.INVALID_REPO_URL),
+    .custom(isSecureGitUrl)
+    .withMessage('Invalid or potentially unsafe repository URL'),
   query('extensions')
     .optional()
     .isString()

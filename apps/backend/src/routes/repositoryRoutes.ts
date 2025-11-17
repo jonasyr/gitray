@@ -2,7 +2,10 @@ import express, { Request, Response, NextFunction } from 'express';
 import { gitService } from '../services/gitService';
 import redis from '../services/cache';
 import { body } from 'express-validator';
-import { handleValidationErrors } from '../middlewares/validation';
+import {
+  handleValidationErrors,
+  isSecureGitUrl,
+} from '../middlewares/validation';
 import { withTempRepository } from '../utils/withTempRepository';
 import {
   ERROR_MESSAGES,
@@ -37,8 +40,8 @@ const repoUrlValidation = [
   body('repoUrl')
     .isURL({ protocols: ['http', 'https'] })
     .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
-    .matches(/\.git$|github\.com|gitlab\.com|bitbucket\.org/)
-    .withMessage(ERROR_MESSAGES.INVALID_REPO_URL),
+    .custom(isSecureGitUrl)
+    .withMessage('Invalid or potentially unsafe repository URL'),
   handleValidationErrors,
 ];
 
