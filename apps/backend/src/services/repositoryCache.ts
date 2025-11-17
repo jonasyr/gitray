@@ -971,14 +971,11 @@ export class RepositoryCacheManager {
 
         // Route filtered requests to specialized cache tier for better hit rates
         if (this.hasSpecificFilters(options)) {
-          // Extend lock scope to include filtered cache operations
-          return withOrderedLocks(
-            [
-              `cache-operation:${repoUrl}`,
-              `cache-filtered:${repoUrl}`,
-              `repo-access:${repoUrl}`,
-            ],
-            () => this.getOrParseFilteredCommitsUnlocked(repoUrl, options)
+          // Acquire only cache-filtered lock since cache-operation and repo-access
+          // are already held by the outer withOrderedLocks.
+          // Fix for issue #110: Prevent deadlock from nested lock acquisition.
+          return withKeyLock(`cache-filtered:${repoUrl}`, () =>
+            this.getOrParseFilteredCommitsUnlocked(repoUrl, options)
           );
         }
 
@@ -1231,13 +1228,12 @@ export class RepositoryCacheManager {
 
       try {
         /*
-         * Carefully ordered locking prevents deadlocks when this filtered cache
-         * operation needs to call the main getOrParseCommits method, which also
-         * acquires cache-operation locks.
+         * Acquire only cache-operation lock since cache-filtered is already held
+         * by the outer withKeyLock. This prevents deadlock from nested lock acquisition.
+         * Fix for issue #110: Deadlock in heatmap endpoint.
          */
-        const rawCommits = await withOrderedLocks(
-          [`cache-filtered:${repoUrl}`, `cache-operation:${repoUrl}`],
-          () => this.getOrParseCommitsUnlocked(repoUrl)
+        const rawCommits = await withKeyLock(`cache-operation:${repoUrl}`, () =>
+          this.getOrParseCommitsUnlocked(repoUrl)
         );
 
         // Apply client-specified filters to raw commit data
@@ -1585,12 +1581,12 @@ export class RepositoryCacheManager {
         };
 
         /*
-         * Use ordered locking to prevent deadlocks when accessing filtered cache
-         * from within the aggregated cache operation context.
+         * Acquire only cache-filtered lock since cache-aggregated is already held
+         * by the outer withKeyLock. This prevents deadlock from nested lock acquisition.
+         * Fix for issue #110: Deadlock in heatmap endpoint.
          */
-        const commits = await withOrderedLocks(
-          [`cache-aggregated:${repoUrl}`, `cache-filtered:${repoUrl}`],
-          () => this.getOrParseFilteredCommitsUnlocked(repoUrl, commitOptions)
+        const commits = await withKeyLock(`cache-filtered:${repoUrl}`, () =>
+          this.getOrParseFilteredCommitsUnlocked(repoUrl, commitOptions)
         );
 
         let aggregatedData: CommitHeatmapData;
