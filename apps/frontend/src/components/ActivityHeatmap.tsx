@@ -51,6 +51,7 @@ const customStyles: StylesConfig<
 > = {
   control: (
     base: CSSObjectWithLabel,
+
     _props: ControlProps<AuthorOption, true, GroupBase<AuthorOption>>
   ) => ({
     ...base,

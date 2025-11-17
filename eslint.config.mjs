@@ -5,7 +5,6 @@ import react from 'eslint-plugin-react';
 import reactHooks from 'eslint-plugin-react-hooks';
 import jsxA11y from 'eslint-plugin-jsx-a11y';
 import sonarjs from 'eslint-plugin-sonarjs';
-import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +16,7 @@ export default tseslint.config(
   {
     // Files to ignore
     ignores: [
+      'eslint.config.mjs', // Config file itself
       'apps/frontend/postcss.config.cjs',
       'apps/frontend/tailwind.config.cjs',
       'prettier.config.js',
@@ -150,6 +150,7 @@ export default tseslint.config(
       globals: {
         ...globals.browser,
         ...globals.vitest,
+        React: 'readonly',
       },
     },
     rules: {
@@ -173,22 +174,16 @@ export default tseslint.config(
   {
     files: [
       '**/*.cjs',
-      '**/vitest.config.ts',
-      '**/vite.config.ts',
-      '**/apps/backend/src/**/*.js',
       'apps/backend/**/*.test.ts',
       'apps/backend/**/__tests__/**/*.ts',
     ],
     plugins: {
       '@typescript-eslint': tseslint.plugin,
     },
-    settings: {
-      // Ensure globals are available without overriding parser from workspace configs
-    },
     languageOptions: {
       globals: {
         ...globals.node,
-        ...globals.vitest, // Add vitest globals
+        ...globals.vitest,
         module: true,
         require: true,
         exports: true,
@@ -207,6 +202,25 @@ export default tseslint.config(
     },
   },
 
+  // Frontend and backend config files (vite, vitest)
+  {
+    files: [
+      'apps/frontend/vite.config.ts',
+      'apps/frontend/vitest.config.ts',
+      'apps/backend/vitest.config.ts',
+    ],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        __dirname: 'readonly',
+        process: 'readonly',
+      },
+    },
+    rules: {
+      'no-undef': 'off',
+    },
+  },
+
   // k6 load testing files
   {
     files: ['**/perf/**/*.ts'],
@@ -220,6 +234,4 @@ export default tseslint.config(
       'no-undef': 'off', // k6 has special globals
     },
   },
-
-  prettier,
 );
