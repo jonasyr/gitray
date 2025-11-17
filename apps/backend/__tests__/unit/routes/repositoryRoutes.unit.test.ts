@@ -33,6 +33,7 @@ const createValidationMiddleware = () => {
   middleware.matches = vi.fn(() => middleware);
   middleware.optional = vi.fn(() => middleware);
   middleware.isObject = vi.fn(() => middleware);
+  middleware.custom = vi.fn(() => middleware);
   return middleware;
 };
 
@@ -65,6 +66,7 @@ vi.mock('express-validator', () => ({
 vi.mock('../../../src/middlewares/validation', () => ({
   __esModule: true,
   handleValidationErrors: vi.fn((req: any, res: any, next: any) => next()),
+  isSecureGitUrl: vi.fn(() => Promise.resolve(true)),
 }));
 
 vi.mock('@gitray/shared-types', () => ({
