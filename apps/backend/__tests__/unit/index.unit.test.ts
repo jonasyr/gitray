@@ -1502,4 +1502,161 @@ describe('index.ts - ENHANCED COVERAGE', () => {
       global.setTimeout = originalSetTimeout;
     });
   });
+
+  describe('404 Handler - XSS Prevention', () => {
+    test('should return JSON for non-existent routes without reflecting path in HTML', async () => {
+      // ARRANGE
+      const { mockApp } = createTestContext();
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { startApplication } = await import('../../src/index');
+      await startApplication();
+
+      // Find the 404 handler (should be the second-to-last middleware, before errorHandler)
+      const useCall = mockApp.use.mock.calls.find((call: any) => {
+        const handler = call[0];
+        return (
+          typeof handler === 'function' &&
+          handler.length === 2 && // Request, Response (not Next)
+          handler.toString().includes('NOT_FOUND')
+        );
+      });
+
+      expect(useCall).toBeDefined();
+
+      const notFoundHandler = useCall![0];
+      const mockReq = { path: '/<svg/onload=alert(1)>' } as any;
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn().mockReturnThis(),
+      } as any;
+
+      notFoundHandler(mockReq, mockRes);
+
+      // ASSERT
+      expect(mockRes.status).toHaveBeenCalledWith(404);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: 'Not Found',
+        code: 'NOT_FOUND',
+      });
+
+      // Verify that the path is NOT reflected in the response
+      const jsonCall = mockRes.json.mock.calls[0][0];
+      expect(JSON.stringify(jsonCall)).not.toContain('<svg');
+      expect(JSON.stringify(jsonCall)).not.toContain('onload');
+    });
+
+    test('should handle URL-encoded XSS payloads safely', async () => {
+      // ARRANGE
+      const { mockApp } = createTestContext();
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { startApplication } = await import('../../src/index');
+      await startApplication();
+
+      const useCall = mockApp.use.mock.calls.find((call: any) => {
+        const handler = call[0];
+        return (
+          typeof handler === 'function' &&
+          handler.length === 2 &&
+          handler.toString().includes('NOT_FOUND')
+        );
+      });
+
+      const notFoundHandler = useCall![0];
+
+      // Test various XSS payloads from the issue
+      const xssPayloads = [
+        '/%3Csvg%2Fonload%3Dalert(1)%3E',
+        '/%22%3E%3C%2Fscript%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E',
+        '/%27%3E%3Cimg%20src=%22x%22%3E',
+      ];
+
+      for (const payload of xssPayloads) {
+        const mockReq = { path: payload } as any;
+        const mockRes = {
+          status: vi.fn().mockReturnThis(),
+          json: vi.fn().mockReturnThis(),
+        } as any;
+
+        notFoundHandler(mockReq, mockRes);
+
+        // ASSERT
+        expect(mockRes.status).toHaveBeenCalledWith(404);
+        expect(mockRes.json).toHaveBeenCalledWith({
+          error: 'Not Found',
+          code: 'NOT_FOUND',
+        });
+
+        // Verify response is JSON and doesn't contain the payload
+        const jsonResponse = mockRes.json.mock.calls[0][0];
+        expect(jsonResponse).toEqual({
+          error: 'Not Found',
+          code: 'NOT_FOUND',
+        });
+      }
+    });
+
+    test('should return application/json content type for 404 responses', async () => {
+      // ARRANGE
+      const { mockApp } = createTestContext();
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { startApplication } = await import('../../src/index');
+      await startApplication();
+
+      const useCall = mockApp.use.mock.calls.find((call: any) => {
+        const handler = call[0];
+        return (
+          typeof handler === 'function' &&
+          handler.length === 2 &&
+          handler.toString().includes('NOT_FOUND')
+        );
+      });
+
+      const notFoundHandler = useCall![0];
+      const mockReq = { path: '/nonexistent' } as any;
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn().mockReturnThis(),
+      } as any;
+
+      notFoundHandler(mockReq, mockRes);
+
+      // ASSERT
+      // Express's res.json() automatically sets Content-Type to application/json
+      // We verify that json() is called, which ensures the response is JSON not HTML
+      expect(mockRes.json).toHaveBeenCalled();
+    });
+  });
 });
