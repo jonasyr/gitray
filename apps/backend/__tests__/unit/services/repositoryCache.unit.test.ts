@@ -863,5 +863,39 @@ describe('RepositoryCache - Fast High Coverage', () => {
       // Should complete quickly without deadlock
       expect(duration).toBeLessThan(5000);
     });
+
+    test('lock helper methods return correct lock arrays', () => {
+      // Test getCommitLocks
+      const commitLocks = (repositoryCache as any).getCommitLocks(
+        'https://github.com/test/repo.git'
+      );
+      expect(commitLocks).toEqual([
+        'cache-filtered:https://github.com/test/repo.git',
+        'cache-operation:https://github.com/test/repo.git',
+        'repo-access:https://github.com/test/repo.git',
+      ]);
+
+      // Test getContributorLocks
+      const contributorLocks = (repositoryCache as any).getContributorLocks(
+        'https://github.com/test/repo.git'
+      );
+      expect(contributorLocks).toEqual([
+        'cache-contributors:https://github.com/test/repo.git',
+        'cache-filtered:https://github.com/test/repo.git',
+        'cache-operation:https://github.com/test/repo.git',
+        'repo-access:https://github.com/test/repo.git',
+      ]);
+
+      // Test getAggregatedLocks
+      const aggregatedLocks = (repositoryCache as any).getAggregatedLocks(
+        'https://github.com/test/repo.git'
+      );
+      expect(aggregatedLocks).toEqual([
+        'cache-aggregated:https://github.com/test/repo.git',
+        'cache-filtered:https://github.com/test/repo.git',
+        'cache-operation:https://github.com/test/repo.git',
+        'repo-access:https://github.com/test/repo.git',
+      ]);
+    });
   });
 });
