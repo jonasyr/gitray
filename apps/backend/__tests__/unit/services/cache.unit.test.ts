@@ -307,8 +307,9 @@ describe('Cache Service - Core Operations', () => {
 describe('Cache Service - Error Recovery', () => {
   let ctx = createCacheContext();
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ctx = createCacheContext();
+    await ctx.importCache();
   });
 
   test('should handle redis connection events and update health status', async () => {

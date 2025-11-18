@@ -138,7 +138,7 @@ describe('RepositoryCoordinator', () => {
     test('should wait for active clone operation', async () => {
       // ARRANGE
       const repoUrl = 'https://github.com/test/repo.git';
-      let resolveClone: (_value: string) => void = () => {};
+      let resolveClone: (path: string) => void;
       const clonePromise = new Promise<string>((resolve) => {
         resolveClone = resolve;
       });
