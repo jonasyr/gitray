@@ -32,6 +32,7 @@ import {
   updateCacheMetrics,
   updateAllEnhancedMetrics,
 } from './services/metrics';
+import { strictContentType } from './middlewares/strictContentType';
 
 // NEW IMPORTS: Repository coordination system
 import { repositoryCoordinator } from './services/repositoryCoordinator';
@@ -177,6 +178,9 @@ export async function startApplication() {
     // CRITICAL: Memory pressure protection middleware
     // This MUST be early in the middleware chain to protect against OOM crashes
     app.use(memoryPressureMiddleware);
+
+    // Enforce JSON requests with a custom header for state-changing operations
+    app.use(['/api/repositories', '/api/commits'], strictContentType);
 
     // Parse incoming JSON bodies
     app.use(express.json());
