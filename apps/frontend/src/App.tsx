@@ -9,6 +9,8 @@ import { DashboardPage } from './components/DashboardPage';
 import { RiveLoader } from './components/RiveLoader';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
+import { getRepositoryFullData } from './services/api';
+import { Commit, CommitHeatmapData } from '@gitray/shared-types';
 
 type Page = 'landing' | 'dashboard';
 type InfoType = 'what' | 'private' | 'local' | null;
@@ -22,6 +24,13 @@ export default function App() {
   const [newsOpen, setNewsOpen] = useState(false);
   const [infoModalType, setInfoModalType] = useState<InfoType>(null);
   const [hasUnreadNews, setHasUnreadNews] = useState(true);
+
+  // State for repository data
+  const [commits, setCommits] = useState<Commit[]>([]);
+  const [heatmapData, setHeatmapData] = useState<CommitHeatmapData | null>(
+    null
+  );
+  const [repoUrl, setRepoUrl] = useState<string>('');
 
   // Apply theme
   useEffect(() => {
@@ -39,21 +48,41 @@ export default function App() {
     }
   }, [theme]);
 
-  const handleAnalyze = (_url: string, mode: string) => {
+  const handleAnalyze = async (url: string, mode: string) => {
     setIsLoading(true);
-    toast.success('Analysis started!', {
+    toast.info('Analysis started!', {
       description: `Analyzing repository in ${mode} mode...`,
     });
 
-    // Simulate analysis delay
-    setTimeout(() => {
+    try {
+      // Fetch real data from backend
+      console.log('Calling API with URL:', url);
+      const data = await getRepositoryFullData(url, 'day');
+      console.log('API response:', data);
+
+      // Store the fetched data in state
+      setCommits(data.commits);
+      setHeatmapData(data.heatmapData);
+      setRepoUrl(url);
+
+      // Navigate to dashboard
       setCurrentPage('dashboard');
       setIsSignedIn(true);
       setIsLoading(false);
+
       toast.success('Analysis complete!', {
-        description: 'Repository data has been processed.',
+        description: `Successfully analyzed ${data.commits.length} commits.`,
       });
-    }, 2500);
+    } catch (error) {
+      setIsLoading(false);
+      console.error('Analysis error details:', error);
+      toast.error('Analysis failed', {
+        description:
+          error instanceof Error
+            ? error.message
+            : 'Failed to analyze repository',
+      });
+    }
   };
 
   const handleSignOut = () => {
@@ -106,7 +135,13 @@ export default function App() {
                 onInfoClick={handleInfoClick}
               />
             )}
-            {currentPage === 'dashboard' && <DashboardPage />}
+            {currentPage === 'dashboard' && (
+              <DashboardPage
+                commits={commits}
+                heatmapData={heatmapData}
+                repoUrl={repoUrl}
+              />
+            )}
           </>
         )}
       </main>

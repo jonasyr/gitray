@@ -32,8 +32,10 @@ import { GraphViewTimeline } from './GraphViewTimeline';
 import { GitDiffViewer } from './GitDiffViewer';
 import { AIInsights } from './AIInsights';
 import { PremiumFeatures } from './PremiumFeatures';
+import { Commit, CommitHeatmapData } from '@gitray/shared-types';
 
-const repoData = {
+// Mock data for fallback
+const mockRepoData = {
   name: 'analytics-pro',
   owner: 'Octo Org',
   created: '2019-06-14',
@@ -51,7 +53,34 @@ const contributors = [
   { name: 'Tom Brown', initials: 'TB' },
 ];
 
-export function DashboardPage() {
+interface DashboardPageProps {
+  commits: Commit[];
+  heatmapData: CommitHeatmapData | null;
+  repoUrl: string;
+}
+
+export function DashboardPage({
+  commits,
+  heatmapData,
+  repoUrl,
+}: DashboardPageProps) {
+  // Extract repo info from URL or use mock data
+  const urlParts = repoUrl ? repoUrl.split('/').filter(Boolean) : [];
+  const repoName =
+    urlParts[urlParts.length - 1]?.replace('.git', '') || mockRepoData.name;
+  const repoOwner = urlParts[urlParts.length - 2] || mockRepoData.owner;
+
+  const repoData = {
+    name: repoName,
+    owner: repoOwner,
+    totalCommits: commits.length || mockRepoData.totalCommits,
+    lastCommit: commits[0]?.date
+      ? new Date(commits[0].date).toLocaleDateString()
+      : mockRepoData.lastCommit,
+    contributors: mockRepoData.contributors, // Will calculate from commits later
+    created: mockRepoData.created, // Will need from backend
+    age: mockRepoData.age, // Will calculate
+  };
   return (
     <div className="container px-4 md:px-8 py-6 md:py-8 space-y-6 md:space-y-8">
       <div className="flex flex-col gap-4">

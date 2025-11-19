@@ -28,7 +28,12 @@ export const getWorkspaceCommits = async (
   repoUrl: string
 ): Promise<Commit[]> => {
   try {
-    const response = await apiClient.post('/api/repositories', { repoUrl });
+    // Ensure URL ends with .git for proper Git URL format
+    const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
+
+    const response = await apiClient.post('/api/repositories', {
+      repoUrl: normalizedUrl,
+    });
     return response.data.commits;
   } catch (error) {
     if (axios.isAxiosError(error)) {
@@ -66,7 +71,10 @@ export const getHeatmapData = async (
   filterOptions?: CommitFilterOptions
 ): Promise<CommitHeatmapData> => {
   try {
-    const params = new URLSearchParams({ repoUrl, timePeriod });
+    // Ensure URL ends with .git for proper Git URL format
+    const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
+
+    const params = new URLSearchParams({ repoUrl: normalizedUrl, timePeriod });
     if (filterOptions?.authors && filterOptions.authors.length > 0) {
       params.append('authors', filterOptions.authors.join(','));
     } else if (filterOptions?.author) {
@@ -109,8 +117,11 @@ export const getRepositoryFullData = async (
   filterOptions?: CommitFilterOptions
 ): Promise<{ commits: Commit[]; heatmapData: CommitHeatmapData }> => {
   try {
+    // Ensure URL ends with .git for proper Git URL format
+    const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
+
     const response = await apiClient.post('/api/repositories/full-data', {
-      repoUrl,
+      repoUrl: normalizedUrl,
       timePeriod,
       filterOptions,
     });
