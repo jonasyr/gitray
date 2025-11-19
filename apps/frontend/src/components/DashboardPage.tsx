@@ -3,7 +3,6 @@ import {
   Users,
   GitBranch,
   Calendar,
-  FileCode,
   TrendingUp,
   AlertCircle,
   Sparkles,
@@ -286,7 +285,10 @@ export function DashboardPage({
               </div>
             </CardHeader>
             <CardContent className="space-y-6">
-              <CommitHeatmap />
+              <CommitHeatmap
+                commits={commits}
+                heatmapData={heatmapData || undefined}
+              />
 
               <div className="pt-6 border-t">
                 <h4 className="font-medium mb-4">Peak Activity Times</h4>

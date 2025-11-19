@@ -1,17 +1,19 @@
-import { useState } from 'react';
+import { useMemo } from 'react';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from './ui/tooltip';
+import { Commit, CommitHeatmapData } from '@gitray/shared-types';
 
 interface CommitHeatmapProps {
-  data?: Array<{ date: string; count: number }>;
+  commits?: Commit[];
+  heatmapData?: CommitHeatmapData;
 }
 
-// Generate mock data for the last 12 months
-function generateHeatmapData() {
+// Generate mock data for the last 12 months (fallback when no real data)
+function generateMockHeatmapData() {
   const data = [];
   const today = new Date();
 
@@ -34,10 +36,44 @@ function generateHeatmapData() {
   return data;
 }
 
-export function CommitHeatmap({
-  data = generateHeatmapData(),
-}: CommitHeatmapProps) {
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+// Convert commits to heatmap data format
+function convertCommitsToHeatmapData(
+  commits: Commit[]
+): Array<{ date: string; count: number }> {
+  const commitsByDate = new Map<string, number>();
+
+  // Count commits per day
+  commits.forEach((commit) => {
+    const dateStr = commit.date.split('T')[0]; // Get YYYY-MM-DD format
+    commitsByDate.set(dateStr, (commitsByDate.get(dateStr) || 0) + 1);
+  });
+
+  // Generate data for last 365 days, filling gaps with 0
+  const data = [];
+  const today = new Date();
+
+  for (let i = 365; i >= 0; i--) {
+    const date = new Date(today);
+    date.setDate(date.getDate() - i);
+    const dateStr = date.toISOString().split('T')[0];
+
+    data.push({
+      date: dateStr,
+      count: commitsByDate.get(dateStr) || 0,
+    });
+  }
+
+  return data;
+}
+
+export function CommitHeatmap({ commits }: CommitHeatmapProps) {
+  // Use real data if available, otherwise fall back to mock data
+  const data = useMemo(() => {
+    if (commits && commits.length > 0) {
+      return convertCommitsToHeatmapData(commits);
+    }
+    return generateMockHeatmapData();
+  }, [commits]);
 
   // Get intensity color based on count
   const getColor = (count: number) => {
@@ -128,7 +164,6 @@ export function CommitHeatmap({
                       <TooltipTrigger asChild>
                         <div
                           className={`h-3 w-3 rounded-sm ${getColor(day.count)} transition-all hover:ring-2 hover:ring-primary cursor-pointer`}
-                          onClick={() => setSelectedDate(day.date)}
                         />
                       </TooltipTrigger>
                       <TooltipContent>
