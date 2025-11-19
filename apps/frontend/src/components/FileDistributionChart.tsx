@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   Cell,
   Pie,
@@ -6,24 +7,110 @@ import {
   Legend,
   Tooltip,
 } from 'recharts';
+import { FileTypeDistribution } from '@gitray/shared-types';
 
-const COLORS = {
-  TypeScript: '#5B9A8B',
-  Go: '#FFA69E',
-  Python: '#2E073F',
-  JSON: '#7DB9A5',
-  Other: '#FFB8B1',
+interface FileDistributionChartProps {
+  fileDistribution?: FileTypeDistribution | null;
+}
+
+const EXTENSION_COLORS: Record<string, string> = {
+  // By extension
+  '.ts': '#3178C6',
+  '.tsx': '#3178C6',
+  '.js': '#F7DF1E',
+  '.jsx': '#F7DF1E',
+  '.go': '#00ADD8',
+  '.py': '#3776AB',
+  '.json': '#292929',
+  '.md': '#083D77',
+  '.html': '#E34C26',
+  '.css': '#264DE4',
+  '.java': '#E76F00',
+  '.rs': '#DEA584',
+  '.c': '#A8B9CC',
+  '.cpp': '#00599C',
+  '.rb': '#CC342D',
+  '.php': '#777BB4',
+  '.swift': '#FA7343',
+  '.kt': '#7F52FF',
+  '.yml': '#CB171E',
+  '.yaml': '#CB171E',
+  '.sh': '#89E051',
+  '.sql': '#E38C00',
+  '.xml': '#E34C26',
+  '.csv': '#217346',
+  '.mjs': '#F7DF1E',
+  '.vue': '#42B883',
+  '.scss': '#CC6699',
+  '.sass': '#CC6699',
+  '.less': '#1D365D',
 };
 
-const data = [
-  { name: 'TypeScript', value: 48, color: COLORS.TypeScript },
-  { name: 'Go', value: 22, color: COLORS.Go },
-  { name: 'Python', value: 18, color: COLORS.Python },
-  { name: 'JSON', value: 7, color: COLORS.JSON },
-  { name: 'Other', value: 5, color: COLORS.Other },
+// Color palette for unmapped extensions
+const COLOR_PALETTE = [
+  '#5B9A8B',
+  '#FFA69E',
+  '#2E073F',
+  '#7DB9A5',
+  '#FFB8B1',
+  '#83C5BE',
+  '#EDF6F9',
+  '#FFDDD2',
+  '#E29578',
+  '#006D77',
 ];
 
-export function FileDistributionChart() {
+// Mock data for fallback
+const mockData = [
+  { name: 'TS', value: 48, color: EXTENSION_COLORS['.ts'] },
+  { name: 'GO', value: 22, color: EXTENSION_COLORS['.go'] },
+  { name: 'PY', value: 18, color: EXTENSION_COLORS['.py'] },
+  { name: 'JSON', value: 7, color: EXTENSION_COLORS['.json'] },
+  { name: 'MD', value: 5, color: EXTENSION_COLORS['.md'] },
+];
+
+// Convert backend data to chart format
+function convertToChartData(fileDistribution: FileTypeDistribution) {
+  const extensionData = Object.entries(fileDistribution.extensions)
+    .map(([ext, stats], index) => ({
+      name: ext.replace('.', '').toUpperCase(),
+      value: Math.round(stats.percentage),
+      count: stats.count,
+      size: stats.size,
+      color:
+        EXTENSION_COLORS[ext.toLowerCase()] ||
+        COLOR_PALETTE[index % COLOR_PALETTE.length],
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10); // Top 10 file types
+
+  return extensionData;
+}
+
+export function FileDistributionChart({
+  fileDistribution,
+}: FileDistributionChartProps) {
+  const data = useMemo(() => {
+    console.log('FileDistribution received:', fileDistribution);
+    if (fileDistribution && fileDistribution.extensions) {
+      const chartData = convertToChartData(fileDistribution);
+      console.log('Converted chart data:', chartData);
+      return chartData;
+    }
+    console.log('Using mock data');
+    return mockData;
+  }, [fileDistribution]);
+
+  console.log('Rendering with data:', data);
+
+  if (!data || data.length === 0) {
+    return (
+      <div className="h-[280px] w-full flex items-center justify-center text-muted-foreground">
+        No file data available
+      </div>
+    );
+  }
+
   return (
     <div className="h-[280px] w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -33,7 +120,7 @@ export function FileDistributionChart() {
             cx="50%"
             cy="50%"
             innerRadius={60}
-            outerRadius={90}
+            outerRadius={80}
             paddingAngle={2}
             dataKey="value"
           >
@@ -58,10 +145,9 @@ export function FileDistributionChart() {
           />
           <Legend
             verticalAlign="bottom"
-            height={36}
             iconType="circle"
             formatter={(value, entry: any) => (
-              <span className="text-sm text-foreground">
+              <span className="text-xs text-foreground">
                 {value} ({entry.payload.value}%)
               </span>
             )}

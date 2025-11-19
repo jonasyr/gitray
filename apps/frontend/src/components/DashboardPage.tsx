@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import {
   Lock,
   Users,
@@ -31,7 +32,12 @@ import { GraphViewTimeline } from './GraphViewTimeline';
 import { GitDiffViewer } from './GitDiffViewer';
 import { AIInsights } from './AIInsights';
 import { PremiumFeatures } from './PremiumFeatures';
-import { Commit, CommitHeatmapData } from '@gitray/shared-types';
+import {
+  Commit,
+  CommitHeatmapData,
+  FileTypeDistribution,
+} from '@gitray/shared-types';
+import { getFileAnalysis } from '../services/api';
 
 // Mock data for fallback
 const mockRepoData = {
@@ -63,6 +69,22 @@ export function DashboardPage({
   heatmapData,
   repoUrl,
 }: DashboardPageProps) {
+  const [fileDistribution, setFileDistribution] =
+    useState<FileTypeDistribution | null>(null);
+
+  // Fetch file analysis when repoUrl changes
+  useEffect(() => {
+    if (repoUrl) {
+      getFileAnalysis(repoUrl)
+        .then((data) => {
+          setFileDistribution(data);
+        })
+        .catch((error) => {
+          console.error('Failed to fetch file analysis:', error);
+        });
+    }
+  }, [repoUrl]);
+
   // Extract repo info from URL or use mock data
   const urlParts = repoUrl ? repoUrl.split('/').filter(Boolean) : [];
   const repoName =
@@ -236,7 +258,7 @@ export function DashboardPage({
                 <CardDescription>Languages by percentage</CardDescription>
               </CardHeader>
               <CardContent>
-                <FileDistributionChart />
+                <FileDistributionChart fileDistribution={fileDistribution} />
               </CardContent>
             </Card>
 
