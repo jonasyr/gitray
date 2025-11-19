@@ -6,6 +6,7 @@ import { NewsDrawer } from './components/NewsDrawer';
 import { InfoModal } from './components/InfoModal';
 import { LandingPage } from './components/LandingPage';
 import { DashboardPage } from './components/DashboardPage';
+import { RiveLoader } from './components/RiveLoader';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
 
@@ -15,6 +16,7 @@ type InfoType = 'what' | 'private' | 'local' | null;
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('landing');
   const [isSignedIn, setIsSignedIn] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('dark');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newsOpen, setNewsOpen] = useState(false);
@@ -38,6 +40,7 @@ export default function App() {
   }, [theme]);
 
   const handleAnalyze = (_url: string, mode: string) => {
+    setIsLoading(true);
     toast.success('Analysis started!', {
       description: `Analyzing repository in ${mode} mode...`,
     });
@@ -46,10 +49,11 @@ export default function App() {
     setTimeout(() => {
       setCurrentPage('dashboard');
       setIsSignedIn(true);
+      setIsLoading(false);
       toast.success('Analysis complete!', {
         description: 'Repository data has been processed.',
       });
-    }, 1500);
+    }, 2500);
   };
 
   const handleSignOut = () => {
@@ -86,13 +90,25 @@ export default function App() {
       />
 
       <main className="flex-1">
-        {currentPage === 'landing' && (
-          <LandingPage
-            onAnalyze={handleAnalyze}
-            onInfoClick={handleInfoClick}
-          />
+        {isLoading ? (
+          <div className="min-h-[calc(100vh-8rem)] flex items-center justify-center">
+            <RiveLoader
+              size={150}
+              message="Analyzing repository..."
+              theme={theme}
+            />
+          </div>
+        ) : (
+          <>
+            {currentPage === 'landing' && (
+              <LandingPage
+                onAnalyze={handleAnalyze}
+                onInfoClick={handleInfoClick}
+              />
+            )}
+            {currentPage === 'dashboard' && <DashboardPage />}
+          </>
         )}
-        {currentPage === 'dashboard' && <DashboardPage />}
       </main>
 
       <Footer />
