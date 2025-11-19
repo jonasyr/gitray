@@ -1,3 +1,4 @@
+<!-- markdownlint-disable -->
 # GitRay
 
 GitRay is a production-ready Git repository analysis and visualization platform that transforms commit history into interactive visualizations such as heatmaps, commit statistics, code churn analysis and time-series aggregations.
