@@ -48,6 +48,11 @@ const mockConfig = {
     batchSize: 100,
   },
   cacheStrategy: { hierarchicalCaching: true },
+  adminRateLimit: {
+    windowMs: 900000,
+    max: 100,
+    message: 'Too many admin requests, please try again later',
+  },
 };
 
 const mockMetrics = {
@@ -86,6 +91,20 @@ vi.mock('../../../src/services/cache', () => ({
 
 vi.mock('../../../src/config', () => ({
   config: mockConfig,
+  lockConfig: {},
+  adminAuthConfig: { enabled: true },
+  adminRateLimitConfig: {
+    windowMs: 900000,
+    max: 100,
+    message: 'Too many requests',
+  },
+  hybridCacheConfig: {},
+  streamingConfig: {},
+  debugConfig: {},
+  repositoryCacheConfig: {},
+  operationCoordinationConfig: {},
+  cacheStrategyConfig: {},
+  memoryPressureConfig: {},
 }));
 
 vi.mock('../../../src/services/metrics', () => mockMetrics);
@@ -94,6 +113,11 @@ vi.mock('../../../src/services/logger', () => ({
   default: global.mockLogger,
   getLogger: () => global.mockLogger,
   createRequestLogger: vi.fn(() => global.mockLogger),
+}));
+
+// Mock admin auth middleware to always allow access in tests
+vi.mock('../../../src/middlewares/adminAuth', () => ({
+  requireAdminToken: (req: any, res: any, next: any) => next(),
 }));
 
 vi.mock('../../../src/utils/cleanupScheduler', () => ({

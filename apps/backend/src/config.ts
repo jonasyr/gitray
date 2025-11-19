@@ -180,6 +180,36 @@ export const config = {
   },
 
   /**
+   * Admin authentication configuration
+   * Controls access to admin-only endpoints like cache management and metrics
+   */
+  adminAuth: {
+    // Enable/disable admin authentication (can be disabled for local development)
+    enabled: parseEnvBoolean(process.env.ADMIN_AUTH_ENABLED, true),
+
+    // Require authentication for /metrics endpoint
+    requireForMetrics: parseEnvBoolean(
+      process.env.REQUIRE_AUTH_FOR_METRICS,
+      true
+    ),
+  },
+
+  /**
+   * Admin-specific rate limiting configuration
+   * More restrictive than general API rate limiting
+   */
+  adminRateLimit: {
+    // Time window for rate limiting (15 minutes)
+    windowMs: parseEnvNumber(process.env.ADMIN_RATE_LIMIT_WINDOW_MS, 900000),
+
+    // Maximum requests per window
+    max: parseEnvNumber(process.env.ADMIN_RATE_LIMIT_MAX, 100),
+
+    // Error message for rate limit exceeded
+    message: 'Too many admin requests, please try again later',
+  },
+
+  /**
    * NEW: Repository-level caching configuration
    * Controls the shared repository coordinator and prevents duplicate clones
    */
@@ -556,6 +586,52 @@ function validateCacheStrategy(result: ValidationResult): void {
 }
 
 /**
+ * Validate admin authentication configuration
+ */
+function validateAdminAuth(result: ValidationResult): void {
+  if (!config.adminAuth.enabled) {
+    addWarning(
+      result,
+      'Admin authentication is disabled - admin endpoints are not protected'
+    );
+    return;
+  }
+
+  // Check if ADMIN_TOKEN is configured when auth is enabled
+  if (!process.env.ADMIN_TOKEN) {
+    addError(
+      result,
+      'ADMIN_TOKEN environment variable must be set when ADMIN_AUTH_ENABLED is true'
+    );
+  } else if (process.env.ADMIN_TOKEN.length < 32) {
+    addWarning(
+      result,
+      'ADMIN_TOKEN should be at least 32 characters for security'
+    );
+  }
+}
+
+/**
+ * Validate admin rate limiting configuration
+ */
+function validateAdminRateLimit(result: ValidationResult): void {
+  if (config.adminRateLimit.windowMs <= 0) {
+    addError(result, 'ADMIN_RATE_LIMIT_WINDOW_MS must be greater than 0');
+  }
+
+  if (config.adminRateLimit.max <= 0) {
+    addError(result, 'ADMIN_RATE_LIMIT_MAX must be greater than 0');
+  }
+
+  if (config.adminRateLimit.windowMs < 60000) {
+    addWarning(
+      result,
+      'ADMIN_RATE_LIMIT_WINDOW_MS is very low (<1min), may be too restrictive'
+    );
+  }
+}
+
+/**
  * Validate memory pressure configuration
  */
 function validateMemoryPressure(result: ValidationResult): void {
@@ -728,6 +804,8 @@ export function validateConfig(): void {
   validateHybridCache(result);
   validateRedis(result);
   validateGit(result);
+  validateAdminAuth(result);
+  validateAdminRateLimit(result);
   validateRepositoryCache(result);
   validateOperationCoordination(result);
   validateCacheStrategy(result);
@@ -745,6 +823,8 @@ export const {
   locks: lockConfig,
   streaming: streamingConfig,
   debug: debugConfig,
+  adminAuth: adminAuthConfig,
+  adminRateLimit: adminRateLimitConfig,
   repositoryCache: repositoryCacheConfig,
   operationCoordination: operationCoordinationConfig,
   cacheStrategy: cacheStrategyConfig,

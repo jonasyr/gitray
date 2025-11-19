@@ -51,6 +51,11 @@ vi.mock('../../../src/services/fileAnalysisService', () => ({
   },
 }));
 
+// Mock admin auth middleware to always allow access in tests
+vi.mock('../../../src/middlewares/adminAuth', () => ({
+  requireAdminToken: (req: any, res: any, next: any) => next(),
+}));
+
 type MockFn = ReturnType<typeof vi.fn>;
 
 let router: express.Router;
