@@ -420,7 +420,7 @@ class RepositoryCoordinator {
    */
   async withRepository<T>(
     repoUrl: string,
-    operation: (localPath: string) => Promise<T>
+    operation: (_localPath: string) => Promise<T>
   ): Promise<T> {
     const handle = await this.getSharedRepository(repoUrl);
 
@@ -800,7 +800,7 @@ export const repositoryCoordinator = new RepositoryCoordinator();
 // Export helper functions
 export async function withSharedRepository<T>(
   repoUrl: string,
-  callback: (handle: RepositoryHandle) => Promise<T>
+  callback: (_handle: RepositoryHandle) => Promise<T>
 ): Promise<T> {
   const handle = await repositoryCoordinator.getSharedRepository(repoUrl);
 

@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-
 // Generic error handler used at the end of the middleware chain. It logs the
 // error details and converts known GitrayError instances into structured JSON
 // responses. Unknown errors fallback to HTTP 500.
@@ -20,7 +18,7 @@ const errorHandler: ErrorRequestHandler = (
   err: Error,
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ) => {
   const userType = getUserType(req);
 

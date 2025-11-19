@@ -365,6 +365,35 @@ export class RepositoryCacheManager {
   }
 
   /**
+   * Helper method to generate standard lock array for commit operations.
+   * Ensures consistent lock ordering across all methods to prevent deadlocks.
+   * Lock order: cache-filtered < cache-operation < repo-access (alphabetical)
+   */
+  private getCommitLocks(repoUrl: string): string[] {
+    return [
+      `cache-filtered:${repoUrl}`,
+      `cache-operation:${repoUrl}`,
+      `repo-access:${repoUrl}`,
+    ];
+  }
+
+  /**
+   * Helper method to generate lock array for contributor operations.
+   * Lock order: cache-contributors < cache-filtered < cache-operation < repo-access
+   */
+  private getContributorLocks(repoUrl: string): string[] {
+    return [`cache-contributors:${repoUrl}`, ...this.getCommitLocks(repoUrl)];
+  }
+
+  /**
+   * Helper method to generate lock array for aggregated data operations.
+   * Lock order: cache-aggregated < cache-filtered < cache-operation < repo-access
+   */
+  private getAggregatedLocks(repoUrl: string): string[] {
+    return [`cache-aggregated:${repoUrl}`, ...this.getCommitLocks(repoUrl)];
+  }
+
+  /**
    * Creates a new cache transaction for atomic multi-tier operations.
    *
    * Transactions ensure that cache updates across multiple tiers either all succeed
@@ -963,192 +992,185 @@ export class RepositoryCacheManager {
     repoUrl: string,
     options?: CommitCacheOptions
   ): Promise<Commit[]> {
-    // Use ordered locks to prevent deadlock between cache operations and repository access
-    return withOrderedLocks(
-      [`cache-operation:${repoUrl}`, `repo-access:${repoUrl}`],
-      async () => {
-        const startTime = Date.now();
+    // FIX: Use ordered locks to prevent deadlock with getOrParseFilteredCommits
+    // All three locks are acquired upfront to match getOrParseFilteredCommits
+    return withOrderedLocks(this.getCommitLocks(repoUrl), async () => {
+      const startTime = Date.now();
 
-        // Route filtered requests to specialized cache tier for better hit rates
-        if (this.hasSpecificFilters(options)) {
-          // Extend lock scope to include filtered cache operations
-          return withOrderedLocks(
-            [
-              `cache-operation:${repoUrl}`,
-              `cache-filtered:${repoUrl}`,
-              `repo-access:${repoUrl}`,
-            ],
-            () => this.getOrParseFilteredCommitsUnlocked(repoUrl, options)
-          );
-        }
+      // Route filtered requests to specialized cache tier for better hit rates
+      if (this.hasSpecificFilters(options)) {
+        // FIX: All locks are already held by outer withOrderedLocks in correct order.
+        // No nested lock acquisition needed - prevents circular lock dependencies.
+        // Fix for issue #110: Prevent cache-operation/cache-filtered circular locking.
+        return this.getOrParseFilteredCommitsUnlocked(repoUrl, options);
+      }
 
-        // Attempt to retrieve from raw commits cache (Tier 1)
-        const rawKey = this.generateRawCommitsKey(repoUrl);
-        let commits: Commit[] | null = null;
+      // Attempt to retrieve from raw commits cache (Tier 1)
+      const rawKey = this.generateRawCommitsKey(repoUrl);
+      let commits: Commit[] | null = null;
 
-        try {
-          commits = await this.rawCommitsCache.get(rawKey);
-        } catch (error) {
-          // Record cache operation failure for system health monitoring
-          recordDetailedError(
-            'cache',
-            error instanceof Error ? error : new Error(String(error)),
-            {
-              userImpact: 'degraded',
-              recoveryAction: 'fallback',
-              severity: 'warning',
-            }
-          );
+      try {
+        commits = await this.rawCommitsCache.get(rawKey);
+      } catch (error) {
+        // Record cache operation failure for system health monitoring
+        recordDetailedError(
+          'cache',
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            userImpact: 'degraded',
+            recoveryAction: 'fallback',
+            severity: 'warning',
+          }
+        );
 
-          logger.error('Cache operation failed', {
-            operation: 'get',
-            key: rawKey,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          commits = null;
-        }
+        logger.error('Cache operation failed', {
+          operation: 'get',
+          key: rawKey,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        commits = null;
+      }
 
-        if (commits) {
-          // Cache hit: Update metrics and return cached data immediately
-          this.metrics.operations.rawHits++;
-          this.recordHitTime(startTime);
-          cacheHits.inc({ operation: 'raw_commits' });
-          recordEnhancedCacheOperation(
-            'raw_commits',
-            true,
-            undefined,
-            repoUrl,
-            commits.length
-          );
-
-          // Track data freshness for cache effectiveness analysis
-          const cacheAge = Date.now() - startTime;
-          recordDataFreshness('commits', cacheAge);
-
-          logger.debug('Raw commits cache hit', {
-            repoUrl,
-            commitsCount: commits.length,
-            cacheKey: rawKey,
-          });
-
-          return commits;
-        }
-
-        // Cache miss: Fetch from Git repository and cache the result
-        this.metrics.operations.rawMisses++;
-        this.recordMissTime(startTime);
-        cacheMisses.inc({ operation: 'raw_commits' });
-        recordEnhancedCacheOperation('raw_commits', false, undefined, repoUrl);
-
-        logger.info('Raw commits cache miss, fetching from repository', {
+      if (commits) {
+        // Cache hit: Update metrics and return cached data immediately
+        this.metrics.operations.rawHits++;
+        this.recordHitTime(startTime);
+        cacheHits.inc({ operation: 'raw_commits' });
+        recordEnhancedCacheOperation(
+          'raw_commits',
+          true,
+          undefined,
           repoUrl,
+          commits.length
+        );
+
+        // Track data freshness for cache effectiveness analysis
+        const cacheAge = Date.now() - startTime;
+        recordDataFreshness('commits', cacheAge);
+
+        logger.debug('Raw commits cache hit', {
+          repoUrl,
+          commitsCount: commits.length,
           cacheKey: rawKey,
         });
 
-        const transaction = this.createTransaction(repoUrl);
-
-        try {
-          /*
-           * Use shared repository coordination to prevent duplicate Git clones.
-           * Multiple concurrent requests for the same repository will share a single
-           * clone operation, significantly reducing I/O overhead and disk usage.
-           */
-          commits = await withSharedRepository(
-            repoUrl,
-            async (handle: RepositoryHandle) => {
-              logger.info('Fetching raw commits via shared repository', {
-                repoUrl,
-                commitCount: handle.commitCount,
-                sizeCategory: handle.sizeCategory,
-                isShared: handle.isShared,
-              });
-
-              // Track efficiency gains from repository sharing
-              if (handle.isShared && handle.refCount > 1) {
-                this.metrics.efficiency.duplicateClonesPrevented++;
-                logger.debug('Duplicate clone prevented', {
-                  repoUrl,
-                  refCount: handle.refCount,
-                  totalPrevented:
-                    this.metrics.efficiency.duplicateClonesPrevented,
-                });
-              }
-
-              return gitService.getCommits(handle.localPath);
-            }
-          );
-
-          // Defensive programming: Ensure we never cache null values
-          if (!commits) {
-            commits = [];
-            logger.warn(
-              'gitService.getCommits returned null, using empty array',
-              {
-                repoUrl,
-              }
-            );
-          }
-
-          // Store the fetched data in cache using transactional consistency
-          const ttl = config.cacheStrategy.cacheKeys.rawCommitsTTL;
-          await this.transactionalSet(
-            this.rawCommitsCache,
-            'raw',
-            rawKey,
-            commits,
-            ttl,
-            transaction
-          );
-
-          // Finalize the transaction - all operations succeeded
-          await this.commitTransaction(transaction);
-
-          logger.info('Raw commits cached with transaction', {
-            repoUrl,
-            commitsCount: commits.length,
-            ttl,
-            sizeCategory: getRepositorySizeCategory(commits.length),
-            transactionId: transaction.id,
-          });
-
-          // Update system health metrics with successful operation
-          updateServiceHealthScore('cache', {
-            cacheHitRate: 1.0,
-            errorRate: 0.0,
-          });
-
-          return commits;
-        } catch (error) {
-          // Increment transaction failure counter for monitoring
-          this.metrics.transactions.failed++;
-
-          // Record comprehensive error details for debugging and alerting
-          recordDetailedError(
-            'cache',
-            error instanceof Error ? error : new Error(String(error)),
-            {
-              userImpact: 'degraded',
-              recoveryAction: 'retry',
-              severity: 'warning',
-            }
-          );
-
-          // Update system health metrics to reflect the failure
-          updateServiceHealthScore('cache', { errorRate: 1 });
-
-          // Rollback all cache changes to maintain consistency
-          await this.rollbackTransaction(transaction);
-
-          logger.error('Failed to cache raw commits, transaction rolled back', {
-            repoUrl,
-            transactionId: transaction.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
-
-          throw error;
-        }
+        return commits;
       }
-    );
+
+      // Cache miss: Fetch from Git repository and cache the result
+      this.metrics.operations.rawMisses++;
+      this.recordMissTime(startTime);
+      cacheMisses.inc({ operation: 'raw_commits' });
+      recordEnhancedCacheOperation('raw_commits', false, undefined, repoUrl);
+
+      logger.info('Raw commits cache miss, fetching from repository', {
+        repoUrl,
+        cacheKey: rawKey,
+      });
+
+      const transaction = this.createTransaction(repoUrl);
+
+      try {
+        /*
+         * Use shared repository coordination to prevent duplicate Git clones.
+         * Multiple concurrent requests for the same repository will share a single
+         * clone operation, significantly reducing I/O overhead and disk usage.
+         */
+        commits = await withSharedRepository(
+          repoUrl,
+          async (handle: RepositoryHandle) => {
+            logger.info('Fetching raw commits via shared repository', {
+              repoUrl,
+              commitCount: handle.commitCount,
+              sizeCategory: handle.sizeCategory,
+              isShared: handle.isShared,
+            });
+
+            // Track efficiency gains from repository sharing
+            if (handle.isShared && handle.refCount > 1) {
+              this.metrics.efficiency.duplicateClonesPrevented++;
+              logger.debug('Duplicate clone prevented', {
+                repoUrl,
+                refCount: handle.refCount,
+                totalPrevented:
+                  this.metrics.efficiency.duplicateClonesPrevented,
+              });
+            }
+
+            return gitService.getCommits(handle.localPath);
+          }
+        );
+
+        // Defensive programming: Ensure we never cache null values
+        if (!commits) {
+          commits = [];
+          logger.warn(
+            'gitService.getCommits returned null, using empty array',
+            {
+              repoUrl,
+            }
+          );
+        }
+
+        // Store the fetched data in cache using transactional consistency
+        const ttl = config.cacheStrategy.cacheKeys.rawCommitsTTL;
+        await this.transactionalSet(
+          this.rawCommitsCache,
+          'raw',
+          rawKey,
+          commits,
+          ttl,
+          transaction
+        );
+
+        // Finalize the transaction - all operations succeeded
+        await this.commitTransaction(transaction);
+
+        logger.info('Raw commits cached with transaction', {
+          repoUrl,
+          commitsCount: commits.length,
+          ttl,
+          sizeCategory: getRepositorySizeCategory(commits.length),
+          transactionId: transaction.id,
+        });
+
+        // Update system health metrics with successful operation
+        updateServiceHealthScore('cache', {
+          cacheHitRate: 1.0,
+          errorRate: 0.0,
+        });
+
+        return commits;
+      } catch (error) {
+        // Increment transaction failure counter for monitoring
+        this.metrics.transactions.failed++;
+
+        // Record comprehensive error details for debugging and alerting
+        recordDetailedError(
+          'cache',
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            userImpact: 'degraded',
+            recoveryAction: 'retry',
+            severity: 'warning',
+          }
+        );
+
+        // Update system health metrics to reflect the failure
+        updateServiceHealthScore('cache', { errorRate: 1 });
+
+        // Rollback all cache changes to maintain consistency
+        await this.rollbackTransaction(transaction);
+
+        logger.error('Failed to cache raw commits, transaction rolled back', {
+          repoUrl,
+          transactionId: transaction.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
+        throw error;
+      }
+    });
   }
 
   /**
@@ -1166,14 +1188,15 @@ export class RepositoryCacheManager {
    * @param options - Commit filtering criteria
    * @returns Promise resolving to filtered commit array
    *
-   * @internal This method uses specialized locking to prevent deadlocks when called
-   * from within other cache operations
+   * @internal This method uses ordered locking to prevent deadlocks with getOrParseCommits
    */
   async getOrParseFilteredCommits(
     repoUrl: string,
     options?: CommitCacheOptions
   ): Promise<Commit[]> {
-    return withKeyLock(`cache-filtered:${repoUrl}`, async () => {
+    // FIX: Use withOrderedLocks to ensure consistent lock acquisition order
+    // This prevents deadlock between getOrParseCommits and getOrParseFilteredCommits
+    return withOrderedLocks(this.getCommitLocks(repoUrl), async () => {
       const startTime = Date.now();
 
       // Attempt retrieval from filtered commits cache (Tier 2)
@@ -1231,14 +1254,11 @@ export class RepositoryCacheManager {
 
       try {
         /*
-         * Carefully ordered locking prevents deadlocks when this filtered cache
-         * operation needs to call the main getOrParseCommits method, which also
-         * acquires cache-operation locks.
+         * FIX: All locks are already held by outer withOrderedLocks in correct order.
+         * No nested lock acquisition needed - prevents deadlock with getOrParseCommits.
+         * Fix for issue #110: Prevent cache-operation/cache-filtered circular locking.
          */
-        const rawCommits = await withOrderedLocks(
-          [`cache-filtered:${repoUrl}`, `cache-operation:${repoUrl}`],
-          () => this.getOrParseCommitsUnlocked(repoUrl)
-        );
+        const rawCommits = await this.getOrParseCommitsUnlocked(repoUrl);
 
         // Apply client-specified filters to raw commit data
         filteredCommits = this.applyFilters(rawCommits, options);
@@ -1331,7 +1351,8 @@ export class RepositoryCacheManager {
       contributionPercentage: number;
     }>
   > {
-    return withKeyLock(`cache-contributors:${repoUrl}`, async () => {
+    // FIX: Use withOrderedLocks to prevent deadlock with getOrParseCommits
+    return withOrderedLocks(this.getContributorLocks(repoUrl), async () => {
       const startTime = Date.now();
 
       // Generate cache key for contributors
@@ -1390,35 +1411,29 @@ export class RepositoryCacheManager {
       const transaction = this.createTransaction(repoUrl);
 
       try {
-        // Use ordered locking to prevent deadlocks
-        // Note: cache-contributors lock is already held by outer withKeyLock
-        let contributors = await withOrderedLocks(
-          [`repo-access:${repoUrl}`],
-          async () => {
-            return withSharedRepository(
+        // FIX: All locks already held by outer withOrderedLocks, no nested acquisition needed
+        let contributors = await withSharedRepository(
+          repoUrl,
+          async (handle: RepositoryHandle) => {
+            logger.info('Fetching contributors via shared repository', {
               repoUrl,
-              async (handle: RepositoryHandle) => {
-                logger.info('Fetching contributors via shared repository', {
-                  repoUrl,
-                  commitCount: handle.commitCount,
-                  sizeCategory: handle.sizeCategory,
-                  isShared: handle.isShared,
-                });
+              commitCount: handle.commitCount,
+              sizeCategory: handle.sizeCategory,
+              isShared: handle.isShared,
+            });
 
-                // Track efficiency gains from repository sharing
-                if (handle.isShared && handle.refCount > 1) {
-                  this.metrics.efficiency.duplicateClonesPrevented++;
-                  logger.debug('Duplicate clone prevented for contributors', {
-                    repoUrl,
-                    refCount: handle.refCount,
-                  });
-                }
+            // Track efficiency gains from repository sharing
+            if (handle.isShared && handle.refCount > 1) {
+              this.metrics.efficiency.duplicateClonesPrevented++;
+              logger.debug('Duplicate clone prevented for contributors', {
+                repoUrl,
+                refCount: handle.refCount,
+              });
+            }
 
-                return gitService.getTopContributors(
-                  handle.localPath,
-                  filterOptions
-                );
-              }
+            return gitService.getTopContributors(
+              handle.localPath,
+              filterOptions
             );
           }
         );
@@ -1511,7 +1526,8 @@ export class RepositoryCacheManager {
     repoUrl: string,
     filterOptions?: CommitFilterOptions
   ): Promise<CommitHeatmapData> {
-    return withKeyLock(`cache-aggregated:${repoUrl}`, async () => {
+    // FIX: Use withOrderedLocks to prevent deadlock with getOrParseCommits
+    return withOrderedLocks(this.getAggregatedLocks(repoUrl), async () => {
       const startTime = Date.now();
 
       // Attempt retrieval from aggregated data cache (Tier 3)
@@ -1585,12 +1601,13 @@ export class RepositoryCacheManager {
         };
 
         /*
-         * Use ordered locking to prevent deadlocks when accessing filtered cache
-         * from within the aggregated cache operation context.
+         * FIX: All locks already held by outer withOrderedLocks in correct order.
+         * No nested lock acquisition needed - prevents circular lock dependencies.
+         * Fix for issue #110: Prevent cache-operation/cache-filtered circular locking.
          */
-        const commits = await withOrderedLocks(
-          [`cache-aggregated:${repoUrl}`, `cache-filtered:${repoUrl}`],
-          () => this.getOrParseFilteredCommitsUnlocked(repoUrl, commitOptions)
+        const commits = await this.getOrParseFilteredCommitsUnlocked(
+          repoUrl,
+          commitOptions
         );
 
         let aggregatedData: CommitHeatmapData;

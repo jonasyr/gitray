@@ -67,7 +67,7 @@ global.process.exit = mockProcessExit as any;
 
 describe('Graceful Shutdown', () => {
   let server: Server;
-  let setupGracefulShutdown: (server: Server) => void;
+  let setupGracefulShutdown: (_server: Server) => void;
   let isServerShuttingDown: () => boolean;
   let clearTimeoutSpy: any; // Added spy instance
 
@@ -140,14 +140,14 @@ describe('Graceful Shutdown', () => {
   const testSignal = async (
     signal: string,
     eventEmitter?: (
-      handler: (errOrReason?: any) => Promise<void> | void
+      _handler: (_errOrReason?: any) => Promise<void> | void
     ) => Promise<void> | void
   ) => {
     // Arrange
     setupGracefulShutdown(server);
     const handler = mockProcessOn.mock.calls.find(
       (call) => call[0] === signal
-    )![1] as (sigOrErr: any) => Promise<void>;
+    )![1] as (_sigOrErr: any) => Promise<void>;
 
     // Act
     if (eventEmitter) {

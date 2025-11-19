@@ -307,16 +307,15 @@ describe('Cache Service - Core Operations', () => {
 describe('Cache Service - Error Recovery', () => {
   let ctx = createCacheContext();
 
-  beforeEach(async () => {
+  beforeEach(() => {
     ctx = createCacheContext();
-    await ctx.importCache();
   });
 
   test('should handle redis connection events and update health status', async () => {
     // ARRANGE
-    let errorHandler: (err: Error) => void;
+    let errorHandler: ((err: Error) => void) | undefined;
 
-    // Setup the Redis mock to capture event handlers during cache initialization
+    // Setup the Redis mock to capture event handlers BEFORE cache initialization
     mockRedis.on.mockImplementation((event, callback) => {
       if (event === 'error') errorHandler = callback;
       return mockRedis;
@@ -325,16 +324,28 @@ describe('Cache Service - Error Recovery', () => {
     // Import the cache service (this will trigger Redis initialization)
     await ctx.importCache();
 
-    // ACT & ASSERT - Simulate error event using the captured error handler
-    if (errorHandler!) {
-      errorHandler(new Error('Connection lost'));
-      // The error handler should have called disconnect
-      expect(mockRedis.disconnect).toHaveBeenCalled();
+    // ACT & ASSERT - Check if error event handler was registered
+    if (mockRedis.on.mock.calls.length > 0) {
+      // If Redis was initialized, verify error handler was set up
+      expect(mockRedis.on).toHaveBeenCalledWith('error', expect.any(Function));
+
+      // Simulate error event using the captured error handler
+      if (errorHandler) {
+        errorHandler(new Error('Connection lost'));
+        // The error handler should have called disconnect
+        expect(mockRedis.disconnect).toHaveBeenCalled();
+      }
+    } else {
+      // If Redis initialization was skipped, verify cache still works with fallback
+      const result = await ctx.cache.get('test-key');
+      expect(result).toBeNull();
     }
   });
 
   test('should handle cache operation timeouts and network failures', async () => {
-    // ARRANGE
+    // ARRANGE - Import cache first
+    await ctx.importCache();
+
     ctx.cache.__setDependenciesForTesting(
       mockHybridCache,
       mockRedis,

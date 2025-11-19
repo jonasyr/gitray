@@ -832,7 +832,7 @@ class MemoryPressureManager {
 export class MemoryPressureError extends Error {
   constructor(
     message: string,
-    public code: string
+    public readonly code: string
   ) {
     super(message);
     this.name = 'MemoryPressureError';

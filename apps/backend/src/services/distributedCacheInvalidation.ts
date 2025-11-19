@@ -36,7 +36,7 @@ export class DistributedCacheInvalidation {
   private readonly subscriptions = new Set<string>();
   private readonly invalidationHandlers = new Map<
     string,
-    (pattern: string, metadata?: any) => Promise<void>
+    (_pattern: string, _metadata?: any) => Promise<void>
   >();
 
   constructor(redisConfig?: {
@@ -196,7 +196,7 @@ export class DistributedCacheInvalidation {
    */
   public registerInvalidationHandler(
     pattern: string,
-    handler: (pattern: string, metadata?: any) => Promise<void>
+    handler: (_pattern: string, _metadata?: any) => Promise<void>
   ): void {
     this.invalidationHandlers.set(pattern, handler);
     logger.debug('Registered distributed cache invalidation handler', {

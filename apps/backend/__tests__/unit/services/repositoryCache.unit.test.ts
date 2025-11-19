@@ -794,4 +794,108 @@ describe('RepositoryCache - Fast High Coverage', () => {
       expect(cache.calculateHitRatio(3, 7)).toBe(0.3);
     });
   });
+
+  // ========================================
+  // DEADLOCK PREVENTION (Issue #110)
+  // ========================================
+  describe('Deadlock Prevention', () => {
+    test('getOrGenerateAggregatedData should not deadlock with nested locks', async () => {
+      resetMockCalls();
+      const startTime = Date.now();
+
+      // Mock cache misses to trigger the code path with nested locks
+      mockCache.get
+        .mockResolvedValueOnce(null) // aggregated miss
+        .mockResolvedValueOnce(null) // filtered miss
+        .mockResolvedValueOnce(testCommits); // raw hit
+
+      const result = await repositoryCache.getOrGenerateAggregatedData(
+        'https://github.com/test/repo.git',
+        { author: 'test' }
+      );
+
+      const duration = Date.now() - startTime;
+
+      // Should complete quickly, not timeout after 120 seconds
+      expect(duration).toBeLessThan(5000);
+      expect(result).toEqual(testHeatmapData);
+
+      // Verify withKeyLock was called for cache-filtered, not withOrderedLocks with duplicate locks
+      expect(mockLock).toHaveBeenCalled();
+    });
+
+    test('getOrParseCommits should not deadlock with filtered options', async () => {
+      resetMockCalls();
+      const startTime = Date.now();
+
+      // Mock cache misses to trigger filtered path
+      mockCache.get
+        .mockResolvedValueOnce(null) // filtered miss
+        .mockResolvedValueOnce(testCommits); // raw hit
+
+      await repositoryCache.getOrParseCommits(
+        'https://github.com/test/repo.git',
+        { author: 'test' }
+      );
+
+      const duration = Date.now() - startTime;
+
+      // Should complete quickly without deadlock
+      expect(duration).toBeLessThan(5000);
+    });
+
+    test('getOrParseFilteredCommits should not deadlock when acquiring cache-operation lock', async () => {
+      resetMockCalls();
+      const startTime = Date.now();
+
+      // Mock cache miss to trigger raw commits fetch
+      mockCache.get
+        .mockResolvedValueOnce(null) // filtered miss
+        .mockResolvedValueOnce(testCommits); // raw hit
+
+      await repositoryCache.getOrParseFilteredCommits(
+        'https://github.com/test/repo.git',
+        { author: 'test' }
+      );
+
+      const duration = Date.now() - startTime;
+
+      // Should complete quickly without deadlock
+      expect(duration).toBeLessThan(5000);
+    });
+
+    test('lock helper methods return correct lock arrays', () => {
+      // Test getCommitLocks
+      const commitLocks = (repositoryCache as any).getCommitLocks(
+        'https://github.com/test/repo.git'
+      );
+      expect(commitLocks).toEqual([
+        'cache-filtered:https://github.com/test/repo.git',
+        'cache-operation:https://github.com/test/repo.git',
+        'repo-access:https://github.com/test/repo.git',
+      ]);
+
+      // Test getContributorLocks
+      const contributorLocks = (repositoryCache as any).getContributorLocks(
+        'https://github.com/test/repo.git'
+      );
+      expect(contributorLocks).toEqual([
+        'cache-contributors:https://github.com/test/repo.git',
+        'cache-filtered:https://github.com/test/repo.git',
+        'cache-operation:https://github.com/test/repo.git',
+        'repo-access:https://github.com/test/repo.git',
+      ]);
+
+      // Test getAggregatedLocks
+      const aggregatedLocks = (repositoryCache as any).getAggregatedLocks(
+        'https://github.com/test/repo.git'
+      );
+      expect(aggregatedLocks).toEqual([
+        'cache-aggregated:https://github.com/test/repo.git',
+        'cache-filtered:https://github.com/test/repo.git',
+        'cache-operation:https://github.com/test/repo.git',
+        'repo-access:https://github.com/test/repo.git',
+      ]);
+    });
+  });
 });
