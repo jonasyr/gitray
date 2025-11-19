@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 import { Badge } from './ui/badge';
+import { RiveLogo } from './RiveLogo';
 
 interface HeaderProps {
   isSignedIn: boolean;
@@ -18,6 +19,7 @@ interface HeaderProps {
   showNews?: boolean;
   hasUnreadNews?: boolean;
   title?: string;
+  theme?: 'light' | 'dark' | 'system';
 }
 
 export function Header({
@@ -29,6 +31,7 @@ export function Header({
   showNews = false,
   hasUnreadNews = false,
   title,
+  theme = 'dark',
 }: HeaderProps) {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -47,11 +50,12 @@ export function Header({
             onClick={onNavigateHome}
             className="flex items-center gap-2 group"
           >
-            <div className="h-8 w-8 md:h-10 md:w-10 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-md group-hover:shadow-lg transition-all">
-              <span className="text-primary-foreground font-bold text-sm md:text-base">
-                GR
-              </span>
-            </div>
+            <RiveLogo
+              size={40}
+              interactive={true}
+              theme={theme}
+              className="md:w-10 md:h-10"
+            />
             {title && (
               <span className="hidden md:block text-lg md:text-xl font-semibold">
                 {title}

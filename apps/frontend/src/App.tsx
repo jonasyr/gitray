@@ -7,7 +7,7 @@ import { InfoModal } from './components/InfoModal';
 import { LandingPage } from './components/LandingPage';
 import { DashboardPage } from './components/DashboardPage';
 import { Toaster } from './components/ui/sonner';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
 
 type Page = 'landing' | 'dashboard';
 type InfoType = 'what' | 'private' | 'local' | null;
@@ -37,7 +37,7 @@ export default function App() {
     }
   }, [theme]);
 
-  const handleAnalyze = (url: string, mode: string) => {
+  const handleAnalyze = (_url: string, mode: string) => {
     toast.success('Analysis started!', {
       description: `Analyzing repository in ${mode} mode...`,
     });
@@ -82,6 +82,7 @@ export default function App() {
         showNews={currentPage === 'dashboard'}
         hasUnreadNews={hasUnreadNews}
         title={currentPage === 'dashboard' ? 'GitRay' : undefined}
+        theme={theme}
       />
 
       <main className="flex-1">
