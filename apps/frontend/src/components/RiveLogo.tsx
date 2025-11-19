@@ -24,22 +24,30 @@ export function RiveLogo({
   theme = 'dark',
 }: RiveLogoProps) {
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('dark');
+  const [logoKey, setLogoKey] = useState(0);
 
   // Resolve system theme preference
   useEffect(() => {
     if (theme === 'system') {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
       const updateTheme = () => {
-        setResolvedTheme(mediaQuery.matches ? 'dark' : 'light');
+        const newTheme = mediaQuery.matches ? 'dark' : 'light';
+        if (newTheme !== resolvedTheme) {
+          setResolvedTheme(newTheme);
+          setLogoKey((prev) => prev + 1);
+        }
       };
 
       updateTheme();
       mediaQuery.addEventListener('change', updateTheme);
       return () => mediaQuery.removeEventListener('change', updateTheme);
     } else {
-      setResolvedTheme(theme);
+      if (theme !== resolvedTheme) {
+        setResolvedTheme(theme);
+        setLogoKey((prev) => prev + 1);
+      }
     }
-  }, [theme]);
+  }, [theme, resolvedTheme]);
 
   const logoSrc =
     resolvedTheme === 'dark'
@@ -60,6 +68,7 @@ export function RiveLogo({
 
   return (
     <div
+      key={logoKey}
       className={`flex items-center justify-center ${interactive ? 'cursor-pointer' : ''} ${className}`}
       style={{ width: size, height: size }}
     >
