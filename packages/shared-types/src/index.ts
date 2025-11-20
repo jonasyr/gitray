@@ -320,10 +320,8 @@ export type AnalysisMethod =
 export type DataSource =
   | 'git-ls-tree' // From git ls-tree commands
   | 'filesystem-walk' // From actual filesystem traversal
-  | 'cache-hit' // From cached analysis results
-  | 'git-sparse-clone' // Git-based repository metadata retrieval
-  | 'git+github-api' // Hybrid git plus platform API
-  | 'cache';
+  | 'cache-hit'; // From cached analysis results
+
 /**
  * Repository characteristics for method selection optimization
  */
@@ -505,11 +503,7 @@ export type RepositoryStatus = 'active' | 'inactive' | 'archived' | 'empty';
 /**
  * Source of repository creation date information
  */
-export type CreatedDateSource = 'first-commit' | 'github-api' | 'gitlab-api';
-
-/**
- * Data source identifier for repository metadata
- */
+export type CreatedDateSource = 'first-commit' | 'git-api' | 'platform-api';
 
 /**
  * Parsed repository URL components
@@ -571,7 +565,7 @@ export interface RepositorySummary {
     /** Whether data was retrieved from cache */
     cached: boolean;
     /** Source of the data */
-    dataSource: DataSource;
+    dataSource: 'git-sparse-clone' | 'cache';
     /** Accuracy of creation date */
     createdDateAccuracy: 'exact' | 'approximate';
     /** Bandwidth savings description */
