@@ -347,14 +347,21 @@ class RepositorySummaryService {
       throw new ValidationError('Repository URL must include owner and name');
     }
 
+    // Safely remove trailing slashes without regex backtracking vulnerability
+    const urlString = parsed.toString();
+    let trimmedUrl = urlString;
+    while (trimmedUrl.endsWith('/')) {
+      trimmedUrl = trimmedUrl.slice(0, -1);
+    }
+
     return {
       platform: this.getPlatform(normalizedHost),
       owner,
       name,
       fullUrl:
         parsed.pathname.endsWith('.git') || parsed.pathname === ''
-          ? parsed.toString()
-          : `${parsed.toString().replace(/\/+$/, '')}.git`,
+          ? urlString
+          : `${trimmedUrl}.git`,
     };
   }
 
@@ -385,7 +392,8 @@ class RepositorySummaryService {
   }
 
   private buildCacheKey(repoUrl: string): string {
-    const hash = crypto.createHash('md5').update(repoUrl).digest('hex');
+    // Use SHA-256 instead of MD5 for better security (non-cryptographic cache key)
+    const hash = crypto.createHash('sha256').update(repoUrl).digest('hex');
     return `repo:summary:${hash}`;
   }
 
