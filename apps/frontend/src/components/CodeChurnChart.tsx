@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   Card,
   CardContent,
@@ -17,8 +18,14 @@ import {
 } from 'recharts';
 import { AlertTriangle, TrendingUp } from 'lucide-react';
 import { Badge } from './ui/badge';
+import { CodeChurnAnalysis } from '@gitray/shared-types';
 
-const churnData = [
+interface CodeChurnChartProps {
+  churnData?: CodeChurnAnalysis | null;
+}
+
+// Mock data for fallback
+const mockChurnData = [
   { file: 'api/auth.ts', changes: 47, category: 'high', bugRisk: 'High' },
   {
     file: 'components/Dashboard.tsx',
@@ -60,14 +67,48 @@ const COLORS = {
   low: '#5B9A8B',
 };
 
-export function CodeChurnChart() {
+// Convert backend data to chart format (backend already limits results)
+function convertChurnData(churnAnalysis: CodeChurnAnalysis) {
+  // Take only top 20 for visualization (backend sends top 50)
+  return churnAnalysis.files.slice(0, 20).map((file) => ({
+    file: file.path,
+    changes: file.changes,
+    category: file.risk,
+    bugRisk: file.risk.charAt(0).toUpperCase() + file.risk.slice(1),
+  }));
+}
+
+export function CodeChurnChart({ churnData }: CodeChurnChartProps) {
+  console.log('CodeChurnChart received churnData:', churnData);
+
+  const chartData = useMemo(() => {
+    if (churnData && churnData.files && Array.isArray(churnData.files)) {
+      const converted = convertChurnData(churnData);
+      console.log('Converted chart data:', converted);
+      return converted;
+    }
+    console.log('Using mock data');
+    return mockChurnData;
+  }, [churnData]);
+
+  const stats = useMemo(() => {
+    if (churnData && churnData.metadata) {
+      return {
+        highRisk: churnData.metadata.highRiskCount,
+        mediumRisk: churnData.metadata.mediumRiskCount,
+        total: churnData.metadata.totalFiles,
+      };
+    }
+    return { highRisk: 3, mediumRisk: 3, total: 8 };
+  }, [churnData]);
+
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="border-destructive/50">
           <CardHeader className="pb-3">
             <CardDescription>High Risk Files</CardDescription>
-            <CardTitle className="text-2xl">3</CardTitle>
+            <CardTitle className="text-2xl">{stats.highRisk}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
@@ -79,7 +120,7 @@ export function CodeChurnChart() {
         <Card className="border-yellow-500/50">
           <CardHeader className="pb-3">
             <CardDescription>Medium Risk Files</CardDescription>
-            <CardTitle className="text-2xl">3</CardTitle>
+            <CardTitle className="text-2xl">{stats.mediumRisk}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
@@ -91,7 +132,7 @@ export function CodeChurnChart() {
         <Card className="border-primary/50">
           <CardHeader className="pb-3">
             <CardDescription>Total Analyzed</CardDescription>
-            <CardTitle className="text-2xl">8</CardTitle>
+            <CardTitle className="text-2xl">{stats.total}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
@@ -113,7 +154,7 @@ export function CodeChurnChart() {
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={churnData} layout="vertical">
+            <BarChart data={chartData} layout="vertical">
               <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
               <XAxis type="number" />
               <YAxis dataKey="file" type="category" width={150} fontSize={12} />
@@ -125,7 +166,7 @@ export function CodeChurnChart() {
                 }}
               />
               <Bar dataKey="changes" radius={[0, 4, 4, 0]}>
-                {churnData.map((entry, index) => (
+                {chartData.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
                     fill={COLORS[entry.category as keyof typeof COLORS]}
@@ -139,7 +180,7 @@ export function CodeChurnChart() {
             <div className="flex items-center justify-between text-sm">
               <span className="font-medium">Bug Hotspot Analysis</span>
             </div>
-            {churnData.slice(0, 3).map((file, index) => (
+            {chartData.slice(0, 3).map((file, index) => (
               <div
                 key={index}
                 className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"

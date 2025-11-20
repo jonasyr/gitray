@@ -36,8 +36,9 @@ import {
   Commit,
   CommitHeatmapData,
   FileTypeDistribution,
+  CodeChurnAnalysis,
 } from '@gitray/shared-types';
-import { getFileAnalysis } from '../services/api';
+import { getFileAnalysis, getCodeChurn } from '../services/api';
 
 // Mock data for fallback
 const mockRepoData = {
@@ -71,16 +72,29 @@ export function DashboardPage({
 }: DashboardPageProps) {
   const [fileDistribution, setFileDistribution] =
     useState<FileTypeDistribution | null>(null);
+  const [churnData, setChurnData] = useState<CodeChurnAnalysis | null>(null);
 
-  // Fetch file analysis when repoUrl changes
+  // Fetch file analysis and churn data when repoUrl changes
   useEffect(() => {
     if (repoUrl) {
+      // Fetch file analysis
       getFileAnalysis(repoUrl)
         .then((data) => {
           setFileDistribution(data);
         })
         .catch((error) => {
           console.error('Failed to fetch file analysis:', error);
+        });
+
+      // Fetch code churn analysis
+      getCodeChurn(repoUrl)
+        .then((data) => {
+          console.log('Fetched churn data:', data);
+          setChurnData(data);
+        })
+        .catch((error) => {
+          console.error('Failed to fetch code churn:', error);
+          setChurnData(null);
         });
     }
   }, [repoUrl]);
@@ -364,7 +378,7 @@ export function DashboardPage({
             </TabsList>
 
             <TabsContent value="churn">
-              <CodeChurnChart />
+              <CodeChurnChart churnData={churnData} />
             </TabsContent>
 
             <TabsContent value="files">

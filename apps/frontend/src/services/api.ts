@@ -5,6 +5,7 @@ import {
   CommitFilterOptions,
   CommitHeatmapData,
   FileTypeDistribution,
+  CodeChurnAnalysis,
 } from '@gitray/shared-types';
 
 // Define the base URL for the API
@@ -184,9 +185,47 @@ export const getFileAnalysis = async (
   }
 };
 
+/**
+ * Fetches code churn analysis for a repository
+ * @param repoUrl The URL of the git repository
+ * @returns Promise containing code churn data
+ */
+export const getCodeChurn = async (
+  repoUrl: string
+): Promise<CodeChurnAnalysis> => {
+  try {
+    // Ensure URL ends with .git for proper Git URL format
+    const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
+
+    const response = await apiClient.post('/api/repositories/churn', {
+      repoUrl: normalizedUrl,
+      filterOptions: {
+        limit: 50, // Request only top 50 files for performance
+      },
+    });
+    return response.data.churnData;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        throw new Error(
+          `Server error: ${error.response.data?.error ?? error.message}`
+        );
+      } else if (error.request) {
+        throw new Error(
+          'No response from server. Please check your network connection.'
+        );
+      } else {
+        throw new Error(`Error: ${error.message}`);
+      }
+    }
+    throw new Error('An unexpected error occurred');
+  }
+};
+
 export default {
   getWorkspaceCommits,
   getHeatmapData,
   getRepositoryFullData,
   getFileAnalysis,
+  getCodeChurn,
 };
