@@ -26,39 +26,62 @@ interface CodeChurnChartProps {
 
 // Mock data for fallback
 const mockChurnData = [
-  { file: 'api/auth.ts', changes: 47, category: 'high', bugRisk: 'High' },
   {
-    file: 'components/Dashboard.tsx',
+    file: 'auth.ts',
+    fullPath: 'api/auth.ts',
+    changes: 47,
+    category: 'high',
+    bugRisk: 'High',
+  },
+  {
+    file: 'Dashboard.tsx',
+    fullPath: 'components/Dashboard.tsx',
     changes: 38,
     category: 'high',
     bugRisk: 'High',
   },
   {
-    file: 'utils/helpers.ts',
+    file: 'helpers.ts',
+    fullPath: 'utils/helpers.ts',
     changes: 32,
     category: 'high',
     bugRisk: 'Medium',
   },
   {
-    file: 'pages/settings.tsx',
+    file: 'settings.tsx',
+    fullPath: 'pages/settings.tsx',
     changes: 24,
     category: 'medium',
     bugRisk: 'Medium',
   },
   {
-    file: 'lib/api-client.ts',
+    file: 'api-client.ts',
+    fullPath: 'lib/api-client.ts',
     changes: 19,
     category: 'medium',
     bugRisk: 'Low',
   },
   {
-    file: 'styles/globals.css',
+    file: 'globals.css',
+    fullPath: 'styles/globals.css',
     changes: 15,
     category: 'medium',
     bugRisk: 'Low',
   },
-  { file: 'config/routes.ts', changes: 12, category: 'low', bugRisk: 'Low' },
-  { file: 'types/index.ts', changes: 8, category: 'low', bugRisk: 'Low' },
+  {
+    file: 'routes.ts',
+    fullPath: 'config/routes.ts',
+    changes: 12,
+    category: 'low',
+    bugRisk: 'Low',
+  },
+  {
+    file: 'index.ts',
+    fullPath: 'types/index.ts',
+    changes: 8,
+    category: 'low',
+    bugRisk: 'Low',
+  },
 ];
 
 const COLORS = {
@@ -67,15 +90,37 @@ const COLORS = {
   low: '#5B9A8B',
 };
 
+// Helper function to truncate long filenames
+function truncateFilename(filename: string, maxLength: number = 25): string {
+  if (filename.length <= maxLength) return filename;
+
+  const extension =
+    filename.lastIndexOf('.') > 0
+      ? filename.substring(filename.lastIndexOf('.'))
+      : '';
+  const nameWithoutExt = extension
+    ? filename.substring(0, filename.lastIndexOf('.'))
+    : filename;
+
+  const availableLength = maxLength - extension.length - 3; // 3 for "..."
+
+  if (availableLength <= 0) {
+    return filename.substring(0, maxLength - 3) + '...';
+  }
+
+  return nameWithoutExt.substring(0, availableLength) + '...' + extension;
+}
+
 // Convert backend data to chart format (backend already limits results)
 function convertChurnData(churnAnalysis: CodeChurnAnalysis) {
   // Take only top 20 for visualization (backend sends top 50)
   return churnAnalysis.files.slice(0, 20).map((file) => {
     // Extract just the filename from the full path
     const fileName = file.path.split('/').pop() || file.path;
+    const displayName = truncateFilename(fileName, 25);
 
     return {
-      file: fileName,
+      file: displayName,
       fullPath: file.path, // Keep full path for tooltip
       changes: file.changes,
       category: file.risk,
@@ -163,7 +208,7 @@ export function CodeChurnChart({ churnData }: CodeChurnChartProps) {
             <BarChart data={chartData} layout="vertical">
               <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
               <XAxis type="number" />
-              <YAxis dataKey="file" type="category" width={150} fontSize={12} />
+              <YAxis dataKey="file" type="category" width={200} fontSize={12} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: 'hsl(var(--background))',
