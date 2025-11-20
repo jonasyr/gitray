@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   Card,
   CardContent,
@@ -7,8 +8,14 @@ import {
 } from './ui/card';
 import { FileCode, FileJson, FileText, Image, File } from 'lucide-react';
 import { Progress } from './ui/progress';
+import { FileTypeDistribution } from '@gitray/shared-types';
 
-const fileTypes = [
+interface FileTypeListProps {
+  fileDistribution?: FileTypeDistribution | null;
+}
+
+// Mock data for fallback
+const mockFileTypes = [
   {
     type: 'TypeScript',
     extension: '.ts, .tsx',
@@ -59,9 +66,74 @@ const fileTypes = [
   },
 ];
 
-const totalFiles = fileTypes.reduce((sum, ft) => sum + ft.count, 0);
+// Helper function to get icon for file extension
+function getIconForExtension(extension: string) {
+  const ext = extension.toLowerCase();
+  if (ext.includes('json')) return FileJson;
+  if (ext.includes('md')) return FileText;
+  if (ext.includes('css') || ext.includes('scss')) return FileText;
+  if (
+    ext.includes('png') ||
+    ext.includes('jpg') ||
+    ext.includes('svg') ||
+    ext.includes('gif')
+  )
+    return Image;
+  if (
+    ext.includes('ts') ||
+    ext.includes('js') ||
+    ext.includes('tsx') ||
+    ext.includes('jsx')
+  )
+    return FileCode;
+  return File;
+}
 
-export function FileTypeList() {
+// Helper function to get color for extension
+function getColorForExtension(extension: string): string {
+  const ext = extension.toLowerCase();
+  if (ext.includes('.ts') || ext.includes('.tsx')) return 'bg-blue-500';
+  if (ext.includes('.js') || ext.includes('.jsx')) return 'bg-yellow-500';
+  if (ext.includes('.json')) return 'bg-green-500';
+  if (ext.includes('.md')) return 'bg-purple-500';
+  if (ext.includes('.css') || ext.includes('.scss')) return 'bg-pink-500';
+  if (ext.includes('.png') || ext.includes('.jpg') || ext.includes('.svg'))
+    return 'bg-orange-500';
+  return 'bg-gray-500';
+}
+
+// Convert backend data to display format
+function convertFileDistribution(data: FileTypeDistribution) {
+  // Convert the extensions Record to an array
+  return (
+    Object.entries(data.extensions)
+      .map(([extension, stats]) => ({
+        type: extension.replace('.', '').toUpperCase(), // e.g., ".ts" -> "TS"
+        extension: extension,
+        count: stats.count,
+        percentage: Math.round(stats.percentage),
+        icon: getIconForExtension(extension),
+        color: getColorForExtension(extension),
+      }))
+      // Sort by count descending
+      .sort((a, b) => b.count - a.count)
+  );
+}
+
+export function FileTypeList({ fileDistribution }: FileTypeListProps) {
+  const fileTypes = useMemo(() => {
+    if (fileDistribution && fileDistribution.extensions) {
+      return convertFileDistribution(fileDistribution);
+    }
+    return mockFileTypes;
+  }, [fileDistribution]);
+
+  const totalFiles = useMemo(() => {
+    if (fileDistribution?.metadata?.totalFiles) {
+      return fileDistribution.metadata.totalFiles;
+    }
+    return fileTypes.reduce((sum, ft) => sum + ft.count, 0);
+  }, [fileDistribution, fileTypes]);
   return (
     <Card>
       <CardHeader>

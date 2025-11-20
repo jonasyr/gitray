@@ -382,7 +382,7 @@ export function DashboardPage({
             </TabsContent>
 
             <TabsContent value="files">
-              <FileTypeList />
+              <FileTypeList fileDistribution={fileDistribution} />
             </TabsContent>
 
             <TabsContent value="timeline">
