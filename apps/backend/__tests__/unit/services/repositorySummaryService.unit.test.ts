@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { SimpleGit } from 'simple-git';
 
 // Mock dependencies BEFORE imports
 vi.mock('../../../src/services/cache', () => ({
@@ -11,14 +10,16 @@ vi.mock('../../../src/services/cache', () => ({
 
 vi.mock('simple-git', () => ({
   default: vi.fn(() => ({
-    init: vi.fn().mockResolvedValue(undefined),
-    addRemote: vi.fn().mockResolvedValue(undefined),
+    clone: vi.fn().mockResolvedValue(undefined),
     raw: vi.fn().mockResolvedValue(''),
+    revparse: vi.fn().mockResolvedValue(''),
+    fetch: vi.fn().mockResolvedValue(undefined),
   })),
   simpleGit: vi.fn(() => ({
-    init: vi.fn().mockResolvedValue(undefined),
-    addRemote: vi.fn().mockResolvedValue(undefined),
+    clone: vi.fn().mockResolvedValue(undefined),
     raw: vi.fn().mockResolvedValue(''),
+    revparse: vi.fn().mockResolvedValue(''),
+    fetch: vi.fn().mockResolvedValue(undefined),
   })),
 }));
 
@@ -46,20 +47,71 @@ const mockRm = vi.mocked(fsPromises.rm);
 
 describe('RepositorySummaryService', () => {
   let mockGitInstance: any;
+  let mockCloneInstance: any;
+  const setupEmptyRepositoryMocks = () => {
+    mockGitInstance.revparse = vi
+      .fn()
+      .mockResolvedValueOnce('true')
+      .mockResolvedValue('true');
+
+    mockGitInstance.raw = vi
+      .fn()
+      .mockResolvedValueOnce('main')
+      .mockResolvedValueOnce('0\n');
+  };
+
+  const setupSummaryFlow = ({
+    totalCommits,
+    firstDate,
+    lastDate,
+    lastSha,
+    lastAuthor,
+    contributorsOutput = '     1  Author\n',
+  }: {
+    totalCommits: number;
+    firstDate: string;
+    lastDate: string;
+    lastSha: string;
+    lastAuthor: string;
+    contributorsOutput?: string;
+  }) => {
+    mockGitInstance.revparse = vi
+      .fn()
+      .mockResolvedValueOnce('true')
+      .mockResolvedValue('true');
+
+    mockGitInstance.raw = vi.fn(async (args: string[]) => {
+      const command = args.join(' ');
+      if (command.includes('--abbrev-ref origin/HEAD')) return 'main';
+      if (command.includes('rev-list --count')) return `${totalCommits}\n`;
+      if (command.includes('--reverse') && command.includes('--format=%aI')) {
+        return `${firstDate}\n`;
+      }
+      if (command.includes('--format=%aI|%H|%an')) {
+        return `${lastDate}|${lastSha}|${lastAuthor}\n`;
+      }
+      if (command.includes('shortlog')) return contributorsOutput;
+      return '';
+    });
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
 
     // Create fresh mock git instance for each test
+    mockCloneInstance = {
+      clone: vi.fn().mockResolvedValue(undefined),
+    };
     mockGitInstance = {
-      init: vi.fn().mockResolvedValue(undefined),
-      addRemote: vi.fn().mockResolvedValue(undefined),
       raw: vi.fn().mockResolvedValue(''),
-      revparse: vi.fn().mockResolvedValue('abc123'),
+      revparse: vi.fn().mockResolvedValue('true'),
+      fetch: vi.fn().mockResolvedValue(undefined),
     };
 
     // Make simpleGit return our mock instance
-    mockSimpleGit.mockReturnValue(mockGitInstance);
+    mockSimpleGit
+      .mockImplementationOnce(() => mockCloneInstance)
+      .mockImplementation(() => mockGitInstance);
   });
 
   afterEach(() => {
@@ -121,21 +173,14 @@ describe('RepositorySummaryService', () => {
   describe('getRepositorySummary - Cache miss', () => {
     it('should perform sparse clone and return summary when cache misses', async () => {
       mockRedis.get.mockResolvedValue(null);
-
-      // Mock Git operations in sequence
-      mockGitInstance.raw = vi
-        .fn()
-        .mockResolvedValueOnce(undefined) // config
-        .mockResolvedValueOnce(undefined) // fetch
-        .mockResolvedValueOnce(undefined) // checkout
-        .mockResolvedValueOnce('100\n') // rev-list --count
-        .mockResolvedValueOnce('2011-03-22T00:00:00.000Z\n') // log --reverse (first commit)
-        .mockResolvedValueOnce(
-          '2025-11-15T10:30:00.000Z|abc123def|Test Author\n'
-        ) // log -1 (last commit)
-        .mockResolvedValueOnce('     10  Author One\n      5  Author Two\n'); // shortlog
-
-      mockGitInstance.revparse = vi.fn().mockResolvedValue('abc123def456');
+      setupSummaryFlow({
+        totalCommits: 100,
+        firstDate: '2011-03-22T00:00:00.000Z',
+        lastDate: '2025-11-15T10:30:00.000Z',
+        lastSha: 'abc123def',
+        lastAuthor: 'Test Author',
+        contributorsOutput: '     10  Author One\n      5  Author Two\n',
+      });
 
       const result = await repositorySummaryService.getRepositorySummary(
         'https://github.com/octocat/Hello-World.git'
@@ -158,14 +203,15 @@ describe('RepositorySummaryService', () => {
     it('should handle empty repository gracefully', async () => {
       mockRedis.get.mockResolvedValue(null);
 
-      // Mock empty repository
-      mockGitInstance.raw
-        .mockResolvedValueOnce('') // init
-        .mockResolvedValueOnce('') // addRemote
-        .mockResolvedValueOnce('') // config
-        .mockResolvedValueOnce('') // fetch
-        .mockResolvedValueOnce('') // checkout
-        .mockRejectedValueOnce(new Error("bad revision 'HEAD'")); // rev-list fails on empty repo
+      mockGitInstance.revparse = vi
+        .fn()
+        .mockResolvedValueOnce('true')
+        .mockResolvedValue('true');
+
+      mockGitInstance.raw = vi
+        .fn()
+        .mockResolvedValueOnce('main')
+        .mockRejectedValueOnce(new Error("bad revision 'HEAD'"));
 
       const result = await repositorySummaryService.getRepositorySummary(
         'https://github.com/test/empty-repo.git'
@@ -182,9 +228,7 @@ describe('RepositorySummaryService', () => {
   describe('URL parsing', () => {
     it('should parse GitHub HTTPS URL correctly', async () => {
       mockRedis.get.mockResolvedValue(null);
-      mockGitInstance.raw
-        .mockResolvedValue('') // init/config/fetch/checkout
-        .mockResolvedValue('0\n'); // commit count for empty repo
+      setupEmptyRepositoryMocks();
 
       const result = await repositorySummaryService.getRepositorySummary(
         'https://github.com/octocat/Hello-World.git'
@@ -197,9 +241,7 @@ describe('RepositorySummaryService', () => {
 
     it('should parse GitHub SSH URL correctly', async () => {
       mockRedis.get.mockResolvedValue(null);
-      mockGitInstance.raw
-        .mockResolvedValue('') // init/config/fetch/checkout
-        .mockResolvedValue('0\n'); // commit count for empty repo
+      setupEmptyRepositoryMocks();
 
       const result = await repositorySummaryService.getRepositorySummary(
         'git@github.com:octocat/Hello-World.git'
@@ -212,9 +254,7 @@ describe('RepositorySummaryService', () => {
 
     it('should parse GitLab URL correctly', async () => {
       mockRedis.get.mockResolvedValue(null);
-      mockGitInstance.raw
-        .mockResolvedValue('') // init/config/fetch/checkout
-        .mockResolvedValue('0\n'); // commit count for empty repo
+      setupEmptyRepositoryMocks();
 
       const result = await repositorySummaryService.getRepositorySummary(
         'https://gitlab.com/test-org/test-project.git'
@@ -245,12 +285,14 @@ describe('RepositorySummaryService', () => {
       const recentDate = new Date();
       recentDate.setDate(recentDate.getDate() - 10); // 10 days ago
 
-      mockGitInstance.raw
-        .mockResolvedValue('') // init/config/fetch/checkout
-        .mockResolvedValueOnce('50\n') // commit count
-        .mockResolvedValueOnce('2020-01-01T00:00:00.000Z\n') // first commit
-        .mockResolvedValueOnce(`${recentDate.toISOString()}|abc123|Test\n`) // last commit (10 days ago)
-        .mockResolvedValueOnce('     10  Author\n'); // contributors
+      setupSummaryFlow({
+        totalCommits: 50,
+        firstDate: '2020-01-01T00:00:00.000Z',
+        lastDate: recentDate.toISOString(),
+        lastSha: 'abc123',
+        lastAuthor: 'Test',
+        contributorsOutput: '     10  Author\n',
+      });
 
       const result = await repositorySummaryService.getRepositorySummary(
         'https://github.com/test/active-repo.git'
@@ -265,15 +307,14 @@ describe('RepositorySummaryService', () => {
       const oldDate = new Date();
       oldDate.setDate(oldDate.getDate() - 90); // 90 days ago
 
-      mockGitInstance.raw = vi
-        .fn()
-        .mockResolvedValueOnce(undefined) // config
-        .mockResolvedValueOnce(undefined) // fetch
-        .mockResolvedValueOnce(undefined) // checkout
-        .mockResolvedValueOnce('50\n') // commit count
-        .mockResolvedValueOnce('2020-01-01T00:00:00.000Z\n') // first commit
-        .mockResolvedValueOnce(`${oldDate.toISOString()}|abc123|Test\n`) // last commit (90 days ago)
-        .mockResolvedValueOnce('     10  Author\n'); // contributors
+      setupSummaryFlow({
+        totalCommits: 50,
+        firstDate: '2020-01-01T00:00:00.000Z',
+        lastDate: oldDate.toISOString(),
+        lastSha: 'abc123',
+        lastAuthor: 'Test',
+        contributorsOutput: '     10  Author\n',
+      });
 
       const result = await repositorySummaryService.getRepositorySummary(
         'https://github.com/test/inactive-repo.git'
@@ -288,15 +329,14 @@ describe('RepositorySummaryService', () => {
       const veryOldDate = new Date();
       veryOldDate.setDate(veryOldDate.getDate() - 200); // 200 days ago
 
-      mockGitInstance.raw = vi
-        .fn()
-        .mockResolvedValueOnce(undefined) // config
-        .mockResolvedValueOnce(undefined) // fetch
-        .mockResolvedValueOnce(undefined) // checkout
-        .mockResolvedValueOnce('50\n') // commit count
-        .mockResolvedValueOnce('2020-01-01T00:00:00.000Z\n') // first commit
-        .mockResolvedValueOnce(`${veryOldDate.toISOString()}|abc123|Test\n`) // last commit (200 days ago)
-        .mockResolvedValueOnce('     10  Author\n'); // contributors
+      setupSummaryFlow({
+        totalCommits: 50,
+        firstDate: '2020-01-01T00:00:00.000Z',
+        lastDate: veryOldDate.toISOString(),
+        lastSha: 'abc123',
+        lastAuthor: 'Test',
+        contributorsOutput: '     10  Author\n',
+      });
 
       const result = await repositorySummaryService.getRepositorySummary(
         'https://github.com/test/archived-repo.git'
@@ -309,7 +349,7 @@ describe('RepositorySummaryService', () => {
   describe('Cleanup', () => {
     it('should clean up temp directory even on error', async () => {
       mockRedis.get.mockResolvedValue(null);
-      mockGitInstance.raw.mockRejectedValue(new Error('Clone failed'));
+      mockCloneInstance.clone.mockRejectedValue(new Error('Clone failed'));
 
       await expect(
         repositorySummaryService.getRepositorySummary(
