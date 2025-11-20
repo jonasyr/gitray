@@ -195,14 +195,18 @@ class RepositorySummaryService {
 
   private async getFirstCommitDate(git: SimpleGit): Promise<string | null> {
     try {
+      // Use rev-list to get the root commit, which is more reliable with sparse clones
       const output = await git.raw([
-        'log',
-        '--reverse',
+        'rev-list',
+        '--max-parents=0',
         '--format=%aI',
-        '--max-count=1',
+        'HEAD',
       ]);
-      const trimmed = output.trim();
-      return trimmed || null;
+      // rev-list --format outputs: commit <sha>\n<formatted-date>
+      const lines = output.trim().split('\n');
+      // Get the date from the second line (first line is "commit <sha>")
+      const date = lines.length > 1 ? lines[1].trim() : null;
+      return date || null;
     } catch (error) {
       if (this.isEmptyRepositoryError(error)) {
         return null;
