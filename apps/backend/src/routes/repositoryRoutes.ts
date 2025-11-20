@@ -23,6 +23,9 @@ import {
 } from '../services/metrics';
 import { repositorySummaryService } from '../services/repositorySummaryService';
 import { ValidationError } from '@gitray/shared-types';
+import { getLogger } from '../services/logger';
+
+const logger = getLogger();
 
 // Middleware to set request priority based on route
 const setRequestPriority = (priority: 'low' | 'normal' | 'high') => {
@@ -100,7 +103,7 @@ router.post(
         }
       } catch (cacheError) {
         // Cache operation failed, continue to fetch from repository
-        console.warn(
+        logger.warn(
           'Cache get operation failed:',
           (cacheError as Error).message
         );
@@ -130,7 +133,7 @@ router.post(
             TIME.HOUR / 1000
           );
         } catch (cacheError) {
-          console.warn(
+          logger.warn(
             'Cache set operation failed:',
             (cacheError as Error).message
           );
@@ -178,7 +181,7 @@ router.post(
         }
       } catch (cacheError) {
         // Cache operation failed, continue to fetch from repository
-        console.warn(
+        logger.warn(
           'Cache get operation failed:',
           (cacheError as Error).message
         );
@@ -206,7 +209,7 @@ router.post(
             TIME.HOUR / 1000
           );
         } catch (cacheError) {
-          console.warn(
+          logger.warn(
             'Cache set operation failed:',
             (cacheError as Error).message
           );
@@ -260,7 +263,7 @@ router.post(
         }
       } catch (cacheError) {
         // Cache operation failed, continue to fetch from repository
-        console.warn(
+        logger.warn(
           'Cache get operation failed:',
           (cacheError as Error).message
         );
@@ -294,7 +297,7 @@ router.post(
             TIME.HOUR / 1000
           );
         } catch (cacheError) {
-          console.warn(
+          logger.warn(
             'Cache set operation failed:',
             (cacheError as Error).message
           );
@@ -351,7 +354,7 @@ router.post(
         }
       } catch (cacheError) {
         // Cache operation failed, continue to fetch from repository
-        console.warn(
+        logger.warn(
           'Cache get operation failed:',
           (cacheError as Error).message
         );
@@ -386,7 +389,7 @@ router.post(
             TIME.HOUR / 1000
           );
         } catch (cacheError) {
-          console.warn(
+          logger.warn(
             'Cache set operation failed:',
             (cacheError as Error).message
           );
@@ -482,7 +485,7 @@ router.post(
         cachedHeatmap = await redis.get(heatmapKey);
       } catch (cacheError) {
         // Cache operation failed, continue to fetch from repository
-        console.warn(
+        logger.warn(
           'Cache get operation failed:',
           (cacheError as Error).message
         );
@@ -515,7 +518,7 @@ router.post(
           return;
         } catch (parseError) {
           // Corrupted cache data, continue to fetch from repository
-          console.warn(
+          logger.warn(
             'Cache data parsing failed:',
             (parseError as Error).message
           );
@@ -555,7 +558,7 @@ router.post(
             TIME.HOUR / 1000
           );
         } catch (cacheError) {
-          console.warn(
+          logger.warn(
             'Cache set operation failed for commits:',
             (cacheError as Error).message
           );
@@ -571,7 +574,7 @@ router.post(
             TIME.HOUR / 1000
           );
         } catch (cacheError) {
-          console.warn(
+          logger.warn(
             'Cache set operation failed for heatmap:',
             (cacheError as Error).message
           );

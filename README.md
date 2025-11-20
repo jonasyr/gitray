@@ -281,6 +281,9 @@ curl "http://localhost:3001/api/commits/info?repoUrl=https://github.com/username
 # Get code churn analysis
 curl "http://localhost:3001/api/repositories/churn?repoUrl=https://github.com/username/repo.git"
 
+# Get repository summary (creation date, commits, contributors, status)
+curl "http://localhost:3001/api/repositories/summary?repoUrl=https://github.com/username/repo.git"
+
 # Health check
 curl "http://localhost:3001/health"
 
@@ -502,6 +505,58 @@ describe('GitService', () => {
 }
 
 // Response: CommitHeatmapData
+```
+
+##### GET /api/repositories/summary
+
+Get comprehensive repository statistics including creation date, last commit info, total commits,
+contributors, and activity status. Uses efficient sparse clone approach (95-99% bandwidth savings).
+
+```typescript
+// Query parameters
+{
+  repoUrl: string;  // Repository URL (required)
+}
+
+// Response: RepositorySummary
+{
+  repository: {
+    name: string;          // Repository name
+    owner: string;         // Repository owner
+    url: string;           // Full repository URL
+    platform: string;      // 'github' | 'gitlab' | 'bitbucket' | 'other'
+  };
+  created: {
+    date: string;          // ISO 8601 timestamp
+    source: string;        // 'first-commit' | 'git-api' | 'platform-api'
+  };
+  age: {
+    years: number;         // Repository age in years
+    months: number;        // Additional months
+    formatted: string;     // Human-readable format (e.g., "5.7y")
+  };
+  lastCommit: {
+    date: string;          // ISO 8601 timestamp
+    relativeTime: string;  // Human-readable (e.g., "2 days ago")
+    sha: string;           // Commit SHA
+    author: string;        // Commit author name
+  };
+  stats: {
+    totalCommits: number;  // Total commit count
+    contributors: number;  // Unique contributor count
+    status: string;        // 'active' | 'inactive' | 'archived' | 'empty'
+  };
+  metadata: {
+    cached: boolean;              // Whether data was served from cache
+    dataSource: string;           // 'git-sparse-clone' | 'cache'
+    createdDateAccuracy: string;  // 'exact' | 'approximate'
+    bandwidthSaved: string;       // Bandwidth savings description
+    lastUpdated: string;          // ISO 8601 timestamp
+  };
+}
+
+// Example
+curl "http://localhost:3001/api/repositories/summary?repoUrl=https://github.com/octocat/Hello-World.git"
 ```
 
 ##### GET /api/repositories/churn
