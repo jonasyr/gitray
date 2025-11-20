@@ -22,91 +22,6 @@ const apiClient = axios.create({
 });
 
 /**
- * Fetches commits for a given repository URL
- * @param repoUrl The URL of the git repository
- * @returns Promise containing an array of commits
- */
-export const getWorkspaceCommits = async (
-  repoUrl: string
-): Promise<Commit[]> => {
-  try {
-    // Ensure URL ends with .git for proper Git URL format
-    const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
-
-    const response = await apiClient.post('/api/repositories', {
-      repoUrl: normalizedUrl,
-    });
-    return response.data.commits;
-  } catch (error) {
-    if (axios.isAxiosError(error)) {
-      if (error.response) {
-        // The request was made and the server responded with a status code
-        // that falls out of the range of 2xx
-        throw new Error(
-          `Server error: ${error.response.data?.error ?? error.message}`
-        );
-      } else if (error.request) {
-        // The request was made but no response was received
-        throw new Error(
-          'No response from server. Please check your network connection.'
-        );
-      } else {
-        // Something happened in setting up the request
-        throw new Error(`Error: ${error.message}`);
-      }
-    }
-    // For non-Axios errors
-    throw new Error('An unexpected error occurred');
-  }
-};
-
-/**
- * Fetches heatmap data for a repository
- * @param repoUrl The URL of the git repository
- * @param timePeriod The time period to aggregate by
- * @param filterOptions Optional filters to apply
- * @returns Promise containing heatmap data
- */
-export const getHeatmapData = async (
-  repoUrl: string,
-  timePeriod: TimePeriod,
-  filterOptions?: CommitFilterOptions
-): Promise<CommitHeatmapData> => {
-  try {
-    // Ensure URL ends with .git for proper Git URL format
-    const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
-
-    const params = new URLSearchParams({ repoUrl: normalizedUrl, timePeriod });
-    if (filterOptions?.authors && filterOptions.authors.length > 0) {
-      params.append('authors', filterOptions.authors.join(','));
-    } else if (filterOptions?.author) {
-      params.append('author', filterOptions.author);
-    }
-    if (filterOptions?.fromDate)
-      params.append('fromDate', filterOptions.fromDate);
-    if (filterOptions?.toDate) params.append('toDate', filterOptions.toDate);
-
-    const response = await apiClient.get('/api/commits/heatmap', { params });
-    return response.data;
-  } catch (error) {
-    if (axios.isAxiosError(error)) {
-      if (error.response) {
-        throw new Error(
-          `Server error: ${error.response.data?.error ?? error.message}`
-        );
-      } else if (error.request) {
-        throw new Error(
-          'No response from server. Please check your network connection.'
-        );
-      } else {
-        throw new Error(`Error: ${error.message}`);
-      }
-    }
-    throw new Error('An unexpected error occurred');
-  }
-};
-
-/**
  * Fetches both commits and heatmap data in a single request
  * @param repoUrl The URL of the git repository
  * @param timePeriod The time period to aggregate by
@@ -223,8 +138,6 @@ export const getCodeChurn = async (
 };
 
 export default {
-  getWorkspaceCommits,
-  getHeatmapData,
   getRepositoryFullData,
   getFileAnalysis,
   getCodeChurn,
