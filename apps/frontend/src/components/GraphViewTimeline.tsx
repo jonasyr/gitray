@@ -17,8 +17,13 @@ import {
   Maximize2,
 } from 'lucide-react';
 import { Slider } from './ui/slider';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from './ui/hover-card';
+import { Commit } from '@gitray/shared-types';
+
+interface GraphViewTimelineProps {
+  commits?: Commit[];
+}
 
 const branches = [
   { name: 'main', color: '#5B9A8B', commits: 247, active: true },
@@ -63,9 +68,63 @@ const timelineEvents = [
   },
 ];
 
-export function GraphViewTimeline() {
+// Helper function to format relative time
+function formatRelativeTime(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+  const diffWeeks = Math.floor(diffDays / 7);
+  const diffMonths = Math.floor(diffDays / 30);
+
+  if (diffSecs < 60) return 'just now';
+  if (diffMins < 60)
+    return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
+  if (diffHours < 24)
+    return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+  if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+  if (diffWeeks < 4)
+    return `${diffWeeks} week${diffWeeks !== 1 ? 's' : ''} ago`;
+  if (diffMonths < 12)
+    return `${diffMonths} month${diffMonths !== 1 ? 's' : ''} ago`;
+  return date.toLocaleDateString();
+}
+
+// Process real commits into timeline events
+function processCommits(commits: Commit[]) {
+  // Sort by date descending (newest first) and take top 10
+  return commits
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 10)
+    .map((commit) => {
+      const isMerge = commit.message.toLowerCase().includes('merge');
+      const branchMatch = commit.message.match(/into (\S+)/);
+      const fromMatch = commit.message.match(/merge (\S+)/);
+
+      return {
+        type: isMerge ? 'merge' : 'commit',
+        branch: branchMatch ? branchMatch[1] : 'main',
+        from: isMerge && fromMatch ? fromMatch[1] : undefined,
+        message: commit.message.split('\n')[0], // First line only
+        author: commit.author,
+        date: formatRelativeTime(new Date(commit.date)),
+        hash: commit.hash.substring(0, 7),
+      };
+    });
+}
+
+export function GraphViewTimeline({ commits = [] }: GraphViewTimelineProps) {
   const [playing, setPlaying] = useState(false);
   const [timelinePosition, setTimelinePosition] = useState([50]);
+
+  console.log(
+    '🔍 GraphViewTimeline received commits:',
+    commits.length,
+    'First commit:',
+    commits[0]
+  );
 
   return (
     <div className="space-y-4">
@@ -242,7 +301,10 @@ export function GraphViewTimeline() {
           {/* Recent Events */}
           <div className="space-y-3 pt-4 border-t">
             <p className="font-medium">Recent Activity</p>
-            {timelineEvents.map((event, index) => (
+            {(commits.length > 0
+              ? processCommits(commits)
+              : timelineEvents
+            ).map((event, index) => (
               <HoverCard key={index}>
                 <HoverCardTrigger asChild>
                   <div className="flex items-start gap-3 p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors">
