@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Lock,
   Users,
@@ -73,6 +73,7 @@ export function DashboardPage({
   const [fileDistribution, setFileDistribution] =
     useState<FileTypeDistribution | null>(null);
   const [churnData, setChurnData] = useState<CodeChurnAnalysis | null>(null);
+  const [heatmapMonths, setHeatmapMonths] = useState<3 | 6 | 12>(12);
 
   // Fetch file analysis and churn data when repoUrl changes
   useEffect(() => {
@@ -98,6 +99,93 @@ export function DashboardPage({
         });
     }
   }, [repoUrl]);
+
+  // Calculate peak activity times from commits
+  const peakActivity = useMemo(() => {
+    if (!commits || commits.length === 0) {
+      return {
+        mostActiveDay: 'Wednesday',
+        avgCommitsPerDay: 12,
+        peakMonth: 'October 2024',
+        peakMonthCommits: 247,
+        currentStreak: 14,
+      };
+    }
+
+    // Calculate most active day of week
+    const dayCount: Record<string, number> = {};
+    const monthCount: Record<string, number> = {};
+    const days = [
+      'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ];
+
+    commits.forEach((commit) => {
+      const date = new Date(commit.date);
+      const dayName = days[date.getDay()];
+      const monthYear = date.toLocaleDateString('en-US', {
+        month: 'long',
+        year: 'numeric',
+      });
+
+      dayCount[dayName] = (dayCount[dayName] || 0) + 1;
+      monthCount[monthYear] = (monthCount[monthYear] || 0) + 1;
+    });
+
+    const mostActiveDay = Object.entries(dayCount).sort(
+      (a, b) => b[1] - a[1]
+    )[0];
+    const peakMonth = Object.entries(monthCount).sort((a, b) => b[1] - a[1])[0];
+
+    // Calculate streak (simplified - consecutive days with commits)
+    const sortedDates = commits
+      .map((c) => new Date(c.date).toDateString())
+      .sort();
+    let streak = 1;
+    let currentStreak = 1;
+    for (let i = 1; i < sortedDates.length; i++) {
+      if (sortedDates[i] !== sortedDates[i - 1]) {
+        const date1 = new Date(sortedDates[i]);
+        const date2 = new Date(sortedDates[i - 1]);
+        const diffDays = Math.abs(
+          (date1.getTime() - date2.getTime()) / (1000 * 60 * 60 * 24)
+        );
+        if (diffDays <= 1) {
+          currentStreak++;
+        } else {
+          streak = Math.max(streak, currentStreak);
+          currentStreak = 1;
+        }
+      }
+    }
+    streak = Math.max(streak, currentStreak);
+
+    return {
+      mostActiveDay: mostActiveDay?.[0] || 'Wednesday',
+      avgCommitsPerDay: Math.round(
+        (mostActiveDay?.[1] || 12) / (commits.length / 7)
+      ),
+      peakMonth: peakMonth?.[0] || 'October 2024',
+      peakMonthCommits: peakMonth?.[1] || 247,
+      currentStreak: streak,
+    };
+  }, [commits]);
+
+  // Filter commits based on selected time period
+  const filteredCommits = useMemo(() => {
+    if (!commits || commits.length === 0) return [];
+
+    const now = new Date();
+    const cutoffDate = new Date();
+    cutoffDate.setMonth(now.getMonth() - heatmapMonths);
+
+    return commits.filter((commit) => new Date(commit.date) >= cutoffDate);
+  }, [commits, heatmapMonths]);
 
   // Extract repo info from URL or use mock data
   const urlParts = repoUrl ? repoUrl.split('/').filter(Boolean) : [];
@@ -308,13 +396,25 @@ export function DashboardPage({
                   </CardDescription>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm">
+                  <Button
+                    variant={heatmapMonths === 3 ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setHeatmapMonths(3)}
+                  >
                     Last 3 months
                   </Button>
-                  <Button variant="outline" size="sm">
+                  <Button
+                    variant={heatmapMonths === 6 ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setHeatmapMonths(6)}
+                  >
                     Last 6 months
                   </Button>
-                  <Button variant="default" size="sm">
+                  <Button
+                    variant={heatmapMonths === 12 ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setHeatmapMonths(12)}
+                  >
                     Last 12 months
                   </Button>
                 </div>
@@ -322,7 +422,7 @@ export function DashboardPage({
             </CardHeader>
             <CardContent className="space-y-6">
               <CommitHeatmap
-                commits={commits}
+                commits={filteredCommits}
                 heatmapData={heatmapData || undefined}
               />
 
@@ -334,9 +434,11 @@ export function DashboardPage({
                       <p className="text-sm text-muted-foreground mb-1">
                         Most Active Day
                       </p>
-                      <p className="text-xl font-semibold">Wednesday</p>
+                      <p className="text-xl font-semibold">
+                        {peakActivity.mostActiveDay}
+                      </p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Avg. 12 commits
+                        Avg. {peakActivity.avgCommitsPerDay} commits
                       </p>
                     </CardContent>
                   </Card>
@@ -345,9 +447,11 @@ export function DashboardPage({
                       <p className="text-sm text-muted-foreground mb-1">
                         Peak Month
                       </p>
-                      <p className="text-xl font-semibold">October 2024</p>
+                      <p className="text-xl font-semibold">
+                        {peakActivity.peakMonth}
+                      </p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        247 total commits
+                        {peakActivity.peakMonthCommits} total commits
                       </p>
                     </CardContent>
                   </Card>
@@ -356,7 +460,9 @@ export function DashboardPage({
                       <p className="text-sm text-muted-foreground mb-1">
                         Current Streak
                       </p>
-                      <p className="text-xl font-semibold">14 days</p>
+                      <p className="text-xl font-semibold">
+                        {peakActivity.currentStreak} days
+                      </p>
                       <p className="text-xs text-muted-foreground mt-1">
                         Keep it up!
                       </p>
