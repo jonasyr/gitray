@@ -371,7 +371,7 @@ export function DashboardPage({
                 <CardDescription>Commits over the last 30 days</CardDescription>
               </CardHeader>
               <CardContent>
-                <ActivityChart />
+                <ActivityChart commits={commits} />
               </CardContent>
             </Card>
           </motion.div>

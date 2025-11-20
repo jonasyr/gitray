@@ -7,38 +7,51 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { Commit } from '@gitray/shared-types';
 
-// Generate mock data for the last 30 days
-function generateActivityData() {
+interface ActivityChartProps {
+  commits?: Commit[];
+}
+
+// Generate activity data from commits for the last 30 days
+function generateActivityData(commits: Commit[]) {
   const data = [];
   const today = new Date();
+  const thirtyDaysAgo = new Date(today);
+  thirtyDaysAgo.setDate(today.getDate() - 29);
 
+  // Create a map of date -> commit count
+  const commitsByDate = new Map<string, number>();
+
+  // Filter commits from last 30 days and count by date
+  commits.forEach((commit) => {
+    const commitDate = new Date(commit.date);
+    if (commitDate >= thirtyDaysAgo && commitDate <= today) {
+      const dateKey = commitDate.toISOString().split('T')[0];
+      commitsByDate.set(dateKey, (commitsByDate.get(dateKey) || 0) + 1);
+    }
+  });
+
+  // Generate data for each day in the last 30 days
   for (let i = 29; i >= 0; i--) {
     const date = new Date(today);
     date.setDate(date.getDate() - i);
-
-    // Generate realistic commit patterns
-    const dayOfWeek = date.getDay();
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-    const baseCommits = isWeekend
-      ? Math.random() * 10
-      : Math.random() * 30 + 10;
+    const dateKey = date.toISOString().split('T')[0];
 
     data.push({
       date: date.toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric',
       }),
-      commits: Math.floor(baseCommits),
+      commits: commitsByDate.get(dateKey) || 0,
     });
   }
 
   return data;
 }
 
-const data = generateActivityData();
-
-export function ActivityChart() {
+export function ActivityChart({ commits = [] }: ActivityChartProps) {
+  const data = generateActivityData(commits);
   return (
     <div className="h-[200px] w-full">
       <ResponsiveContainer width="100%" height="100%">
