@@ -1,0 +1,3 @@
+# Prevent compiled JS files in src from being committed
+src/**/*.js
+src/**/*.js.map
