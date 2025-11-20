@@ -33,6 +33,7 @@ import {
   updateAllEnhancedMetrics,
 } from './services/metrics';
 import { strictContentType } from './middlewares/strictContentType';
+import { requireAdminToken } from './middlewares/adminAuth';
 
 // NEW IMPORTS: Repository coordination system
 import { repositoryCoordinator } from './services/repositoryCoordinator';
@@ -171,6 +172,15 @@ export async function startApplication() {
     const limiter = rateLimit(config.rateLimit);
     app.use('/api', limiter);
 
+    // Admin-specific rate limiter (more restrictive than general API limits)
+    const adminRateLimiter = rateLimit({
+      windowMs: config.adminRateLimit.windowMs,
+      max: config.adminRateLimit.max,
+      message: config.adminRateLimit.message,
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+
     // Attach request ID and metrics collection
     app.use(requestIdMiddleware);
     app.use(metricsMiddleware);
@@ -185,8 +195,8 @@ export async function startApplication() {
     // Parse incoming JSON bodies
     app.use(express.json());
 
-    // Expose Prometheus metrics endpoint
-    app.use('/metrics', metricsHandler);
+    // Expose Prometheus metrics endpoint (admin-only with authentication)
+    app.use('/metrics', adminRateLimiter, requireAdminToken, metricsHandler);
 
     // Application routes
     app.use('/api', routes);

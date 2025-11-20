@@ -35,6 +35,7 @@ describe('Config Unit Tests', () => {
     vi.resetModules();
     process.env = { ...originalEnv };
     process.env.GIT_CLONE_DEPTH = '20'; // Set default to avoid clone depth warnings
+    process.env.ADMIN_AUTH_ENABLED = 'false'; // Disable admin auth in tests to avoid token requirement
     mockTotalmem.mockReturnValue(8 * 1024 ** 3); // 8GB default
   });
 
