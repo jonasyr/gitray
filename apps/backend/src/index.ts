@@ -12,6 +12,7 @@
  */
 import express, { Request, Response } from 'express';
 import cors from 'cors';
+import dotenv from 'dotenv';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { HTTP_STATUS } from '@gitray/shared-types';
@@ -37,6 +38,9 @@ import { requireAdminToken } from './middlewares/adminAuth';
 // NEW IMPORTS: Repository coordination system
 import { repositoryCoordinator } from './services/repositoryCoordinator';
 import { repositoryCache } from './services/repositoryCache';
+
+// Load environment variables
+dotenv.config();
 
 // Initialize logger after environment variables are loaded
 const logger = initializeLogger();
