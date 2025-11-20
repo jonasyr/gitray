@@ -30,6 +30,7 @@ export default defineConfig({
     // requires a bit more time when the full workspace test run is executing,
     // so give them a larger timeout budget.
     testTimeout: 20000,
+    globalSetup: ['./vitest.global-setup.ts'],
     setupFiles: ['./__tests__/setup/global.setup.ts'],
     pool: 'threads',
     // isolate: true is the default - keeps tests reliable

@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "dev": "nodemon --watch src --exec \"node --import tsx src/index.ts\"",
+    "dev": "nodemon --watch src --exec \"node --import dotenv/config --import tsx src/index.ts\"",
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
