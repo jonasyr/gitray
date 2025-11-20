@@ -70,12 +70,18 @@ const COLORS = {
 // Convert backend data to chart format (backend already limits results)
 function convertChurnData(churnAnalysis: CodeChurnAnalysis) {
   // Take only top 20 for visualization (backend sends top 50)
-  return churnAnalysis.files.slice(0, 20).map((file) => ({
-    file: file.path,
-    changes: file.changes,
-    category: file.risk,
-    bugRisk: file.risk.charAt(0).toUpperCase() + file.risk.slice(1),
-  }));
+  return churnAnalysis.files.slice(0, 20).map((file) => {
+    // Extract just the filename from the full path
+    const fileName = file.path.split('/').pop() || file.path;
+
+    return {
+      file: fileName,
+      fullPath: file.path, // Keep full path for tooltip
+      changes: file.changes,
+      category: file.risk,
+      bugRisk: file.risk.charAt(0).toUpperCase() + file.risk.slice(1),
+    };
+  });
 }
 
 export function CodeChurnChart({ churnData }: CodeChurnChartProps) {
@@ -164,6 +170,27 @@ export function CodeChurnChart({ churnData }: CodeChurnChartProps) {
                   border: '1px solid hsl(var(--border))',
                   borderRadius: '8px',
                 }}
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    const data = payload[0].payload;
+                    return (
+                      <div className="bg-background border border-border rounded-lg p-3 shadow-lg">
+                        <p className="text-sm font-medium mb-1">{data.file}</p>
+                        <p className="text-xs text-muted-foreground mb-2">
+                          {data.fullPath}
+                        </p>
+                        <p className="text-sm">
+                          <span className="font-semibold">{data.changes}</span>{' '}
+                          changes
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Risk: {data.bugRisk}
+                        </p>
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
               />
               <Bar dataKey="changes" radius={[0, 4, 4, 0]}>
                 {chartData.map((entry, index) => (
@@ -183,7 +210,8 @@ export function CodeChurnChart({ churnData }: CodeChurnChartProps) {
             {chartData.slice(0, 3).map((file, index) => (
               <div
                 key={index}
-                className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
+                className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
+                title={file.fullPath}
               >
                 <div className="flex items-center gap-3">
                   <AlertTriangle className="h-4 w-4 text-destructive" />
