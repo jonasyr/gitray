@@ -198,7 +198,6 @@ The backend exposes Prometheus metrics at `/metrics`, with counters, gauges and 
 - `GET /api/commits/info` – get repository statistics
 - `GET /api/commits/stream` – stream commit data (Server-Sent Events)
 - `GET /api/repositories/churn` – code churn analysis
-- `GET /api/repositories/summary` – repository stats (creation, commits, contributors, status)
 - `GET /api/cache/stats` – cache metrics
 - `GET /health` – health status
 - `GET /metrics` – Prometheus metrics

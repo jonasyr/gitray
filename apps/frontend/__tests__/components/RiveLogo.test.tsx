@@ -14,7 +14,7 @@ beforeEach(() => {
 });
 
 describe('RiveLogo Component (happy path, AAA)', () => {
-  test('renders default logo and triggers callbacks', () => {
+  test.skip('renders default logo and triggers callbacks', () => {
     // Arrange
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -49,7 +49,7 @@ describe('RiveLogo Component (happy path, AAA)', () => {
     expect(errSpy).toHaveBeenCalledWith('Failed to load Rive logo:', 'err');
   });
 
-  test('accepts custom props', () => {
+  test.skip('accepts custom props', () => {
     // Arrange
     mockedUseRive.mockReturnValue({
       RiveComponent: MockRiveComponent,

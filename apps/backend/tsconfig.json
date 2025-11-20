@@ -23,7 +23,7 @@
     "esm": true
     // "experimentalSpecifierResolution": "node"
   },
-  "include": ["src/**/*.ts", "__tests__/**/*.ts"],
+  "include": ["src/**/*.ts", "__tests__/**/*.ts", "*.ts"],
   "exclude": ["node_modules", "dist"],
   "references": [{ "path": "../../packages/shared-types" }]
 }

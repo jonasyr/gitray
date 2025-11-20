@@ -21,6 +21,11 @@ import {
   getUserType,
   getRepositorySizeCategory,
 } from '../services/metrics';
+import { repositorySummaryService } from '../services/repositorySummaryService';
+import { ValidationError } from '@gitray/shared-types';
+import { getLogger } from '../services/logger';
+
+const logger = getLogger();
 
 // Middleware to set request priority based on route
 const setRequestPriority = (priority: 'low' | 'normal' | 'high') => {
@@ -98,7 +103,7 @@ router.post(
         }
       } catch (cacheError) {
         // Cache operation failed, continue to fetch from repository
-        console.warn(
+        logger.warn(
           'Cache get operation failed:',
           (cacheError as Error).message
         );
@@ -128,7 +133,7 @@ router.post(
             TIME.HOUR / 1000
           );
         } catch (cacheError) {
-          console.warn(
+          logger.warn(
             'Cache set operation failed:',
             (cacheError as Error).message
           );
@@ -176,7 +181,7 @@ router.post(
         }
       } catch (cacheError) {
         // Cache operation failed, continue to fetch from repository
-        console.warn(
+        logger.warn(
           'Cache get operation failed:',
           (cacheError as Error).message
         );
@@ -204,7 +209,7 @@ router.post(
             TIME.HOUR / 1000
           );
         } catch (cacheError) {
-          console.warn(
+          logger.warn(
             'Cache set operation failed:',
             (cacheError as Error).message
           );
@@ -258,7 +263,7 @@ router.post(
         }
       } catch (cacheError) {
         // Cache operation failed, continue to fetch from repository
-        console.warn(
+        logger.warn(
           'Cache get operation failed:',
           (cacheError as Error).message
         );
@@ -292,7 +297,7 @@ router.post(
             TIME.HOUR / 1000
           );
         } catch (cacheError) {
-          console.warn(
+          logger.warn(
             'Cache set operation failed:',
             (cacheError as Error).message
           );
@@ -349,7 +354,7 @@ router.post(
         }
       } catch (cacheError) {
         // Cache operation failed, continue to fetch from repository
-        console.warn(
+        logger.warn(
           'Cache get operation failed:',
           (cacheError as Error).message
         );
@@ -384,7 +389,7 @@ router.post(
             TIME.HOUR / 1000
           );
         } catch (cacheError) {
-          console.warn(
+          logger.warn(
             'Cache set operation failed:',
             (cacheError as Error).message
           );
@@ -396,6 +401,62 @@ router.post(
     } catch (error) {
       // Record failed feature usage
       recordFeatureUsage('code_churn_view', userType, false, 'api_call');
+      next(error);
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// GET endpoint to get repository summary statistics
+// ---------------------------------------------------------------------------
+router.get(
+  '/summary',
+  setRequestPriority('normal'), // Normal priority - lightweight metadata operation
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { repoUrl } = req.query;
+    const userType = getUserType(req);
+
+    // Validate repoUrl query parameter
+    if (!repoUrl || typeof repoUrl !== 'string') {
+      recordFeatureUsage('repository_summary', userType, false, 'api_call');
+      return next(new ValidationError('repoUrl query parameter is required'));
+    }
+
+    // Validate URL format and security
+    try {
+      const url = new URL(repoUrl);
+      if (!['http:', 'https:'].includes(url.protocol)) {
+        throw new ValidationError('Invalid repository URL protocol');
+      }
+      // Note: Additional validation happens in repositorySummaryService
+    } catch (error) {
+      recordFeatureUsage('repository_summary', userType, false, 'api_call');
+      if (error instanceof ValidationError) {
+        return next(error);
+      }
+      return next(new ValidationError(ERROR_MESSAGES.INVALID_REPO_URL));
+    }
+
+    try {
+      const summary =
+        await repositorySummaryService.getRepositorySummary(repoUrl);
+
+      // Record successful operation
+      recordEnhancedCacheOperation(
+        'summary',
+        summary.metadata.cached,
+        req,
+        repoUrl
+      );
+      recordFeatureUsage('repository_summary', userType, true, 'api_call');
+      if (summary.metadata.cached) {
+        recordDataFreshness('summary', 0, 'hybrid');
+      }
+
+      res.status(HTTP_STATUS.OK).json({ summary });
+    } catch (error) {
+      // Record failed feature usage
+      recordFeatureUsage('repository_summary', userType, false, 'api_call');
       next(error);
     }
   }
@@ -424,7 +485,7 @@ router.post(
         cachedHeatmap = await redis.get(heatmapKey);
       } catch (cacheError) {
         // Cache operation failed, continue to fetch from repository
-        console.warn(
+        logger.warn(
           'Cache get operation failed:',
           (cacheError as Error).message
         );
@@ -457,7 +518,7 @@ router.post(
           return;
         } catch (parseError) {
           // Corrupted cache data, continue to fetch from repository
-          console.warn(
+          logger.warn(
             'Cache data parsing failed:',
             (parseError as Error).message
           );
@@ -497,7 +558,7 @@ router.post(
             TIME.HOUR / 1000
           );
         } catch (cacheError) {
-          console.warn(
+          logger.warn(
             'Cache set operation failed for commits:',
             (cacheError as Error).message
           );
@@ -513,7 +574,7 @@ router.post(
             TIME.HOUR / 1000
           );
         } catch (cacheError) {
-          console.warn(
+          logger.warn(
             'Cache set operation failed for heatmap:',
             (cacheError as Error).message
           );
