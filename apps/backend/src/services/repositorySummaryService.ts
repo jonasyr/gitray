@@ -108,8 +108,9 @@ class RepositorySummaryService {
       };
     }
 
-    const firstCommitDate = await this.getFirstCommitDate(git);
-    const lastCommit = await this.getLastCommitInfo(git);
+    const targetRef = await this.resolveTargetRef(git);
+    const firstCommitDate = await this.getFirstCommitDate(git, targetRef);
+    const lastCommit = await this.getLastCommitInfo(git, targetRef);
     const contributors = await this.getContributorCount(git);
 
     const ageInfo = firstCommitDate
@@ -160,21 +161,19 @@ class RepositorySummaryService {
     git: SimpleGit;
   }> {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), 'gitray-summary-'));
-    const git = simpleGit(tempDir);
 
     try {
-      await git.init();
-      await git.addRemote('origin', repoUrl);
-      await git.raw(['config', 'core.sparseCheckout', 'true']);
-      await git.raw([
-        'fetch',
+      await simpleGit().clone(repoUrl, tempDir, [
         '--filter=blob:none',
         '--depth=1',
+        '--single-branch',
+        '--no-checkout',
         '--no-tags',
-        'origin',
-        'HEAD',
       ]);
-      await git.raw(['checkout', 'FETCH_HEAD']);
+
+      const git = simpleGit(tempDir);
+      await this.ensureFullCommitHistory(git);
+
       return { tempDir, git };
     } catch (error) {
       await this.cleanup(tempDir);
@@ -191,13 +190,40 @@ class RepositorySummaryService {
     }
   }
 
-  private async getFirstCommitDate(git: SimpleGit): Promise<string | null> {
+  private async ensureFullCommitHistory(git: SimpleGit): Promise<void> {
+    try {
+      const isShallow =
+        (await git.revparse(['--is-shallow-repository'])).trim() === 'true';
+      if (!isShallow) return;
+
+      await git.fetch([
+        '--filter=blob:none',
+        '--deepen=2147483647',
+        '--update-shallow',
+        '--no-tags',
+        '--prune',
+        'origin',
+      ]);
+    } catch (error) {
+      if (this.isEmptyRepositoryError(error)) {
+        return;
+      }
+      logger.error('Failed to unshallow repository for summary', { error });
+      throw error;
+    }
+  }
+
+  private async getFirstCommitDate(
+    git: SimpleGit,
+    ref: string
+  ): Promise<string | null> {
     try {
       const output = await git.raw([
         'log',
         '--reverse',
         '--format=%aI',
         '--max-count=1',
+        ref,
       ]);
       const trimmed = output.trim();
       return trimmed || null;
@@ -211,10 +237,11 @@ class RepositorySummaryService {
   }
 
   private async getLastCommitInfo(
-    git: SimpleGit
+    git: SimpleGit,
+    ref: string
   ): Promise<{ date: string; sha: string; author: string } | null> {
     try {
-      const output = await git.raw(['log', '-1', '--format=%aI|%H|%an']);
+      const output = await git.raw(['log', '-1', '--format=%aI|%H|%an', ref]);
       const [date, sha, author] = output.trim().split('|');
       if (!date || !sha || !author) {
         return null;
@@ -231,7 +258,8 @@ class RepositorySummaryService {
 
   private async getCommitCount(git: SimpleGit): Promise<number> {
     try {
-      const output = await git.raw(['rev-list', '--count', 'HEAD']);
+      const targetRef = await this.resolveTargetRef(git);
+      const output = await git.raw(['rev-list', '--count', targetRef]);
       const parsed = Number.parseInt(output.trim(), 10);
       return Number.isNaN(parsed) ? 0 : parsed;
     } catch (error) {
@@ -258,6 +286,44 @@ class RepositorySummaryService {
       logger.error('Failed to count contributors', { error });
       throw error;
     }
+  }
+
+  private async resolveTargetRef(git: SimpleGit): Promise<string> {
+    const resolvers = [
+      async () => {
+        const branch = (
+          await git.raw(['rev-parse', '--abbrev-ref', 'origin/HEAD'])
+        ).trim();
+        if (branch && branch !== 'origin/HEAD' && branch !== 'HEAD') {
+          return `origin/${branch}`;
+        }
+        if (branch) {
+          return branch;
+        }
+        return '';
+      },
+      async () => {
+        const head = (
+          await git.raw(['rev-parse', '--abbrev-ref', 'HEAD'])
+        ).trim();
+        return head || '';
+      },
+    ];
+
+    for (const resolver of resolvers) {
+      try {
+        const ref = await resolver();
+        if (ref) {
+          return ref;
+        }
+      } catch (error) {
+        logger.debug('Failed to resolve repository ref for summary', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return 'origin/HEAD';
   }
 
   private determineStatus(
@@ -292,11 +358,8 @@ class RepositorySummaryService {
   }
 
   private getCreatedDateSource(
-    platform: RepositoryPlatform
+    _platform: RepositoryPlatform
   ): CreatedDateSource {
-    if (platform === 'github') return 'first-commit';
-    if (platform === 'gitlab') return 'first-commit';
-    if (platform === 'bitbucket') return 'first-commit';
     return 'first-commit';
   }
 
@@ -387,7 +450,11 @@ class RepositorySummaryService {
     const message = error.message.toLowerCase();
     return (
       message.includes('does not have any commits yet') ||
-      message.includes("bad revision 'head'")
+      message.includes("bad revision 'head'") ||
+      message.includes("bad revision 'origin/head'") ||
+      message.includes("couldn't find remote ref head") ||
+      message.includes('no such ref: head') ||
+      message.includes('unknown revision or path not in the working tree')
     );
   }
 
