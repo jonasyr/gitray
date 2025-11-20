@@ -12,7 +12,103 @@ vi.mock('../../src/services/logger', () => ({
   initializeLogger,
   getLogger: global.getLogger,
 }));
-vi.mock('../../src/config');
+vi.mock('../../src/config', () => ({
+  config: {
+    port: 3001,
+    cors: { origin: 'http://localhost:5173', credentials: true },
+    rateLimit: {
+      windowMs: 15 * 60 * 1000,
+      max: 100,
+      message: 'Too many requests',
+    },
+    adminRateLimit: {
+      windowMs: 900000,
+      max: 100,
+      message: 'Too many admin requests',
+    },
+    redis: { host: 'localhost', port: 6379 },
+    git: { maxConcurrentProcesses: 10, cloneDepth: 1 },
+    hybridCache: {
+      diskPath: '/tmp/cache',
+      enableRedis: false,
+      enableDisk: true,
+      maxEntries: 1000,
+      memoryLimitBytes: 100 * 1024 * 1024,
+      redisConfig: {
+        host: 'localhost',
+        port: 6379,
+        keyPrefix: 'gitray:cache:',
+        maxRetriesPerRequest: 1,
+        enableOfflineQueue: false,
+        connectTimeout: 10000,
+        lazyConnect: true,
+      },
+    },
+    locks: { lockDir: '/tmp/locks', defaultTimeoutMs: 120000 },
+    repositoryCache: { enabled: false, maxRepositories: 50, maxAgeHours: 24 },
+    operationCoordination: { enabled: false, coalescingEnabled: true },
+    cacheStrategy: { hierarchicalCaching: true, memoryPressureThreshold: 0.8 },
+    memoryPressure: {
+      warningThreshold: 0.75,
+      criticalThreshold: 0.85,
+      emergencyThreshold: 0.95,
+      checkIntervalMs: 5000,
+    },
+    adminAuth: { enabled: false, requireForMetrics: false },
+  },
+  lockConfig: {
+    lockDir: '/tmp/locks',
+    defaultTimeoutMs: 120000,
+    cleanupIntervalMs: 60000,
+  },
+  adminAuthConfig: { enabled: false, requireForMetrics: false },
+  adminRateLimitConfig: {
+    windowMs: 900000,
+    max: 100,
+    message: 'Too many admin requests',
+  },
+  hybridCacheConfig: {},
+  streamingConfig: {},
+  debugConfig: {},
+  repositoryCacheConfig: {},
+  operationCoordinationConfig: {},
+  cacheStrategyConfig: {},
+  memoryPressureConfig: {},
+  validateConfig: vi.fn(),
+}));
+vi.mock('../../src/utils/lockManager', () => ({
+  LockManager: vi.fn(() => ({
+    acquireLock: vi.fn(),
+    releaseLock: vi.fn(),
+    cleanup: vi.fn(),
+  })),
+  lockManager: {
+    acquireLock: vi.fn(),
+    releaseLock: vi.fn(),
+    cleanup: vi.fn(),
+  },
+}));
+vi.mock('../../src/utils/hybridLruCache', () => {
+  const mockHybridLRUCache = vi.fn().mockImplementation(() => ({
+    get: vi.fn(),
+    set: vi.fn(),
+    has: vi.fn(),
+    delete: vi.fn(),
+    clear: vi.fn(),
+    getStats: vi.fn(),
+  }));
+  return {
+    HybridLRUCache: mockHybridLRUCache,
+    default: mockHybridLRUCache,
+    hybridLruCache: {
+      get: vi.fn(),
+      set: vi.fn(),
+      has: vi.fn(),
+      delete: vi.fn(),
+      clear: vi.fn(),
+    },
+  };
+});
 vi.mock('../../src/services/metrics');
 vi.mock('../../src/services/repositoryCoordinator');
 vi.mock('../../src/services/repositoryCache');
@@ -24,6 +120,9 @@ vi.mock('../../src/middlewares/errorHandler');
 vi.mock('../../src/utils/gracefulShutdown');
 vi.mock('../../src/middlewares/requestId');
 vi.mock('../../src/middlewares/memoryPressureMiddleware');
+vi.mock('../../src/middlewares/adminAuth', () => ({
+  requireAdminToken: (req: any, res: any, next: any) => next(),
+}));
 vi.mock('express', () => {
   const mockRouter = {
     get: vi.fn(),
@@ -119,6 +218,12 @@ describe('index.ts - ENHANCED COVERAGE', () => {
       emergencyThreshold: 0.95,
       checkIntervalMs: 5000,
     },
+    adminRateLimit: {
+      windowMs: 900000,
+      max: 100,
+      message: 'Too many admin requests, please try again later',
+    },
+    adminAuth: { enabled: false, requireForMetrics: false },
     ...overrides,
   });
 
@@ -127,6 +232,7 @@ describe('index.ts - ENHANCED COVERAGE', () => {
   beforeEach(() => {
     originalEnv = process.env;
     process.env = { ...originalEnv };
+    process.env.ADMIN_AUTH_ENABLED = 'false'; // Disable admin auth in tests
     vi.clearAllMocks();
     vi.useRealTimers();
   });
@@ -310,6 +416,8 @@ describe('index.ts - ENHANCED COVERAGE', () => {
       // ASSERT
       expect(mockApp.use).toHaveBeenCalledWith(
         '/metrics',
+        expect.any(Function),
+        expect.any(Function),
         expect.any(Function)
       );
       expect(mockApp.use).toHaveBeenCalledWith('/api', expect.any(Function));
@@ -1243,6 +1351,12 @@ describe('index.ts - ENHANCED COVERAGE', () => {
           emergencyThreshold: 0.99,
           checkIntervalMs: 10000,
         },
+        adminRateLimit: {
+          windowMs: 900000,
+          max: 100,
+          message: 'Too many admin requests',
+        },
+        adminAuth: { enabled: false, requireForMetrics: false },
       };
 
       vi.doMock('../../src/config', () => ({

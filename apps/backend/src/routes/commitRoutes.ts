@@ -42,9 +42,20 @@ import {
 import { config } from '../config';
 import { fileAnalysisService } from '../services/fileAnalysisService';
 import { isSecureGitUrl } from '../middlewares/validation';
+import { requireAdminToken } from '../middlewares/adminAuth';
+import rateLimit from 'express-rate-limit';
 
 // Router serving commit related data with unified caching
 const router = express.Router();
+
+// Admin-specific rate limiter (more restrictive than general API limits)
+const adminRateLimiter = rateLimit({
+  windowMs: config.adminRateLimit.windowMs,
+  max: config.adminRateLimit.max,
+  message: config.adminRateLimit.message,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // ---------------------------------------------------------------------------
 // Custom validation error handler that formats errors correctly
@@ -523,34 +534,41 @@ router.get(
 // ---------------------------------------------------------------------------
 
 // GET /cache/stats - Get detailed cache statistics
-router.get('/cache/stats', (req: Request, res: Response) => {
-  const logger = createRequestLogger(req);
+router.get(
+  '/cache/stats',
+  adminRateLimiter,
+  requireAdminToken,
+  (req: Request, res: Response) => {
+    const logger = createRequestLogger(req);
 
-  const cacheStats = getRepositoryCacheStats();
-  const coordinationMetrics = getCoordinationMetrics();
-  const repositoryStatus = getRepositoryStatus();
+    const cacheStats = getRepositoryCacheStats();
+    const coordinationMetrics = getCoordinationMetrics();
+    const repositoryStatus = getRepositoryStatus();
 
-  const result = {
-    cache: cacheStats,
-    coordination: coordinationMetrics,
-    repositories: {
-      cached: repositoryStatus.length,
-      details: repositoryStatus.slice(0, 10), // Limit to first 10 for performance
-    },
-    timestamp: new Date().toISOString(),
-  };
+    const result = {
+      cache: cacheStats,
+      coordination: coordinationMetrics,
+      repositories: {
+        cached: repositoryStatus.length,
+        details: repositoryStatus.slice(0, 10), // Limit to first 10 for performance
+      },
+      timestamp: new Date().toISOString(),
+    };
 
-  logger.debug('Cache stats requested', {
-    cachedRepositories: repositoryStatus.length,
-    overallHitRatio: cacheStats.hitRatios.overall,
-  });
+    logger.debug('Cache stats requested', {
+      cachedRepositories: repositoryStatus.length,
+      overallHitRatio: cacheStats.hitRatios.overall,
+    });
 
-  res.status(HTTP_STATUS.OK).json(result);
-});
+    res.status(HTTP_STATUS.OK).json(result);
+  }
+);
 
 // POST /cache/invalidate - Invalidate repository cache
 router.post(
   '/cache/invalidate',
+  adminRateLimiter,
+  requireAdminToken,
   [
     body('repoUrl')
       .isURL({ protocols: ['http', 'https'] })
@@ -586,37 +604,42 @@ router.post(
 );
 
 // GET /cache/repositories - List all cached repositories
-router.get('/cache/repositories', (req: Request, res: Response) => {
-  const logger = createRequestLogger(req);
+router.get(
+  '/cache/repositories',
+  adminRateLimiter,
+  requireAdminToken,
+  (req: Request, res: Response) => {
+    const logger = createRequestLogger(req);
 
-  const repositoryStatus = getRepositoryStatus();
-  const coordinationMetrics = getCoordinationMetrics();
+    const repositoryStatus = getRepositoryStatus();
+    const coordinationMetrics = getCoordinationMetrics();
 
-  const result = {
-    repositories: repositoryStatus.map((repo) => ({
-      ...repo,
-      ageMinutes: Math.round(repo.age / (60 * 1000)),
-      lastAccessedFormatted: repo.lastAccessed.toISOString(),
-    })),
-    summary: {
-      total: repositoryStatus.length,
-      maxRepositories: config.repositoryCache?.maxRepositories || 50,
-      utilizationPercent: Math.round(
-        (repositoryStatus.length /
-          (config.repositoryCache?.maxRepositories || 50)) *
-          100
-      ),
-    },
-    coordination: coordinationMetrics,
-    timestamp: new Date().toISOString(),
-  };
+    const result = {
+      repositories: repositoryStatus.map((repo) => ({
+        ...repo,
+        ageMinutes: Math.round(repo.age / (60 * 1000)),
+        lastAccessedFormatted: repo.lastAccessed.toISOString(),
+      })),
+      summary: {
+        total: repositoryStatus.length,
+        maxRepositories: config.repositoryCache?.maxRepositories || 50,
+        utilizationPercent: Math.round(
+          (repositoryStatus.length /
+            (config.repositoryCache?.maxRepositories || 50)) *
+            100
+        ),
+      },
+      coordination: coordinationMetrics,
+      timestamp: new Date().toISOString(),
+    };
 
-  logger.debug('Repository status requested', {
-    totalRepositories: repositoryStatus.length,
-  });
+    logger.debug('Repository status requested', {
+      totalRepositories: repositoryStatus.length,
+    });
 
-  res.status(HTTP_STATUS.OK).json(result);
-});
+    res.status(HTTP_STATUS.OK).json(result);
+  }
+);
 
 // ---------------------------------------------------------------------------
 // ENHANCED: Streaming endpoints (with coordination support)
