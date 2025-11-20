@@ -485,3 +485,92 @@ export interface CodeChurnAnalysis {
     fromCache?: boolean;
   };
 }
+
+// ============================================================================
+// REPOSITORY SUMMARY - Repository Metadata and Statistics
+// ============================================================================
+
+/**
+ * Git hosting platform identifier
+ */
+export type RepositoryPlatform = 'github' | 'gitlab' | 'bitbucket' | 'other';
+
+/**
+ * Repository activity status based on last commit recency
+ */
+export type RepositoryStatus = 'active' | 'inactive' | 'archived' | 'empty';
+
+/**
+ * Source of repository creation date information
+ */
+export type CreatedDateSource = 'first-commit' | 'git-api' | 'platform-api';
+
+/**
+ * Parsed repository URL components
+ */
+export interface RepositoryUrlInfo {
+  /** Detected hosting platform */
+  platform: RepositoryPlatform;
+  /** Repository owner/organization */
+  owner: string;
+  /** Repository name */
+  name: string;
+  /** Normalized full URL */
+  fullUrl: string;
+}
+
+/**
+ * Comprehensive repository summary statistics
+ */
+export interface RepositorySummary {
+  repository: {
+    name: string;
+    owner: string;
+    url: string;
+    platform: RepositoryPlatform;
+  };
+  created: {
+    /** ISO 8601 timestamp of repository creation */
+    date: string;
+    /** How the creation date was determined */
+    source: CreatedDateSource;
+  };
+  age: {
+    /** Full years since creation */
+    years: number;
+    /** Remaining months after full years */
+    months: number;
+    /** Human-readable formatted age (e.g., "5.7y") */
+    formatted: string;
+  };
+  lastCommit: {
+    /** ISO 8601 timestamp of last commit */
+    date: string;
+    /** Human-readable relative time (e.g., "2 days ago") */
+    relativeTime: string;
+    /** Commit SHA hash */
+    sha: string;
+    /** Commit author name */
+    author: string;
+  };
+  stats: {
+    /** Total number of commits in repository */
+    totalCommits: number;
+    /** Number of unique contributors */
+    contributors: number;
+    /** Activity status classification */
+    status: RepositoryStatus;
+  };
+  metadata: {
+    /** Whether data was retrieved from cache */
+    cached: boolean;
+    /** Source of the data */
+    dataSource: 'git-sparse-clone' | 'cache';
+    /** Accuracy of creation date */
+    createdDateAccuracy: 'exact' | 'approximate';
+    /** Bandwidth savings description */
+    bandwidthSaved: string;
+    /** When this summary was last updated */
+    lastUpdated: string;
+  };
+}

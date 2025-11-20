@@ -25,6 +25,10 @@ const mockMetrics = {
   getRepositorySizeCategory: vi.fn(),
 };
 
+const mockRepositorySummaryService = {
+  getRepositorySummary: vi.fn(),
+};
+
 // Create middleware function that can be chained
 const createValidationMiddleware = () => {
   const middleware = vi.fn((req: any, res: any, next: any) => next()) as any;
@@ -69,22 +73,63 @@ vi.mock('../../../src/middlewares/validation', () => ({
   isSecureGitUrl: vi.fn(() => Promise.resolve(true)),
 }));
 
-vi.mock('@gitray/shared-types', () => ({
+vi.mock('../../../src/services/repositorySummaryService', () => ({
   __esModule: true,
-  ERROR_MESSAGES: {
-    INVALID_REPO_URL: 'Invalid repository URL',
-  },
-  HTTP_STATUS: {
-    OK: 200,
-    BAD_REQUEST: 400,
-    INTERNAL_SERVER_ERROR: 500,
-  },
-  TIME: {
-    HOUR: 3600000,
-  },
-  CommitFilterOptions: {},
-  ChurnFilterOptions: {},
+  repositorySummaryService: mockRepositorySummaryService,
 }));
+
+vi.mock('@gitray/shared-types', () => {
+  const TIME = {
+    SECOND: 1000,
+    MINUTE: 60 * 1000,
+    HOUR: 60 * 60 * 1000,
+    DAY: 24 * 60 * 60 * 1000,
+    WEEK: 7 * 24 * 60 * 60 * 1000,
+  };
+
+  class GitrayError extends Error {
+    constructor(
+      message: string,
+      public readonly statusCode: number = 500,
+      public readonly code?: string
+    ) {
+      super(message);
+      this.name = 'GitrayError';
+    }
+  }
+
+  class ValidationError extends GitrayError {
+    constructor(
+      message: string,
+      public readonly errors?: any[]
+    ) {
+      super(message, 400, 'VALIDATION_ERROR');
+      this.name = 'ValidationError';
+    }
+  }
+
+  return {
+    __esModule: true,
+    ERROR_MESSAGES: {
+      INVALID_REPO_URL: 'Invalid repository URL',
+    },
+    HTTP_STATUS: {
+      OK: 200,
+      BAD_REQUEST: 400,
+      INTERNAL_SERVER_ERROR: 500,
+    },
+    TIME,
+    RATE_LIMIT: {
+      WINDOW_MS: 15 * TIME.MINUTE,
+      MAX_REQUESTS: 100,
+      MESSAGE: 'Too many requests from this IP, please try again later.',
+    },
+    GitrayError,
+    ValidationError,
+    CommitFilterOptions: {},
+    ChurnFilterOptions: {},
+  };
+});
 
 describe('RepositoryRoutes Unit Tests', () => {
   let app: Application;
@@ -918,6 +963,424 @@ describe('RepositoryRoutes Unit Tests', () => {
       expect(response.status).toBe(200);
       expect(response.body.churnData.files).toHaveLength(0);
       expect(response.body.churnData.metadata.totalFiles).toBe(0);
+    });
+  });
+
+  describe('GET /summary - Get Repository Summary Statistics', () => {
+    beforeEach(async () => {
+      vi.clearAllMocks();
+      mockMetrics.getUserType.mockReturnValue('anonymous');
+    });
+
+    test('should return repository summary when service succeeds', async () => {
+      // ARRANGE
+      const mockSummary = {
+        repository: {
+          name: 'Hello-World',
+          owner: 'octocat',
+          url: 'https://github.com/octocat/Hello-World.git',
+          platform: 'github' as const,
+        },
+        created: {
+          date: '2011-03-22T00:00:00.000Z',
+          source: 'first-commit' as const,
+        },
+        age: {
+          years: 13,
+          months: 8,
+          formatted: '13.7y',
+        },
+        lastCommit: {
+          date: '2025-11-15T10:30:00.000Z',
+          relativeTime: '4 days ago',
+          sha: 'abc123',
+          author: 'Test Author',
+        },
+        stats: {
+          totalCommits: 100,
+          contributors: 5,
+          status: 'active' as const,
+        },
+        metadata: {
+          cached: false,
+          dataSource: 'git-sparse-clone' as const,
+          createdDateAccuracy: 'approximate' as const,
+          bandwidthSaved: '95-99% vs full clone',
+          lastUpdated: '2025-11-19T10:00:00.000Z',
+        },
+      };
+
+      mockRepositorySummaryService.getRepositorySummary.mockResolvedValue(
+        mockSummary
+      );
+
+      // ACT
+      const response = await request(app).get(
+        '/summary?repoUrl=https://github.com/octocat/Hello-World.git'
+      );
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ summary: mockSummary });
+      expect(
+        mockRepositorySummaryService.getRepositorySummary
+      ).toHaveBeenCalledWith('https://github.com/octocat/Hello-World.git');
+      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
+        'repository_summary',
+        'anonymous',
+        true,
+        'api_call'
+      );
+    });
+
+    test('should return 400 when repoUrl query parameter is missing', async () => {
+      // ACT
+      const response = await request(app).get('/summary');
+
+      // ASSERT
+      expect(response.status).toBe(400);
+      expect(
+        mockRepositorySummaryService.getRepositorySummary
+      ).not.toHaveBeenCalled();
+      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
+        'repository_summary',
+        'anonymous',
+        false,
+        'api_call'
+      );
+    });
+
+    test('should return 400 when repoUrl is not a string', async () => {
+      // ACT
+      const response = await request(app).get('/summary?repoUrl=');
+
+      // ASSERT
+      expect(response.status).toBe(400);
+      expect(
+        mockRepositorySummaryService.getRepositorySummary
+      ).not.toHaveBeenCalled();
+    });
+
+    test('should return 400 when repoUrl has invalid protocol', async () => {
+      // ACT
+      const response = await request(app).get(
+        '/summary?repoUrl=ftp://invalid.com/repo.git'
+      );
+
+      // ASSERT
+      expect(response.status).toBe(400);
+      expect(
+        mockRepositorySummaryService.getRepositorySummary
+      ).not.toHaveBeenCalled();
+      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
+        'repository_summary',
+        'anonymous',
+        false,
+        'api_call'
+      );
+    });
+
+    test('should handle service errors and return 500', async () => {
+      // ARRANGE
+      const serviceError = new Error('Repository not found');
+      mockRepositorySummaryService.getRepositorySummary.mockRejectedValue(
+        serviceError
+      );
+
+      // ACT
+      const response = await request(app).get(
+        '/summary?repoUrl=https://github.com/test/notfound.git'
+      );
+
+      // ASSERT
+      expect(response.status).toBe(500);
+      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
+        'repository_summary',
+        'anonymous',
+        false,
+        'api_call'
+      );
+    });
+
+    test('should record cache hit when summary is cached', async () => {
+      // ARRANGE
+      const cachedSummary = {
+        repository: {
+          name: 'cached-repo',
+          owner: 'test',
+          url: 'https://github.com/test/cached-repo.git',
+          platform: 'github' as const,
+        },
+        created: {
+          date: '2020-01-01T00:00:00.000Z',
+          source: 'first-commit' as const,
+        },
+        age: {
+          years: 5,
+          months: 0,
+          formatted: '5.0y',
+        },
+        lastCommit: {
+          date: '2025-11-19T00:00:00.000Z',
+          relativeTime: '1 day ago',
+          sha: 'def456',
+          author: 'Cached Author',
+        },
+        stats: {
+          totalCommits: 500,
+          contributors: 10,
+          status: 'active' as const,
+        },
+        metadata: {
+          cached: true,
+          dataSource: 'cache' as const,
+          createdDateAccuracy: 'approximate' as const,
+          bandwidthSaved: '95-99% vs full clone',
+          lastUpdated: '2025-11-18T10:00:00.000Z',
+        },
+      };
+
+      mockRepositorySummaryService.getRepositorySummary.mockResolvedValue(
+        cachedSummary
+      );
+
+      // ACT
+      const response = await request(app).get(
+        '/summary?repoUrl=https://github.com/test/cached-repo.git'
+      );
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(response.body.summary.metadata.cached).toBe(true);
+      expect(mockMetrics.recordEnhancedCacheOperation).toHaveBeenCalledWith(
+        'summary',
+        true,
+        expect.any(Object),
+        'https://github.com/test/cached-repo.git'
+      );
+      expect(mockMetrics.recordDataFreshness).toHaveBeenCalledWith(
+        'summary',
+        0,
+        'hybrid'
+      );
+    });
+
+    test('should record cache miss when summary is fetched fresh', async () => {
+      // ARRANGE
+      const freshSummary = {
+        repository: {
+          name: 'fresh-repo',
+          owner: 'test',
+          url: 'https://github.com/test/fresh-repo.git',
+          platform: 'github' as const,
+        },
+        created: {
+          date: '2023-01-01T00:00:00.000Z',
+          source: 'first-commit' as const,
+        },
+        age: {
+          years: 2,
+          months: 0,
+          formatted: '2.0y',
+        },
+        lastCommit: {
+          date: '2025-11-19T10:00:00.000Z',
+          relativeTime: 'just now',
+          sha: 'ghi789',
+          author: 'Fresh Author',
+        },
+        stats: {
+          totalCommits: 250,
+          contributors: 3,
+          status: 'active' as const,
+        },
+        metadata: {
+          cached: false,
+          dataSource: 'git-sparse-clone' as const,
+          createdDateAccuracy: 'approximate' as const,
+          bandwidthSaved: '95-99% vs full clone',
+          lastUpdated: '2025-11-19T10:00:00.000Z',
+        },
+      };
+
+      mockRepositorySummaryService.getRepositorySummary.mockResolvedValue(
+        freshSummary
+      );
+
+      // ACT
+      const response = await request(app).get(
+        '/summary?repoUrl=https://github.com/test/fresh-repo.git'
+      );
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(response.body.summary.metadata.cached).toBe(false);
+      expect(mockMetrics.recordEnhancedCacheOperation).toHaveBeenCalledWith(
+        'summary',
+        false,
+        expect.any(Object),
+        'https://github.com/test/fresh-repo.git'
+      );
+      expect(mockMetrics.recordDataFreshness).not.toHaveBeenCalled();
+    });
+
+    test('should handle different user types for summary metrics', async () => {
+      // ARRANGE
+      mockMetrics.getUserType.mockReturnValue('premium');
+      const mockSummary = {
+        repository: {
+          name: 'test',
+          owner: 'test',
+          url: 'https://github.com/test/test.git',
+          platform: 'github' as const,
+        },
+        created: {
+          date: '2020-01-01T00:00:00.000Z',
+          source: 'first-commit' as const,
+        },
+        age: { years: 5, months: 0, formatted: '5.0y' },
+        lastCommit: {
+          date: '2025-11-19T00:00:00.000Z',
+          relativeTime: 'now',
+          sha: 'abc',
+          author: 'Test',
+        },
+        stats: {
+          totalCommits: 100,
+          contributors: 5,
+          status: 'active' as const,
+        },
+        metadata: {
+          cached: false,
+          dataSource: 'git-sparse-clone' as const,
+          createdDateAccuracy: 'approximate' as const,
+          bandwidthSaved: '95-99% vs full clone',
+          lastUpdated: '2025-11-19T00:00:00.000Z',
+        },
+      };
+
+      mockRepositorySummaryService.getRepositorySummary.mockResolvedValue(
+        mockSummary
+      );
+
+      // ACT
+      await request(app).get(
+        '/summary?repoUrl=https://github.com/test/test.git'
+      );
+
+      // ASSERT
+      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
+        'repository_summary',
+        'premium',
+        true,
+        'api_call'
+      );
+    });
+
+    test('should handle empty repository (status: empty)', async () => {
+      // ARRANGE
+      const emptySummary = {
+        repository: {
+          name: 'empty-repo',
+          owner: 'test',
+          url: 'https://github.com/test/empty-repo.git',
+          platform: 'github' as const,
+        },
+        created: {
+          date: '',
+          source: 'first-commit' as const,
+        },
+        age: {
+          years: 0,
+          months: 0,
+          formatted: '0.0y',
+        },
+        lastCommit: {
+          date: '',
+          relativeTime: 'no commits',
+          sha: '',
+          author: '',
+        },
+        stats: {
+          totalCommits: 0,
+          contributors: 0,
+          status: 'empty' as const,
+        },
+        metadata: {
+          cached: false,
+          dataSource: 'git-sparse-clone' as const,
+          createdDateAccuracy: 'approximate' as const,
+          bandwidthSaved: '95-99% vs full clone',
+          lastUpdated: '2025-11-19T10:00:00.000Z',
+        },
+      };
+
+      mockRepositorySummaryService.getRepositorySummary.mockResolvedValue(
+        emptySummary
+      );
+
+      // ACT
+      const response = await request(app).get(
+        '/summary?repoUrl=https://github.com/test/empty-repo.git'
+      );
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(response.body.summary.stats.status).toBe('empty');
+      expect(response.body.summary.stats.totalCommits).toBe(0);
+      expect(response.body.summary.lastCommit.relativeTime).toBe('no commits');
+    });
+
+    test('should handle different repository platforms (GitLab, Bitbucket)', async () => {
+      // ARRANGE - GitLab
+      const gitlabSummary = {
+        repository: {
+          name: 'gitlab-repo',
+          owner: 'test',
+          url: 'https://gitlab.com/test/gitlab-repo.git',
+          platform: 'gitlab' as const,
+        },
+        created: {
+          date: '2021-01-01T00:00:00.000Z',
+          source: 'first-commit' as const,
+        },
+        age: {
+          years: 4,
+          months: 0,
+          formatted: '4.0y',
+        },
+        lastCommit: {
+          date: '2025-11-01T00:00:00.000Z',
+          relativeTime: '18 days ago',
+          sha: 'gitlab123',
+          author: 'GitLab User',
+        },
+        stats: {
+          totalCommits: 300,
+          contributors: 7,
+          status: 'inactive' as const,
+        },
+        metadata: {
+          cached: false,
+          dataSource: 'git-sparse-clone' as const,
+          createdDateAccuracy: 'approximate' as const,
+          bandwidthSaved: '95-99% vs full clone',
+          lastUpdated: '2025-11-19T10:00:00.000Z',
+        },
+      };
+
+      mockRepositorySummaryService.getRepositorySummary.mockResolvedValue(
+        gitlabSummary
+      );
+
+      // ACT
+      const response = await request(app).get(
+        '/summary?repoUrl=https://gitlab.com/test/gitlab-repo.git'
+      );
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(response.body.summary.repository.platform).toBe('gitlab');
     });
   });
 });

@@ -170,7 +170,6 @@ class RepositorySummaryService {
         'fetch',
         '--filter=blob:none',
         '--depth=1',
-        '--single-branch',
         '--no-tags',
         'origin',
         'HEAD',
