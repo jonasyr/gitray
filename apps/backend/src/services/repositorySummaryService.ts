@@ -166,13 +166,15 @@ class RepositorySummaryService {
       await git.init();
       await git.addRemote('origin', repoUrl);
       await git.raw(['config', 'core.sparseCheckout', 'true']);
+      // Fetch all commits from default branch (commit graph) but exclude file contents (blobs)
+      // This allows accurate commit counting and contributor analysis
+      // while still saving 95-99% bandwidth vs full clone
       await git.raw([
         'fetch',
-        '--filter=blob:none',
-        '--depth=1',
-        '--no-tags',
+        '--filter=blob:none', // Exclude file contents, keep commit history
+        '--no-tags', // Skip tags to reduce bandwidth
         'origin',
-        'HEAD',
+        'HEAD', // Fetch default branch with full history
       ]);
       await git.raw(['checkout', 'FETCH_HEAD']);
       return { tempDir, git };
@@ -245,7 +247,7 @@ class RepositorySummaryService {
 
   private async getContributorCount(git: SimpleGit): Promise<number> {
     try {
-      const output = await git.raw(['shortlog', '-s', '-n', '--all']);
+      const output = await git.raw(['shortlog', '-s', '-n', 'HEAD']);
       const lines = output
         .split('\n')
         .map((line) => line.trim())
