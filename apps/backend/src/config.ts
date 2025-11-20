@@ -1,6 +1,11 @@
 import { RATE_LIMIT, GIT_SERVICE } from '@gitray/shared-types';
 import path from 'node:path';
 import os from 'node:os';
+import dotenv from 'dotenv';
+
+// CRITICAL: Load environment variables FIRST before parsing config
+// This ensures .env values are available when config object is created
+dotenv.config();
 
 /**
  * FIX: Added comprehensive configuration for HybridLRUCache
