@@ -1653,6 +1653,7 @@ describe('index.ts - ENHANCED COVERAGE', () => {
       const mockRes = {
         status: vi.fn().mockReturnThis(),
         json: vi.fn().mockReturnThis(),
+        setHeader: vi.fn(),
       } as any;
 
       notFoundHandler(mockReq, mockRes);
@@ -1711,6 +1712,7 @@ describe('index.ts - ENHANCED COVERAGE', () => {
         const mockRes = {
           status: vi.fn().mockReturnThis(),
           json: vi.fn().mockReturnThis(),
+          setHeader: vi.fn(),
         } as any;
 
         notFoundHandler(mockReq, mockRes);
@@ -1763,6 +1765,7 @@ describe('index.ts - ENHANCED COVERAGE', () => {
       const mockRes = {
         status: vi.fn().mockReturnThis(),
         json: vi.fn().mockReturnThis(),
+        setHeader: vi.fn(),
       } as any;
 
       notFoundHandler(mockReq, mockRes);
@@ -1771,6 +1774,191 @@ describe('index.ts - ENHANCED COVERAGE', () => {
       // Express's res.json() automatically sets Content-Type to application/json
       // We verify that json() is called, which ensures the response is JSON not HTML
       expect(mockRes.json).toHaveBeenCalled();
+    });
+  });
+
+  describe('404 Handler - Security Headers', () => {
+    test('should set strict Content-Security-Policy header on 404 responses', async () => {
+      // ARRANGE
+      const { mockApp } = createTestContext();
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { startApplication } = await import('../../src/index');
+      await startApplication();
+
+      const useCall = mockApp.use.mock.calls.find((call: any) => {
+        const handler = call[0];
+        return (
+          typeof handler === 'function' &&
+          handler.length === 2 &&
+          handler.toString().includes('NOT_FOUND')
+        );
+      });
+
+      expect(useCall).toBeDefined();
+
+      const notFoundHandler = useCall![0];
+      const mockReq = { path: '/nonexistent' } as any;
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn().mockReturnThis(),
+        setHeader: vi.fn(),
+      } as any;
+
+      notFoundHandler(mockReq, mockRes);
+
+      // ASSERT
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        'Content-Security-Policy',
+        expect.stringContaining("default-src 'none'")
+      );
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        'Content-Security-Policy',
+        expect.stringContaining("script-src 'none'")
+      );
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        'Content-Security-Policy',
+        expect.stringContaining("frame-ancestors 'none'")
+      );
+    });
+
+    test('should set X-Content-Type-Options: nosniff on 404 responses', async () => {
+      // ARRANGE
+      const { mockApp } = createTestContext();
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { startApplication } = await import('../../src/index');
+      await startApplication();
+
+      const useCall = mockApp.use.mock.calls.find((call: any) => {
+        const handler = call[0];
+        return (
+          typeof handler === 'function' &&
+          handler.length === 2 &&
+          handler.toString().includes('NOT_FOUND')
+        );
+      });
+
+      const notFoundHandler = useCall![0];
+      const mockReq = { path: '/nonexistent' } as any;
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn().mockReturnThis(),
+        setHeader: vi.fn(),
+      } as any;
+
+      notFoundHandler(mockReq, mockRes);
+
+      // ASSERT
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        'X-Content-Type-Options',
+        'nosniff'
+      );
+    });
+
+    test('should set X-Frame-Options: DENY on 404 responses', async () => {
+      // ARRANGE
+      const { mockApp } = createTestContext();
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { startApplication } = await import('../../src/index');
+      await startApplication();
+
+      const useCall = mockApp.use.mock.calls.find((call: any) => {
+        const handler = call[0];
+        return (
+          typeof handler === 'function' &&
+          handler.length === 2 &&
+          handler.toString().includes('NOT_FOUND')
+        );
+      });
+
+      const notFoundHandler = useCall![0];
+      const mockReq = { path: '/nonexistent' } as any;
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn().mockReturnThis(),
+        setHeader: vi.fn(),
+      } as any;
+
+      notFoundHandler(mockReq, mockRes);
+
+      // ASSERT
+      expect(mockRes.setHeader).toHaveBeenCalledWith('X-Frame-Options', 'DENY');
+    });
+
+    test('should set Content-Disposition: inline on 404 responses', async () => {
+      // ARRANGE
+      const { mockApp } = createTestContext();
+      const mockFs = await import('fs');
+      const mockFsPromises = await import('fs/promises');
+
+      vi.mocked(mockFs.existsSync).mockReturnValue(true);
+      vi.mocked(mockFsPromises.mkdir).mockResolvedValue(undefined);
+
+      vi.doMock('../../src/config', () => ({
+        config: createMockConfig(),
+        validateConfig: vi.fn(),
+      }));
+
+      // ACT
+      const { startApplication } = await import('../../src/index');
+      await startApplication();
+
+      const useCall = mockApp.use.mock.calls.find((call: any) => {
+        const handler = call[0];
+        return (
+          typeof handler === 'function' &&
+          handler.length === 2 &&
+          handler.toString().includes('NOT_FOUND')
+        );
+      });
+
+      const notFoundHandler = useCall![0];
+      const mockReq = { path: '/nonexistent' } as any;
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn().mockReturnThis(),
+        setHeader: vi.fn(),
+      } as any;
+
+      notFoundHandler(mockReq, mockRes);
+
+      // ASSERT
+      expect(mockRes.setHeader).toHaveBeenCalledWith(
+        'Content-Disposition',
+        'inline'
+      );
     });
   });
 });
