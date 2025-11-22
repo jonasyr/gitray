@@ -6,6 +6,7 @@ import {
   CommitHeatmapData,
   FileTypeDistribution,
   CodeChurnAnalysis,
+  RepositorySummary,
 } from '@gitray/shared-types';
 
 // Define the base URL for the API
@@ -47,7 +48,7 @@ export const getRepositoryFullData = async (
       commits: response.data.commits,
       heatmapData: response.data.heatmapData,
     };
-  } catch (error) {
+  } catch (error: unknown) {
     if (axios.isAxiosError(error)) {
       if (error.response) {
         throw new Error(
@@ -82,7 +83,7 @@ export const getFileAnalysis = async (
       params,
     });
     return response.data;
-  } catch (error) {
+  } catch (error: unknown) {
     if (axios.isAxiosError(error)) {
       if (error.response) {
         throw new Error(
@@ -119,7 +120,42 @@ export const getCodeChurn = async (
       },
     });
     return response.data.churnData;
-  } catch (error) {
+  } catch (error: unknown) {
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        throw new Error(
+          `Server error: ${error.response.data?.error ?? error.message}`
+        );
+      } else if (error.request) {
+        throw new Error(
+          'No response from server. Please check your network connection.'
+        );
+      } else {
+        throw new Error(`Error: ${error.message}`);
+      }
+    }
+    throw new Error('An unexpected error occurred');
+  }
+};
+
+/**
+ * Fetches repository summary statistics
+ * @param repoUrl The URL of the git repository
+ * @returns Promise containing repository summary data
+ */
+export const getRepositorySummary = async (
+  repoUrl: string
+): Promise<RepositorySummary> => {
+  try {
+    // Ensure URL ends with .git for proper Git URL format
+    const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
+
+    const params = new URLSearchParams({ repoUrl: normalizedUrl });
+    const response = await apiClient.get('/api/repositories/summary', {
+      params,
+    });
+    return response.data.summary;
+  } catch (error: unknown) {
     if (axios.isAxiosError(error)) {
       if (error.response) {
         throw new Error(
@@ -141,4 +177,5 @@ export default {
   getRepositoryFullData,
   getFileAnalysis,
   getCodeChurn,
+  getRepositorySummary,
 };

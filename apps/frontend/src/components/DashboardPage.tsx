@@ -37,8 +37,13 @@ import {
   CommitHeatmapData,
   FileTypeDistribution,
   CodeChurnAnalysis,
+  RepositorySummary,
 } from '@gitray/shared-types';
-import { getFileAnalysis, getCodeChurn } from '../services/api';
+import {
+  getFileAnalysis,
+  getCodeChurn,
+  getRepositorySummary,
+} from '../services/api';
 
 // Mock data for fallback
 const mockRepoData = {
@@ -65,6 +70,21 @@ interface DashboardPageProps {
   repoUrl: string;
 }
 
+// Helper function to format repository age with proper pluralization
+const formatAge = (years: number, months: number): string => {
+  const parts: string[] = [];
+
+  if (years > 0) {
+    parts.push(`${years} ${years === 1 ? 'year' : 'years'}`);
+  }
+
+  if (months > 0) {
+    parts.push(`${months} ${months === 1 ? 'month' : 'months'}`);
+  }
+
+  return parts.length > 0 ? parts.join(' ') : '0 months';
+};
+
 export function DashboardPage({
   commits: commitsFromProps,
   heatmapData,
@@ -75,15 +95,27 @@ export function DashboardPage({
   const [churnData, setChurnData] = useState<CodeChurnAnalysis | null>(null);
   const [commits, setCommits] = useState<Commit[]>(commitsFromProps);
   const [heatmapMonths, setHeatmapMonths] = useState<3 | 6 | 12>(12);
+  const [summary, setSummary] = useState<RepositorySummary | null>(null);
 
   // Update local commits state when props change
   useEffect(() => {
     setCommits(commitsFromProps);
   }, [commitsFromProps]);
 
-  // Fetch file analysis and churn data when repoUrl changes
+  // Fetch file analysis, churn data, and summary when repoUrl changes
   useEffect(() => {
     if (repoUrl) {
+      // Fetch repository summary
+      getRepositorySummary(repoUrl)
+        .then((data) => {
+          console.log('Repository summary fetched:', data);
+          setSummary(data);
+        })
+        .catch((error) => {
+          console.error('Failed to fetch repository summary:', error);
+          setSummary(null);
+        });
+
       // Fetch file analysis
       getFileAnalysis(repoUrl)
         .then((data) => {
@@ -193,22 +225,37 @@ export function DashboardPage({
     return commits.filter((commit) => new Date(commit.date) >= cutoffDate);
   }, [commits, heatmapMonths]);
 
-  // Extract repo info from URL or use mock data
+  // Use summary data from API, fallback to mock/parsed data if not available
   const urlParts = repoUrl ? repoUrl.split('/').filter(Boolean) : [];
   const repoName =
-    urlParts[urlParts.length - 1]?.replace('.git', '') || mockRepoData.name;
-  const repoOwner = urlParts[urlParts.length - 2] || mockRepoData.owner;
+    summary?.repository.name ??
+    urlParts[urlParts.length - 1]?.replace('.git', '') ??
+    mockRepoData.name;
+  const repoOwner =
+    summary?.repository.owner ??
+    urlParts[urlParts.length - 2] ??
+    mockRepoData.owner;
 
   const repoData = {
     name: repoName,
     owner: repoOwner,
-    totalCommits: commits.length || mockRepoData.totalCommits,
-    lastCommit: commits[0]?.date
-      ? new Date(commits[0].date).toLocaleDateString()
-      : mockRepoData.lastCommit,
-    contributors: mockRepoData.contributors, // Will calculate from commits later
-    created: mockRepoData.created, // Will need from backend
-    age: mockRepoData.age, // Will calculate
+    totalCommits:
+      summary?.stats.totalCommits ??
+      commits.length ??
+      mockRepoData.totalCommits,
+    lastCommit:
+      summary?.lastCommit.relativeTime ??
+      (commits[0]?.date
+        ? new Date(commits[0].date).toLocaleDateString()
+        : mockRepoData.lastCommit),
+    contributors: summary?.stats.contributors ?? mockRepoData.contributors,
+    created: summary?.created.date
+      ? new Date(summary.created.date).toLocaleDateString('en-CA') // en-CA gives YYYY-MM-DD format
+      : mockRepoData.created,
+    age: summary?.age
+      ? formatAge(summary.age.years, summary.age.months)
+      : mockRepoData.age,
+    status: summary?.stats.status ?? 'active',
   };
   return (
     <div className="container px-4 md:px-8 py-6 md:py-8 space-y-6 md:space-y-8">
@@ -294,7 +341,9 @@ export function DashboardPage({
                     <p className="font-semibold">{repoData.owner}</p>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">Created</p>
+                    <p className="text-sm text-muted-foreground">
+                      Created <span className="text-xs">(YYYY-MM-DD)</span>
+                    </p>
                     <p className="font-semibold">{repoData.created}</p>
                   </div>
                   <div className="space-y-1">
@@ -321,8 +370,21 @@ export function DashboardPage({
                   </div>
                   <div className="space-y-1">
                     <p className="text-sm text-muted-foreground">Status</p>
-                    <Badge className="bg-primary/10 text-primary hover:bg-primary/20">
-                      Active
+                    <Badge
+                      className={
+                        repoData.status === 'active'
+                          ? 'bg-green-500/10 text-green-600 hover:bg-green-500/20'
+                          : repoData.status === 'inactive'
+                            ? 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20'
+                            : repoData.status === 'archived'
+                              ? 'bg-gray-500/10 text-gray-600 hover:bg-gray-500/20'
+                              : repoData.status === 'empty'
+                                ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20'
+                                : 'bg-blue-500/10 text-blue-600 hover:bg-blue-500/20'
+                      }
+                    >
+                      {repoData.status.charAt(0).toUpperCase() +
+                        repoData.status.slice(1)}
                     </Badge>
                   </div>
                 </div>
