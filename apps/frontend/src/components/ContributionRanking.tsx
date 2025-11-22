@@ -7,14 +7,7 @@ import {
 } from './ui/card';
 import { Avatar, AvatarFallback } from './ui/avatar';
 import { Badge } from './ui/badge';
-import {
-  Trophy,
-  Medal,
-  TrendingUp,
-  GitCommit,
-  Plus,
-  Minus,
-} from 'lucide-react';
+import { Trophy, GitCommit, Plus, Minus } from 'lucide-react';
 import { Progress } from './ui/progress';
 
 const contributors = [

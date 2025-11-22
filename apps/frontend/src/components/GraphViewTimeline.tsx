@@ -17,7 +17,7 @@ import {
   Maximize2,
 } from 'lucide-react';
 import { Slider } from './ui/slider';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from './ui/hover-card';
 import { Commit } from '@gitray/shared-types';
 
@@ -108,9 +108,9 @@ function processCommits(commits: Commit[]) {
         branch: branchMatch ? branchMatch[1] : 'main',
         from: isMerge && fromMatch ? fromMatch[1] : undefined,
         message: commit.message.split('\n')[0], // First line only
-        author: commit.author,
+        author: commit.authorName,
         date: formatRelativeTime(new Date(commit.date)),
-        hash: commit.hash.substring(0, 7),
+        hash: commit.sha.substring(0, 7),
       };
     });
 }

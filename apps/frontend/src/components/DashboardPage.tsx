@@ -66,14 +66,20 @@ interface DashboardPageProps {
 }
 
 export function DashboardPage({
-  commits,
+  commits: commitsFromProps,
   heatmapData,
   repoUrl,
 }: DashboardPageProps) {
   const [fileDistribution, setFileDistribution] =
     useState<FileTypeDistribution | null>(null);
   const [churnData, setChurnData] = useState<CodeChurnAnalysis | null>(null);
+  const [commits, setCommits] = useState<Commit[]>(commitsFromProps);
   const [heatmapMonths, setHeatmapMonths] = useState<3 | 6 | 12>(12);
+
+  // Update local commits state when props change
+  useEffect(() => {
+    setCommits(commitsFromProps);
+  }, [commitsFromProps]);
 
   // Fetch file analysis and churn data when repoUrl changes
   useEffect(() => {
@@ -492,7 +498,7 @@ export function DashboardPage({
             </TabsContent>
 
             <TabsContent value="timeline">
-              <GraphViewTimeline />
+              <GraphViewTimeline commits={commits} />
             </TabsContent>
 
             <TabsContent value="diff">
