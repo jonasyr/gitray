@@ -15,9 +15,10 @@ import {
   Pause,
   RotateCcw,
   Maximize2,
+  ArrowUp,
 } from 'lucide-react';
 import { Slider } from './ui/slider';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from './ui/hover-card';
 import { Commit } from '@gitray/shared-types';
 
@@ -93,11 +94,11 @@ function formatRelativeTime(date: Date): string {
 }
 
 // Process real commits into timeline events
-function processCommits(commits: Commit[]) {
-  // Sort by date descending (newest first) and take top 10
+function processCommits(commits: Commit[], limit: number = 5) {
+  // Sort by date descending (newest first) and take top N
   return commits
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, 10)
+    .slice(0, limit)
     .map((commit) => {
       const isMerge = commit.message.toLowerCase().includes('merge');
       const branchMatch = commit.message.match(/into (\S+)/);
@@ -118,6 +119,10 @@ function processCommits(commits: Commit[]) {
 export function GraphViewTimeline({ commits = [] }: GraphViewTimelineProps) {
   const [playing, setPlaying] = useState(false);
   const [timelinePosition, setTimelinePosition] = useState([50]);
+  const [showMore, setShowMore] = useState(false);
+  const activityHeaderRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const timelineCardRef = useRef<HTMLDivElement>(null);
 
   console.log(
     '🔍 GraphViewTimeline received commits:',
@@ -125,6 +130,19 @@ export function GraphViewTimeline({ commits = [] }: GraphViewTimelineProps) {
     'First commit:',
     commits[0]
   );
+
+  const scrollToTop = () => {
+    console.log('Scroll to top clicked', timelineCardRef.current);
+    if (timelineCardRef.current) {
+      timelineCardRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    } else {
+      // Fallback: scroll window to top
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -153,7 +171,7 @@ export function GraphViewTimeline({ commits = [] }: GraphViewTimelineProps) {
         ))}
       </div>
 
-      <Card>
+      <Card ref={timelineCardRef}>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
@@ -300,67 +318,111 @@ export function GraphViewTimeline({ commits = [] }: GraphViewTimelineProps) {
 
           {/* Recent Events */}
           <div className="space-y-3 pt-4 border-t">
-            <p className="font-medium">Recent Activity</p>
-            {(commits.length > 0
-              ? processCommits(commits)
-              : timelineEvents
-            ).map((event, index) => (
-              <HoverCard key={index}>
-                <HoverCardTrigger asChild>
-                  <div className="flex items-start gap-3 p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors">
-                    <div
-                      className={`p-2 rounded-full ${event.type === 'merge' ? 'bg-primary/10' : 'bg-muted'}`}
-                    >
-                      {event.type === 'merge' ? (
-                        <GitMerge className="h-4 w-4 text-primary" />
-                      ) : (
-                        <GitCommit className="h-4 w-4" />
-                      )}
+            <div
+              className="flex items-center justify-between mb-3"
+              ref={activityHeaderRef}
+            >
+              <p className="font-medium">Recent Activity</p>
+              {commits.length > 5 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowMore(!showMore)}
+                  className="text-xs h-8"
+                >
+                  {showMore ? 'Show Less' : 'Show More'}
+                </Button>
+              )}
+            </div>
+            <div
+              ref={scrollContainerRef}
+              className={
+                showMore
+                  ? 'max-h-[500px] space-y-3 overflow-y-scroll'
+                  : 'space-y-3'
+              }
+              style={
+                showMore
+                  ? ({
+                      paddingRight: '8px',
+                    } as React.CSSProperties)
+                  : undefined
+              }
+            >
+              {(commits.length > 0
+                ? processCommits(commits, showMore ? 20 : 5)
+                : timelineEvents
+              ).map((event, index) => (
+                <HoverCard key={index}>
+                  <HoverCardTrigger asChild>
+                    <div className="flex items-start gap-3 p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors">
+                      <div
+                        className={`p-2 rounded-full ${event.type === 'merge' ? 'bg-primary/10' : 'bg-muted'}`}
+                      >
+                        {event.type === 'merge' ? (
+                          <GitMerge className="h-4 w-4 text-primary" />
+                        ) : (
+                          <GitCommit className="h-4 w-4" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge variant="outline" className="text-xs">
+                            {event.branch}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {event.date}
+                          </span>
+                        </div>
+                        <p className="text-sm truncate">{event.message}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          by {event.author} · {event.hash}
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Badge variant="outline" className="text-xs">
-                          {event.branch}
+                  </HoverCardTrigger>
+                  <HoverCardContent className="w-80">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Badge
+                          variant={
+                            event.type === 'merge' ? 'default' : 'secondary'
+                          }
+                        >
+                          {event.type}
                         </Badge>
-                        <span className="text-xs text-muted-foreground">
-                          {event.date}
+                        <span className="text-sm text-muted-foreground">
+                          {event.hash}
                         </span>
                       </div>
-                      <p className="text-sm truncate">{event.message}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        by {event.author} · {event.hash}
-                      </p>
+                      <p className="font-medium">{event.message}</p>
+                      <div className="flex items-center justify-between text-sm text-muted-foreground">
+                        <span>{event.author}</span>
+                        <span>{event.date}</span>
+                      </div>
+                      {event.type === 'merge' && (
+                        <p className="text-sm text-muted-foreground pt-2 border-t">
+                          Merged {event.from} → {event.branch}
+                        </p>
+                      )}
                     </div>
-                  </div>
-                </HoverCardTrigger>
-                <HoverCardContent className="w-80">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Badge
-                        variant={
-                          event.type === 'merge' ? 'default' : 'secondary'
-                        }
-                      >
-                        {event.type}
-                      </Badge>
-                      <span className="text-sm text-muted-foreground">
-                        {event.hash}
-                      </span>
-                    </div>
-                    <p className="font-medium">{event.message}</p>
-                    <div className="flex items-center justify-between text-sm text-muted-foreground">
-                      <span>{event.author}</span>
-                      <span>{event.date}</span>
-                    </div>
-                    {event.type === 'merge' && (
-                      <p className="text-sm text-muted-foreground pt-2 border-t">
-                        Merged {event.from} → {event.branch}
-                      </p>
-                    )}
-                  </div>
-                </HoverCardContent>
-              </HoverCard>
-            ))}
+                  </HoverCardContent>
+                </HoverCard>
+              ))}
+            </div>
+            {showMore && commits.length > 5 && (
+              <div className="flex justify-center pt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={scrollToTop}
+                  className="text-xs gap-2"
+                >
+                  <ArrowUp className="h-3 w-3" />
+                  Back to Top
+                </Button>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
