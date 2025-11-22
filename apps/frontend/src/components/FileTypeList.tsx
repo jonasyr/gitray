@@ -208,7 +208,7 @@ export function FileTypeList({ fileDistribution }: FileTypeListProps) {
               <p className="text-sm text-muted-foreground">Average File Size</p>
               <p className="text-xl font-semibold">
                 {fileDistribution?.metadata?.totalSize && totalFiles > 0
-                  ? `${Math.round(fileDistribution.metadata.totalSize / totalFiles / 1024)}KB`
+                  ? `≈ ${Math.round(fileDistribution.metadata.totalSize / totalFiles / 1024)} KB`
                   : 'N/A'}
               </p>
             </div>
