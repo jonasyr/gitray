@@ -60,6 +60,7 @@ describe('Error Handler Middleware', () => {
     mockResponse = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
+      setHeader: vi.fn(),
     };
     mockNext = vi.fn();
 
@@ -108,6 +109,116 @@ describe('Error Handler Middleware', () => {
     expect(mockResponse.json).toHaveBeenCalledWith({
       error: 'Custom error message',
       code: 'VALIDATION_ERROR',
+    });
+  });
+
+  describe('Security Headers', () => {
+    beforeEach(() => {
+      mockResponse = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+        setHeader: vi.fn(),
+      };
+    });
+
+    test('should set strict security headers on generic errors', () => {
+      // Arrange
+      const mockError = new Error('Test error');
+
+      // Act
+      errorHandler(
+        mockError,
+        mockRequest as Request,
+        mockResponse as Response,
+        mockNext
+      );
+
+      // Assert - Verify all security headers are set
+      expect(mockResponse.setHeader).toHaveBeenCalledWith(
+        'Content-Security-Policy',
+        expect.stringContaining("default-src 'none'")
+      );
+      expect(mockResponse.setHeader).toHaveBeenCalledWith(
+        'Content-Security-Policy',
+        expect.stringContaining("script-src 'none'")
+      );
+      expect(mockResponse.setHeader).toHaveBeenCalledWith(
+        'X-Content-Type-Options',
+        'nosniff'
+      );
+      expect(mockResponse.setHeader).toHaveBeenCalledWith(
+        'X-Frame-Options',
+        'DENY'
+      );
+      expect(mockResponse.setHeader).toHaveBeenCalledWith(
+        'Content-Disposition',
+        'inline'
+      );
+    });
+
+    test('should set strict security headers on GitrayError', () => {
+      // Arrange
+      const gitrayError = new GitrayError(
+        'Custom error',
+        HTTP_STATUS.BAD_REQUEST,
+        'VALIDATION_ERROR'
+      );
+
+      // Act
+      errorHandler(
+        gitrayError,
+        mockRequest as Request,
+        mockResponse as Response,
+        mockNext
+      );
+
+      // Assert - Verify all security headers are set
+      expect(mockResponse.setHeader).toHaveBeenCalledWith(
+        'Content-Security-Policy',
+        expect.stringContaining("default-src 'none'")
+      );
+      expect(mockResponse.setHeader).toHaveBeenCalledWith(
+        'X-Content-Type-Options',
+        'nosniff'
+      );
+      expect(mockResponse.setHeader).toHaveBeenCalledWith(
+        'X-Frame-Options',
+        'DENY'
+      );
+      expect(mockResponse.setHeader).toHaveBeenCalledWith(
+        'Content-Disposition',
+        'inline'
+      );
+    });
+
+    test('should set complete strict CSP policy', () => {
+      // Arrange
+      const mockError = new Error('Test error');
+
+      // Act
+      errorHandler(
+        mockError,
+        mockRequest as Request,
+        mockResponse as Response,
+        mockNext
+      );
+
+      // Assert - Verify the complete CSP includes all required directives
+      const cspCall = (mockResponse.setHeader as any).mock.calls.find(
+        (call: any[]) => call[0] === 'Content-Security-Policy'
+      );
+      expect(cspCall).toBeDefined();
+      const cspValue = cspCall[1];
+
+      // Verify all CSP directives are present
+      expect(cspValue).toContain("default-src 'none'");
+      expect(cspValue).toContain("script-src 'none'");
+      expect(cspValue).toContain("style-src 'none'");
+      expect(cspValue).toContain("img-src 'none'");
+      expect(cspValue).toContain("object-src 'none'");
+      expect(cspValue).toContain("base-uri 'none'");
+      expect(cspValue).toContain("form-action 'none'");
+      expect(cspValue).toContain("frame-ancestors 'none'");
     });
   });
 });

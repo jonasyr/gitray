@@ -14,6 +14,20 @@ import {
 
 const logger = getLogger();
 
+/**
+ * Sets strict security headers on error responses for defense-in-depth.
+ * Even though we return JSON, these headers protect against future HTML additions.
+ */
+function setStrictSecurityHeaders(res: Response): void {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'none'; script-src 'none'; style-src 'none'; img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  );
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Disposition', 'inline');
+}
+
 const errorHandler: ErrorRequestHandler = (
   err: Error,
   req: Request,
@@ -46,6 +60,9 @@ const errorHandler: ErrorRequestHandler = (
   // Record failed feature usage
   const feature = req.path.split('/')[2] ?? 'unknown'; // Extract feature from path
   recordFeatureUsage(feature, userType, false, 'api_call');
+
+  // Set strict security headers on all error responses
+  setStrictSecurityHeaders(res);
 
   if (err instanceof GitrayError) {
     res.status(err.statusCode).json({

@@ -253,6 +253,15 @@ export async function startApplication() {
     // 404 handler - MUST come after ALL routes but before error handler
     // Security: Returns JSON instead of HTML to prevent XSS via path reflection
     app.use((req: Request, res: Response) => {
+      // Set strict security headers for error responses (defense-in-depth)
+      res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'none'; script-src 'none'; style-src 'none'; img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+      );
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('X-Frame-Options', 'DENY');
+      res.setHeader('Content-Disposition', 'inline');
+
       res.status(HTTP_STATUS.NOT_FOUND).json({
         error: 'Not Found',
         code: 'NOT_FOUND',
