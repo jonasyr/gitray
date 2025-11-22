@@ -102,6 +102,98 @@ function getColorForExtension(extension: string): string {
   return 'bg-gray-500';
 }
 
+// Helper function to get human-readable file type name from extension
+function getFileTypeName(extension: string): string {
+  const ext = extension.toLowerCase();
+
+  // Programming languages
+  if (ext === '.ts' || ext === '.tsx') return 'TypeScript';
+  if (ext === '.js' || ext === '.jsx') return 'JavaScript';
+  if (ext === '.mjs') return 'Module JavaScript';
+  if (ext === '.cjs') return 'CommonJS';
+  if (ext === '.py') return 'Python';
+  if (ext === '.java') return 'Java';
+  if (ext === '.cpp' || ext === '.cc' || ext === '.cxx') return 'C++';
+  if (ext === '.c') return 'C';
+  if (ext === '.cs') return 'C#';
+  if (ext === '.go') return 'Go';
+  if (ext === '.rs') return 'Rust';
+  if (ext === '.rb') return 'Ruby';
+  if (ext === '.php') return 'PHP';
+  if (ext === '.swift') return 'Swift';
+  if (ext === '.kt' || ext === '.kts') return 'Kotlin';
+  if (ext === '.scala') return 'Scala';
+  if (ext === '.clj' || ext === '.cljs') return 'Clojure';
+  if (ext === '.ex' || ext === '.exs') return 'Elixir';
+  if (ext === '.erl') return 'Erlang';
+  if (ext === '.hs') return 'Haskell';
+  if (ext === '.lua') return 'Lua';
+  if (ext === '.r') return 'R';
+  if (ext === '.m') return 'Objective-C';
+  if (ext === '.dart') return 'Dart';
+  if (ext === '.sh' || ext === '.bash') return 'Shell Script';
+  if (ext === '.pl') return 'Perl';
+  if (ext === '.vb') return 'Visual Basic';
+  if (ext === '.fs' || ext === '.fsx') return 'F#';
+
+  // Markup & styling
+  if (ext === '.html' || ext === '.htm') return 'HTML';
+  if (ext === '.css') return 'CSS';
+  if (ext === '.scss' || ext === '.sass') return 'SCSS/Sass';
+  if (ext === '.less') return 'Less';
+  if (ext === '.xml') return 'XML';
+  if (ext === '.svg') return 'SVG';
+  if (ext === '.vue') return 'Vue';
+  if (ext === '.jsx') return 'JSX';
+  if (ext === '.tsx') return 'TSX';
+
+  // Data formats
+  if (ext === '.json') return 'JSON';
+  if (ext === '.yaml' || ext === '.yml') return 'YAML';
+  if (ext === '.toml') return 'TOML';
+  if (ext === '.xml') return 'XML';
+  if (ext === '.csv') return 'CSV';
+  if (ext === '.sql') return 'SQL';
+
+  // Documentation
+  if (ext === '.md' || ext === '.markdown') return 'Markdown';
+  if (ext === '.txt') return 'Text';
+  if (ext === '.rst') return 'reStructuredText';
+  if (ext === '.tex') return 'LaTeX';
+  if (ext === '.pdf') return 'PDF';
+  if (ext === '.doc' || ext === '.docx') return 'Word Document';
+
+  // Images
+  if (ext === '.png') return 'PNG Image';
+  if (ext === '.jpg' || ext === '.jpeg') return 'JPEG Image';
+  if (ext === '.gif') return 'GIF Image';
+  if (ext === '.webp') return 'WebP Image';
+  if (ext === '.bmp') return 'Bitmap Image';
+  if (ext === '.ico') return 'Icon';
+  if (ext === '.tif' || ext === '.tiff') return 'TIFF Image';
+
+  // Animation & interactive
+  if (ext === '.riv') return 'Rive';
+
+  // Configuration
+  if (ext === '.env') return 'Environment Config';
+  if (ext === '.gitignore') return 'Git Ignore';
+  if (ext === '.dockerignore') return 'Docker Ignore';
+  if (ext === '.editorconfig') return 'Editor Config';
+  if (ext === '.eslintrc') return 'ESLint Config';
+  if (ext === '.prettierrc') return 'Prettier Config';
+
+  // Build & package files
+  if (ext === '.lock') return 'Lock File';
+  if (ext === '.log') return 'Log File';
+  if (ext === '.zip') return 'ZIP Archive';
+  if (ext === '.tar') return 'TAR Archive';
+  if (ext === '.gz') return 'Gzip Archive';
+
+  // Fallback: capitalize the extension without the dot
+  return ext.replace('.', '').toUpperCase();
+}
+
 // Convert backend data to display format
 function convertFileDistribution(data: FileTypeDistribution) {
   // Convert the extensions Record to an array
@@ -113,7 +205,7 @@ function convertFileDistribution(data: FileTypeDistribution) {
           !extension || extension === '' || extension === '.';
         const displayType = isNoExtension
           ? 'No Extension'
-          : extension.replace('.', '').toUpperCase();
+          : getFileTypeName(extension);
         const displayExtension = isNoExtension
           ? 'files without extension'
           : extension;

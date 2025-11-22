@@ -317,7 +317,7 @@ export function GraphViewTimeline({ commits = [] }: GraphViewTimelineProps) {
           </div>
 
           {/* Recent Events */}
-          <div className="space-y-3 pt-4 border-t">
+          <div className="pt-4 border-t">
             <div
               className="flex items-center justify-between mb-3"
               ref={activityHeaderRef}
@@ -338,14 +338,15 @@ export function GraphViewTimeline({ commits = [] }: GraphViewTimelineProps) {
               ref={scrollContainerRef}
               className={
                 showMore
-                  ? 'max-h-[500px] space-y-3 overflow-y-scroll'
+                  ? 'h-[400px] overflow-y-scroll space-y-3 pr-2'
                   : 'space-y-3'
               }
               style={
                 showMore
-                  ? ({
-                      paddingRight: '8px',
-                    } as React.CSSProperties)
+                  ? {
+                      scrollbarWidth: 'thin',
+                      scrollbarColor: 'rgba(91, 154, 139, 0.5) transparent',
+                    }
                   : undefined
               }
             >
@@ -355,9 +356,9 @@ export function GraphViewTimeline({ commits = [] }: GraphViewTimelineProps) {
               ).map((event, index) => (
                 <HoverCard key={index}>
                   <HoverCardTrigger asChild>
-                    <div className="flex items-start gap-3 p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors">
+                    <div className="flex items-start gap-3 p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors min-w-0">
                       <div
-                        className={`p-2 rounded-full ${event.type === 'merge' ? 'bg-primary/10' : 'bg-muted'}`}
+                        className={`p-2 rounded-full flex-shrink-0 ${event.type === 'merge' ? 'bg-primary/10' : 'bg-muted'}`}
                       >
                         {event.type === 'merge' ? (
                           <GitMerge className="h-4 w-4 text-primary" />
