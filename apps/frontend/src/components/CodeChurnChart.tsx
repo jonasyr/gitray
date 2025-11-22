@@ -204,11 +204,23 @@ export function CodeChurnChart({ churnData }: CodeChurnChartProps) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={chartData} layout="vertical">
+          <ResponsiveContainer width="100%" height={400}>
+            <BarChart
+              data={chartData}
+              layout="vertical"
+              barSize={20}
+              margin={{ left: 10 }}
+            >
               <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
               <XAxis type="number" />
-              <YAxis dataKey="file" type="category" width={200} fontSize={12} />
+              <YAxis
+                dataKey="file"
+                type="category"
+                width={200}
+                fontSize={12}
+                interval={0}
+                tickLine={false}
+              />
               <Tooltip
                 contentStyle={{
                   backgroundColor: 'hsl(var(--background))',
