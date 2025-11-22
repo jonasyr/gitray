@@ -107,14 +107,28 @@ function convertFileDistribution(data: FileTypeDistribution) {
   // Convert the extensions Record to an array
   return (
     Object.entries(data.extensions)
-      .map(([extension, stats]) => ({
-        type: extension.replace('.', '').toUpperCase(), // e.g., ".ts" -> "TS"
-        extension: extension,
-        count: stats.count,
-        percentage: Math.round(stats.percentage),
-        icon: getIconForExtension(extension),
-        color: getColorForExtension(extension),
-      }))
+      .map(([extension, stats]) => {
+        // Handle files without extension
+        const isNoExtension =
+          !extension || extension === '' || extension === '.';
+        const displayType = isNoExtension
+          ? 'No Extension'
+          : extension.replace('.', '').toUpperCase();
+        const displayExtension = isNoExtension
+          ? 'files without extension'
+          : extension;
+
+        return {
+          type: displayType,
+          extension: displayExtension,
+          count: stats.count,
+          percentage: Math.round(stats.percentage),
+          icon: isNoExtension ? File : getIconForExtension(extension),
+          color: isNoExtension
+            ? 'bg-gray-500'
+            : getColorForExtension(extension),
+        };
+      })
       // Sort by count descending
       .sort((a, b) => b.count - a.count)
   );
@@ -165,7 +179,12 @@ export function FileTypeList({ fileDistribution }: FileTypeListProps) {
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="font-semibold">{fileType.count}</p>
+                    <p className="font-semibold">
+                      <span className="text-xs text-muted-foreground font-normal mr-1">
+                        Files:
+                      </span>
+                      {fileType.count}
+                    </p>
                     <p className="text-xs text-muted-foreground">
                       {fileType.percentage}%
                     </p>
@@ -178,14 +197,22 @@ export function FileTypeList({ fileDistribution }: FileTypeListProps) {
         </div>
 
         <div className="mt-6 pt-6 border-t">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div className="space-y-1">
               <p className="text-sm text-muted-foreground">Total Files</p>
               <p className="text-xl font-semibold">
                 {totalFiles.toLocaleString()}
               </p>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 text-center">
+              <p className="text-sm text-muted-foreground">Average File Size</p>
+              <p className="text-xl font-semibold">
+                {fileDistribution?.metadata?.totalSize && totalFiles > 0
+                  ? `${Math.round(fileDistribution.metadata.totalSize / totalFiles / 1024)}KB`
+                  : 'N/A'}
+              </p>
+            </div>
+            <div className="space-y-1 text-right">
               <p className="text-sm text-muted-foreground">File Types</p>
               <p className="text-xl font-semibold">{fileTypes.length}</p>
             </div>

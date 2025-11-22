@@ -69,22 +69,57 @@ const mockData = [
   { name: 'MD', value: 5, color: EXTENSION_COLORS['.md'] },
 ];
 
-// Convert backend data to chart format
+// Convert backend data to chart format with "Others" grouping
 function convertToChartData(fileDistribution: FileTypeDistribution) {
-  const extensionData = Object.entries(fileDistribution.extensions)
-    .map(([ext, stats], index) => ({
-      name: ext.replace('.', '').toUpperCase(),
-      value: Math.round(stats.percentage),
-      count: stats.count,
-      size: stats.size,
-      color:
-        EXTENSION_COLORS[ext.toLowerCase()] ||
-        COLOR_PALETTE[index % COLOR_PALETTE.length],
-    }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 10); // Top 10 file types
+  const OTHERS_THRESHOLD = 5; // Group file types with less than 5% into "Others"
 
-  return extensionData;
+  const extensionData = Object.entries(fileDistribution.extensions)
+    .map(([ext, stats], index) => {
+      // Handle files without extension
+      const isNoExtension = !ext || ext === '' || ext === '.';
+      const displayName = isNoExtension
+        ? 'No Extension'
+        : ext.replace('.', '').toUpperCase();
+
+      return {
+        name: displayName,
+        value: Math.round(stats.percentage * 100) / 100, // Round to 2 decimal places
+        count: stats.count,
+        size: stats.size,
+        color: isNoExtension
+          ? '#6B7280' // Gray for no extension
+          : EXTENSION_COLORS[ext.toLowerCase()] ||
+            COLOR_PALETTE[index % COLOR_PALETTE.length],
+      };
+    })
+    .sort((a, b) => b.value - a.value);
+
+  // Separate significant types and small types
+  const significantTypes = extensionData.filter(
+    (item) => item.value >= OTHERS_THRESHOLD
+  );
+  const smallTypes = extensionData.filter(
+    (item) => item.value < OTHERS_THRESHOLD
+  );
+
+  // If there are small types, group them into "Others"
+  if (smallTypes.length > 0) {
+    const othersEntry = {
+      name: 'Others',
+      value:
+        Math.round(
+          smallTypes.reduce((sum, item) => sum + item.value, 0) * 100
+        ) / 100,
+      count: smallTypes.reduce((sum, item) => sum + item.count, 0),
+      size: smallTypes.reduce((sum, item) => sum + item.size, 0),
+      color: '#94A3B8', // Neutral gray color for "Others"
+      isOthers: true, // Flag to identify this as the "Others" category
+    };
+
+    return [...significantTypes, othersEntry];
+  }
+
+  return significantTypes;
 }
 
 export function FileDistributionChart({
@@ -131,12 +166,25 @@ export function FileDistributionChart({
           <Tooltip
             content={({ active, payload }) => {
               if (active && payload && payload.length) {
+                const data = payload[0].payload;
                 return (
                   <div className="bg-popover border border-border rounded-lg p-3 shadow-lg">
-                    <p className="text-sm">
-                      {payload[0].name}:{' '}
-                      <span className="font-semibold">{payload[0].value}%</span>
+                    <p className="text-sm font-medium mb-1">
+                      {payload[0].name}
                     </p>
+                    <p className="text-sm">
+                      Percentage:{' '}
+                      <span className="font-semibold">{data.value}%</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {data.count.toLocaleString()} file
+                      {data.count !== 1 ? 's' : ''}
+                    </p>
+                    {data.isOthers && (
+                      <p className="text-xs text-muted-foreground mt-1 italic">
+                        Grouped file types &lt; 5%
+                      </p>
+                    )}
                   </div>
                 );
               }
