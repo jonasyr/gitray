@@ -196,29 +196,82 @@ function getFileTypeName(extension: string): string {
 
 // Convert backend data to display format
 function convertFileDistribution(data: FileTypeDistribution) {
-  // Convert the extensions Record to an array
+  // First, group extensions by their display name, keeping individual stats
+  const groupedByType = new Map<
+    string,
+    {
+      extensionStats: Array<{
+        extension: string;
+        count: number;
+        percentage: number;
+      }>;
+      totalCount: number;
+      totalPercentage: number;
+    }
+  >();
+
+  Object.entries(data.extensions).forEach(([extension, stats]) => {
+    const isNoExtension = !extension || extension === '' || extension === '.';
+    const displayType = isNoExtension
+      ? 'No Extension'
+      : getFileTypeName(extension);
+
+    if (groupedByType.has(displayType)) {
+      const existing = groupedByType.get(displayType)!;
+      existing.extensionStats.push({
+        extension,
+        count: stats.count,
+        percentage: stats.percentage,
+      });
+      existing.totalCount += stats.count;
+      existing.totalPercentage += stats.percentage;
+    } else {
+      groupedByType.set(displayType, {
+        extensionStats: [
+          { extension, count: stats.count, percentage: stats.percentage },
+        ],
+        totalCount: stats.count,
+        totalPercentage: stats.percentage,
+      });
+    }
+  });
+
+  // Convert to array format
   return (
-    Object.entries(data.extensions)
-      .map(([extension, stats]) => {
-        // Handle files without extension
-        const isNoExtension =
-          !extension || extension === '' || extension === '.';
-        const displayType = isNoExtension
-          ? 'No Extension'
-          : getFileTypeName(extension);
-        const displayExtension = isNoExtension
-          ? 'files without extension'
-          : extension;
+    Array.from(groupedByType.entries())
+      .map(([type, data]) => {
+        const isNoExtension = type === 'No Extension';
+        const firstExtension = data.extensionStats[0].extension;
+
+        // Create display extension with percentages only if there are multiple extensions
+        let displayExtension: string;
+        if (isNoExtension) {
+          displayExtension = 'files without extension';
+        } else if (data.extensionStats.length === 1) {
+          // Single extension: just show the extension
+          displayExtension = data.extensionStats[0].extension;
+        } else {
+          // Multiple extensions: show each with their actual percentage (not relative)
+          // Round to 2 decimal places to match pie chart
+          const roundedPercentages = data.extensionStats.map((stat) => ({
+            extension: stat.extension,
+            percentage: Math.round(stat.percentage * 100) / 100,
+          }));
+
+          displayExtension = roundedPercentages
+            .map((stat) => `${stat.extension} ${stat.percentage}%`)
+            .join(', ');
+        }
 
         return {
-          type: displayType,
+          type,
           extension: displayExtension,
-          count: stats.count,
-          percentage: Math.round(stats.percentage),
-          icon: isNoExtension ? File : getIconForExtension(extension),
+          count: data.totalCount,
+          percentage: Math.round(data.totalPercentage * 100) / 100, // Round to 2 decimal places
+          icon: isNoExtension ? File : getIconForExtension(firstExtension),
           color: isNoExtension
             ? 'bg-gray-500'
-            : getColorForExtension(extension),
+            : getColorForExtension(firstExtension),
         };
       })
       // Sort by count descending

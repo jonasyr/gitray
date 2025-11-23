@@ -69,26 +69,147 @@ const mockData = [
   { name: 'MD', value: 5, color: EXTENSION_COLORS['.md'] },
 ];
 
+// Helper function to get human-readable file type name from extension
+function getFileTypeName(extension: string): string {
+  const ext = extension.toLowerCase();
+
+  // Programming languages
+  if (ext === '.ts' || ext === '.tsx') return 'TypeScript';
+  if (ext === '.js' || ext === '.jsx') return 'JavaScript';
+  if (ext === '.mjs') return 'Module JavaScript';
+  if (ext === '.cjs') return 'CommonJS';
+  if (ext === '.py') return 'Python';
+  if (ext === '.java') return 'Java';
+  if (ext === '.cpp' || ext === '.cc' || ext === '.cxx') return 'C++';
+  if (ext === '.c') return 'C';
+  if (ext === '.cs') return 'C#';
+  if (ext === '.go') return 'Go';
+  if (ext === '.rs') return 'Rust';
+  if (ext === '.rb') return 'Ruby';
+  if (ext === '.php') return 'PHP';
+  if (ext === '.swift') return 'Swift';
+  if (ext === '.kt' || ext === '.kts') return 'Kotlin';
+  if (ext === '.scala') return 'Scala';
+  if (ext === '.clj' || ext === '.cljs') return 'Clojure';
+  if (ext === '.ex' || ext === '.exs') return 'Elixir';
+  if (ext === '.erl') return 'Erlang';
+  if (ext === '.hs') return 'Haskell';
+  if (ext === '.lua') return 'Lua';
+  if (ext === '.r') return 'R';
+  if (ext === '.m') return 'Objective-C';
+  if (ext === '.dart') return 'Dart';
+  if (ext === '.sh' || ext === '.bash') return 'Shell Script';
+  if (ext === '.pl') return 'Perl';
+  if (ext === '.vb') return 'Visual Basic';
+  if (ext === '.fs' || ext === '.fsx') return 'F#';
+
+  // Markup & styling
+  if (ext === '.html' || ext === '.htm') return 'HTML';
+  if (ext === '.css') return 'CSS';
+  if (ext === '.scss' || ext === '.sass') return 'SCSS/Sass';
+  if (ext === '.less') return 'Less';
+  if (ext === '.xml') return 'XML';
+  if (ext === '.svg') return 'SVG';
+  if (ext === '.vue') return 'Vue';
+  if (ext === '.jsx') return 'JSX';
+  if (ext === '.tsx') return 'TSX';
+
+  // Data formats
+  if (ext === '.json') return 'JSON';
+  if (ext === '.yaml' || ext === '.yml') return 'YAML';
+  if (ext === '.toml') return 'TOML';
+  if (ext === '.xml') return 'XML';
+  if (ext === '.csv') return 'CSV';
+  if (ext === '.sql') return 'SQL';
+
+  // Documentation
+  if (ext === '.md' || ext === '.markdown') return 'Markdown';
+  if (ext === '.txt') return 'Text';
+  if (ext === '.rst') return 'reStructuredText';
+  if (ext === '.tex') return 'LaTeX';
+  if (ext === '.pdf') return 'PDF';
+  if (ext === '.doc' || ext === '.docx') return 'Word Document';
+
+  // Images
+  if (ext === '.png') return 'PNG Image';
+  if (ext === '.jpg' || ext === '.jpeg') return 'JPEG Image';
+  if (ext === '.gif') return 'GIF Image';
+  if (ext === '.webp') return 'WebP Image';
+  if (ext === '.bmp') return 'Bitmap Image';
+  if (ext === '.ico') return 'Icon';
+  if (ext === '.tif' || ext === '.tiff') return 'TIFF Image';
+
+  // Animation & interactive
+  if (ext === '.riv') return 'Rive';
+
+  // Configuration
+  if (ext === '.env') return 'Environment Config';
+  if (ext === '.gitignore') return 'Git Ignore';
+  if (ext === '.dockerignore') return 'Docker Ignore';
+  if (ext === '.editorconfig') return 'Editor Config';
+  if (ext === '.eslintrc') return 'ESLint Config';
+  if (ext === '.prettierrc') return 'Prettier Config';
+
+  // Build & package files
+  if (ext === '.lock') return 'Lock File';
+  if (ext === '.log') return 'Log File';
+  if (ext === '.zip') return 'ZIP Archive';
+  if (ext === '.tar') return 'TAR Archive';
+  if (ext === '.gz') return 'Gzip Archive';
+
+  // Fallback: capitalize the extension without the dot
+  return ext.replace('.', '').toUpperCase();
+}
+
 // Convert backend data to chart format with "Others" grouping
 function convertToChartData(fileDistribution: FileTypeDistribution) {
   const OTHERS_THRESHOLD = 5; // Group file types with less than 5% into "Others"
 
-  const extensionData = Object.entries(fileDistribution.extensions)
-    .map(([ext, stats], index) => {
-      // Handle files without extension
-      const isNoExtension = !ext || ext === '' || ext === '.';
-      const displayName = isNoExtension
-        ? 'No Extension'
-        : ext.replace('.', '').toUpperCase();
+  // First, group extensions by their display name
+  const groupedByType = new Map<
+    string,
+    {
+      extensions: string[];
+      count: number;
+      size: number;
+      percentage: number;
+    }
+  >();
+
+  Object.entries(fileDistribution.extensions).forEach(([ext, stats]) => {
+    const isNoExtension = !ext || ext === '' || ext === '.';
+    const displayName = isNoExtension ? 'No Extension' : getFileTypeName(ext);
+
+    if (groupedByType.has(displayName)) {
+      const existing = groupedByType.get(displayName)!;
+      existing.extensions.push(ext);
+      existing.count += stats.count;
+      existing.size += stats.size;
+      existing.percentage += stats.percentage;
+    } else {
+      groupedByType.set(displayName, {
+        extensions: [ext],
+        count: stats.count,
+        size: stats.size,
+        percentage: stats.percentage,
+      });
+    }
+  });
+
+  // Convert to array format
+  const extensionData = Array.from(groupedByType.entries())
+    .map(([displayName, data], index) => {
+      const isNoExtension = displayName === 'No Extension';
+      const firstExt = data.extensions[0];
 
       return {
         name: displayName,
-        value: Math.round(stats.percentage * 100) / 100, // Round to 2 decimal places
-        count: stats.count,
-        size: stats.size,
+        value: Math.round(data.percentage * 100) / 100, // Round to 2 decimal places
+        count: data.count,
+        size: data.size,
         color: isNoExtension
           ? '#6B7280' // Gray for no extension
-          : EXTENSION_COLORS[ext.toLowerCase()] ||
+          : EXTENSION_COLORS[firstExt.toLowerCase()] ||
             COLOR_PALETTE[index % COLOR_PALETTE.length],
       };
     })
