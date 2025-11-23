@@ -132,6 +132,9 @@ function getFileTypeName(extension: string): string {
   if (ext === '.m') return 'Objective-C';
   if (ext === '.dart') return 'Dart';
   if (ext === '.sh' || ext === '.bash') return 'Shell Script';
+  if (ext === '.ps1') return 'PowerShell Script';
+  if (ext === '.psd1') return 'PowerShell Data';
+  if (ext === '.psm1') return 'PowerShell Module';
   if (ext === '.pl') return 'Perl';
   if (ext === '.vb') return 'Visual Basic';
   if (ext === '.fs' || ext === '.fsx') return 'F#';
