@@ -163,7 +163,7 @@ function getFileTypeName(extension: string): string {
 
 // Convert backend data to chart format with "Others" grouping
 function convertToChartData(fileDistribution: FileTypeDistribution) {
-  const OTHERS_THRESHOLD = 5; // Group file types with less than 5% into "Others"
+  const OTHERS_THRESHOLD = 3; // Group file types with less than 3% into "Others"
 
   // First, group extensions by their display name
   const groupedByType = new Map<
@@ -303,7 +303,7 @@ export function FileDistributionChart({
                     </p>
                     {data.isOthers && (
                       <p className="text-xs text-muted-foreground mt-1 italic">
-                        Grouped file types &lt; 5%
+                        Grouped file types &lt; 3%
                       </p>
                     )}
                   </div>

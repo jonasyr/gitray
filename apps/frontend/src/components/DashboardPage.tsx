@@ -96,6 +96,14 @@ export function DashboardPage({
   const [commits, setCommits] = useState<Commit[]>(commitsFromProps);
   const [heatmapMonths, setHeatmapMonths] = useState<3 | 6 | 12>(12);
   const [summary, setSummary] = useState<RepositorySummary | null>(null);
+  const [activeTab, setActiveTab] = useState<string>('overview');
+  const [analyticsTab, setAnalyticsTab] = useState<string>('churn');
+
+  // Handler to navigate to File Types tab
+  const navigateToFileTypes = () => {
+    setActiveTab('analytics');
+    setAnalyticsTab('files');
+  };
 
   // Update local commits state when props change
   useEffect(() => {
@@ -308,7 +316,11 @@ export function DashboardPage({
         </Alert>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-6">
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className="space-y-6"
+      >
         <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
           <TabsList className="inline-flex md:grid w-auto md:w-full grid-cols-5 h-auto min-w-max">
             <TabsTrigger value="overview" className="gap-2">
@@ -455,6 +467,14 @@ export function DashboardPage({
               </CardHeader>
               <CardContent>
                 <FileDistributionChart fileDistribution={fileDistribution} />
+                <div className="mt-4 text-center">
+                  <button
+                    onClick={navigateToFileTypes}
+                    className="text-sm text-primary hover:underline cursor-pointer"
+                  >
+                    View detailed breakdown →
+                  </button>
+                </div>
               </CardContent>
             </Card>
 
@@ -569,7 +589,11 @@ export function DashboardPage({
         </TabsContent>
 
         <TabsContent value="analytics" className="space-y-6">
-          <Tabs defaultValue="churn" className="space-y-6">
+          <Tabs
+            value={analyticsTab}
+            onValueChange={setAnalyticsTab}
+            className="space-y-6"
+          >
             <TabsList>
               <TabsTrigger value="churn">Code Churn</TabsTrigger>
               <TabsTrigger value="files">File Types</TabsTrigger>
