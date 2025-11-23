@@ -5,35 +5,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from './ui/tooltip';
+import { Calendar } from 'lucide-react';
 import { Commit, CommitHeatmapData } from '@gitray/shared-types';
 
 interface CommitHeatmapProps {
   commits?: Commit[];
   heatmapData?: CommitHeatmapData;
-}
-
-// Generate mock data for the last 12 months (fallback when no real data)
-function generateMockHeatmapData() {
-  const data = [];
-  const today = new Date();
-
-  for (let i = 365; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i);
-
-    // Generate realistic commit patterns (more during weekdays, less on weekends)
-    const dayOfWeek = date.getDay();
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-    const baseCount = isWeekend ? Math.random() * 3 : Math.random() * 15;
-    const count = Math.floor(baseCount);
-
-    data.push({
-      date: date.toISOString().split('T')[0],
-      count,
-    });
-  }
-
-  return data;
 }
 
 // Convert commits to heatmap data format
@@ -67,12 +44,12 @@ function convertCommitsToHeatmapData(
 }
 
 export function CommitHeatmap({ commits }: CommitHeatmapProps) {
-  // Use real data if available, otherwise fall back to mock data
+  // Use real data if available
   const data = useMemo(() => {
     if (commits && commits.length > 0) {
       return convertCommitsToHeatmapData(commits);
     }
-    return generateMockHeatmapData();
+    return [];
   }, [commits]);
 
   // Get intensity color based on count
@@ -120,6 +97,20 @@ export function CommitHeatmap({ commits }: CommitHeatmapProps) {
   ];
 
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  if (data.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <Calendar className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
+        <p className="text-lg font-medium text-muted-foreground mb-2">
+          No commit data available
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Commit activity heatmap could not be generated for this repository.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

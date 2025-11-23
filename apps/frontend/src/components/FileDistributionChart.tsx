@@ -7,6 +7,7 @@ import {
   Legend,
   Tooltip,
 } from 'recharts';
+import { File } from 'lucide-react';
 import { FileTypeDistribution } from '@gitray/shared-types';
 
 interface FileDistributionChartProps {
@@ -58,15 +59,6 @@ const COLOR_PALETTE = [
   '#FFDDD2',
   '#E29578',
   '#006D77',
-];
-
-// Mock data for fallback
-const mockData = [
-  { name: 'TS', value: 48, color: EXTENSION_COLORS['.ts'] },
-  { name: 'GO', value: 22, color: EXTENSION_COLORS['.go'] },
-  { name: 'PY', value: 18, color: EXTENSION_COLORS['.py'] },
-  { name: 'JSON', value: 7, color: EXTENSION_COLORS['.json'] },
-  { name: 'MD', value: 5, color: EXTENSION_COLORS['.md'] },
 ];
 
 // Helper function to get human-readable file type name from extension
@@ -256,16 +248,18 @@ export function FileDistributionChart({
       console.log('Converted chart data:', chartData);
       return chartData;
     }
-    console.log('Using mock data');
-    return mockData;
+    console.log('No file distribution data available');
+    return [];
   }, [fileDistribution]);
 
   console.log('Rendering with data:', data);
 
   if (!data || data.length === 0) {
     return (
-      <div className="h-[280px] w-full flex items-center justify-center text-muted-foreground">
-        No file data available
+      <div className="h-[280px] w-full flex flex-col items-center justify-center text-muted-foreground">
+        <File className="h-12 w-12 mb-3 opacity-50" />
+        <p className="font-medium">No file data available</p>
+        <p className="text-xs mt-1">File distribution could not be loaded</p>
       </div>
     );
   }

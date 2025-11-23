@@ -24,66 +24,6 @@ interface CodeChurnChartProps {
   churnData?: CodeChurnAnalysis | null;
 }
 
-// Mock data for fallback
-const mockChurnData = [
-  {
-    file: 'auth.ts',
-    fullPath: 'api/auth.ts',
-    changes: 47,
-    category: 'high',
-    bugRisk: 'High',
-  },
-  {
-    file: 'Dashboard.tsx',
-    fullPath: 'components/Dashboard.tsx',
-    changes: 38,
-    category: 'high',
-    bugRisk: 'High',
-  },
-  {
-    file: 'helpers.ts',
-    fullPath: 'utils/helpers.ts',
-    changes: 32,
-    category: 'high',
-    bugRisk: 'Medium',
-  },
-  {
-    file: 'settings.tsx',
-    fullPath: 'pages/settings.tsx',
-    changes: 24,
-    category: 'medium',
-    bugRisk: 'Medium',
-  },
-  {
-    file: 'api-client.ts',
-    fullPath: 'lib/api-client.ts',
-    changes: 19,
-    category: 'medium',
-    bugRisk: 'Low',
-  },
-  {
-    file: 'globals.css',
-    fullPath: 'styles/globals.css',
-    changes: 15,
-    category: 'medium',
-    bugRisk: 'Low',
-  },
-  {
-    file: 'routes.ts',
-    fullPath: 'config/routes.ts',
-    changes: 12,
-    category: 'low',
-    bugRisk: 'Low',
-  },
-  {
-    file: 'index.ts',
-    fullPath: 'types/index.ts',
-    changes: 8,
-    category: 'low',
-    bugRisk: 'Low',
-  },
-];
-
 const COLORS = {
   high: '#FFA69E',
   medium: '#FAE3B4',
@@ -138,8 +78,8 @@ export function CodeChurnChart({ churnData }: CodeChurnChartProps) {
       console.log('Converted chart data:', converted);
       return converted;
     }
-    console.log('Using mock data');
-    return mockChurnData;
+    console.log('No churn data available');
+    return [];
   }, [churnData]);
 
   const stats = useMemo(() => {
@@ -150,7 +90,7 @@ export function CodeChurnChart({ churnData }: CodeChurnChartProps) {
         total: churnData.metadata.totalFiles,
       };
     }
-    return { highRisk: 3, mediumRisk: 3, total: 8 };
+    return { highRisk: 0, mediumRisk: 0, total: 0 };
   }, [churnData]);
 
   return (
@@ -204,91 +144,109 @@ export function CodeChurnChart({ churnData }: CodeChurnChartProps) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={400}>
-            <BarChart
-              data={chartData}
-              layout="vertical"
-              barSize={20}
-              margin={{ left: 10 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-              <XAxis type="number" />
-              <YAxis
-                dataKey="file"
-                type="category"
-                width={200}
-                fontSize={12}
-                interval={0}
-                tickLine={false}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: 'hsl(var(--background))',
-                  border: '1px solid hsl(var(--border))',
-                  borderRadius: '8px',
-                }}
-                content={({ active, payload }) => {
-                  if (active && payload && payload.length) {
-                    const data = payload[0].payload;
-                    return (
-                      <div className="bg-background border border-border rounded-lg p-3 shadow-lg">
-                        <p className="text-sm font-medium mb-1">{data.file}</p>
-                        <p className="text-xs text-muted-foreground mb-2">
-                          {data.fullPath}
-                        </p>
-                        <p className="text-sm">
-                          <span className="font-semibold">{data.changes}</span>{' '}
-                          changes
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Risk: {data.bugRisk}
+          {chartData.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <TrendingUp className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
+              <p className="text-lg font-medium text-muted-foreground mb-2">
+                No churn data available
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Code churn analysis could not be loaded for this repository.
+              </p>
+            </div>
+          ) : (
+            <>
+              <ResponsiveContainer width="100%" height={400}>
+                <BarChart
+                  data={chartData}
+                  layout="vertical"
+                  barSize={20}
+                  margin={{ left: 10 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                  <XAxis type="number" />
+                  <YAxis
+                    dataKey="file"
+                    type="category"
+                    width={200}
+                    fontSize={12}
+                    interval={0}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'hsl(var(--background))',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                    }}
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div className="bg-background border border-border rounded-lg p-3 shadow-lg">
+                            <p className="text-sm font-medium mb-1">
+                              {data.file}
+                            </p>
+                            <p className="text-xs text-muted-foreground mb-2">
+                              {data.fullPath}
+                            </p>
+                            <p className="text-sm">
+                              <span className="font-semibold">
+                                {data.changes}
+                              </span>{' '}
+                              changes
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Risk: {data.bugRisk}
+                            </p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Bar dataKey="changes" radius={[0, 4, 4, 0]}>
+                    {chartData.map((entry, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={COLORS[entry.category as keyof typeof COLORS]}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+
+              <div className="mt-6 space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium">Bug Hotspot Analysis</span>
+                </div>
+                {chartData.slice(0, 3).map((file, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
+                    title={file.fullPath}
+                  >
+                    <div className="flex items-center gap-3">
+                      <AlertTriangle className="h-4 w-4 text-destructive" />
+                      <div>
+                        <p className="text-sm font-medium">{file.file}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {file.changes} changes detected
                         </p>
                       </div>
-                    );
-                  }
-                  return null;
-                }}
-              />
-              <Bar dataKey="changes" radius={[0, 4, 4, 0]}>
-                {chartData.map((entry, index) => (
-                  <Cell
-                    key={`cell-${index}`}
-                    fill={COLORS[entry.category as keyof typeof COLORS]}
-                  />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-
-          <div className="mt-6 space-y-3">
-            <div className="flex items-center justify-between text-sm">
-              <span className="font-medium">Bug Hotspot Analysis</span>
-            </div>
-            {chartData.slice(0, 3).map((file, index) => (
-              <div
-                key={index}
-                className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
-                title={file.fullPath}
-              >
-                <div className="flex items-center gap-3">
-                  <AlertTriangle className="h-4 w-4 text-destructive" />
-                  <div>
-                    <p className="text-sm font-medium">{file.file}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {file.changes} changes detected
-                    </p>
+                    </div>
+                    <Badge
+                      variant={
+                        file.bugRisk === 'High' ? 'destructive' : 'secondary'
+                      }
+                    >
+                      {file.bugRisk} Risk
+                    </Badge>
                   </div>
-                </div>
-                <Badge
-                  variant={
-                    file.bugRisk === 'High' ? 'destructive' : 'secondary'
-                  }
-                >
-                  {file.bugRisk} Risk
-                </Badge>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -45,17 +45,6 @@ import {
   getRepositorySummary,
 } from '../services/api';
 
-// Mock data for fallback
-const mockRepoData = {
-  name: 'analytics-pro',
-  owner: 'Octo Org',
-  created: '2019-06-14',
-  age: '5.7y',
-  lastCommit: '2 days ago',
-  totalCommits: 3482,
-  contributors: 24,
-};
-
 const contributors = [
   { name: 'John Doe', initials: 'JD' },
   { name: 'Jane Smith', initials: 'JS' },
@@ -258,37 +247,33 @@ export function DashboardPage({
     return commits.filter((commit) => new Date(commit.date) >= cutoffDate);
   }, [commits, heatmapMonths]);
 
-  // Use summary data from API, fallback to mock/parsed data if not available
+  // Use summary data from API, parse from URL if not available
   const urlParts = repoUrl ? repoUrl.split('/').filter(Boolean) : [];
   const repoName =
     summary?.repository.name ??
     urlParts[urlParts.length - 1]?.replace('.git', '') ??
-    mockRepoData.name;
+    'Unknown';
   const repoOwner =
-    summary?.repository.owner ??
-    urlParts[urlParts.length - 2] ??
-    mockRepoData.owner;
+    summary?.repository.owner ?? urlParts[urlParts.length - 2] ?? 'Unknown';
 
   const repoData = {
     name: repoName,
     owner: repoOwner,
     totalCommits:
-      summary?.stats.totalCommits ??
-      commits.length ??
-      mockRepoData.totalCommits,
+      summary?.stats.totalCommits ?? (commits.length > 0 ? commits.length : 0),
     lastCommit:
       summary?.lastCommit.relativeTime ??
       (commits[0]?.date
         ? new Date(commits[0].date).toLocaleDateString()
-        : mockRepoData.lastCommit),
-    contributors: summary?.stats.contributors ?? mockRepoData.contributors,
+        : 'N/A'),
+    contributors: summary?.stats.contributors ?? 0,
     created: summary?.created.date
       ? new Date(summary.created.date).toLocaleDateString('en-CA') // en-CA gives YYYY-MM-DD format
-      : mockRepoData.created,
+      : 'N/A',
     age: summary?.age
       ? formatAge(summary.age.years, summary.age.months)
-      : mockRepoData.age,
-    status: summary?.stats.status ?? 'active',
+      : 'N/A',
+    status: summary?.stats.status ?? 'unknown',
   };
   return (
     <div className="container px-4 md:px-8 py-6 md:py-8 space-y-6 md:space-y-8">
