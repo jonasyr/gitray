@@ -180,37 +180,63 @@ export function DashboardPage({
     )[0];
     const peakMonth = Object.entries(monthCount).sort((a, b) => b[1] - a[1])[0];
 
-    // Calculate streak (simplified - consecutive days with commits)
-    const sortedDates = commits
-      .map((c) => new Date(c.date).toDateString())
-      .sort();
-    let streak = 1;
-    let currentStreak = 1;
-    for (let i = 1; i < sortedDates.length; i++) {
-      if (sortedDates[i] !== sortedDates[i - 1]) {
-        const date1 = new Date(sortedDates[i]);
-        const date2 = new Date(sortedDates[i - 1]);
-        const diffDays = Math.abs(
-          (date1.getTime() - date2.getTime()) / (1000 * 60 * 60 * 24)
-        );
-        if (diffDays <= 1) {
-          currentStreak++;
-        } else {
-          streak = Math.max(streak, currentStreak);
-          currentStreak = 1;
+    // Calculate current streak (consecutive days with commits ending at most recent commit)
+    // First, get unique dates and sort them properly
+    const uniqueDates = Array.from(
+      new Set(commits.map((c) => new Date(c.date).toDateString()))
+    )
+      .map((dateStr) => new Date(dateStr))
+      .sort((a, b) => b.getTime() - a.getTime()); // Sort descending (newest first)
+
+    let currentStreak = 0;
+    if (uniqueDates.length > 0) {
+      currentStreak = 1; // Start with the most recent commit day
+      const mostRecentDate = uniqueDates[0];
+
+      // Check if the most recent commit is today or yesterday
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      const recentDate = new Date(mostRecentDate);
+      recentDate.setHours(0, 0, 0, 0);
+
+      // Only count as active streak if the last commit was today or yesterday
+      if (recentDate < yesterday) {
+        currentStreak = 0; // Streak is broken
+      } else {
+        // Count consecutive days backwards from most recent commit
+        for (let i = 1; i < uniqueDates.length; i++) {
+          const currentDate = new Date(uniqueDates[i]);
+          currentDate.setHours(0, 0, 0, 0);
+          const previousDate = new Date(uniqueDates[i - 1]);
+          previousDate.setHours(0, 0, 0, 0);
+
+          const diffDays = Math.round(
+            (previousDate.getTime() - currentDate.getTime()) /
+              (1000 * 60 * 60 * 24)
+          );
+
+          if (diffDays === 1) {
+            currentStreak++;
+          } else {
+            break; // Streak is broken
+          }
         }
       }
     }
-    streak = Math.max(streak, currentStreak);
+
+    // Calculate average commits per day for the most active day
+    const totalDaysWithCommits = uniqueDates.length;
+    const avgCommitsOnMostActiveDay = mostActiveDay?.[1] || 0;
 
     return {
       mostActiveDay: mostActiveDay?.[0] || 'Wednesday',
-      avgCommitsPerDay: Math.round(
-        (mostActiveDay?.[1] || 12) / (commits.length / 7)
-      ),
+      avgCommitsPerDay: avgCommitsOnMostActiveDay,
       peakMonth: peakMonth?.[0] || 'October 2024',
       peakMonthCommits: peakMonth?.[1] || 247,
-      currentStreak: streak,
+      currentStreak: currentStreak,
     };
   }, [commits]);
 
