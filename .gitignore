@@ -346,3 +346,6 @@ apps/backend/logs/
 
 # GitHub instructions
 .github/instructions/sonarqube_mcp.instructions.md
+
+# VS Code MCP configuration
+.vscode/mcp.json
