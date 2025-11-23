@@ -334,22 +334,7 @@ export function GraphViewTimeline({ commits = [] }: GraphViewTimelineProps) {
                 </Button>
               )}
             </div>
-            <div
-              ref={scrollContainerRef}
-              className={
-                showMore
-                  ? 'h-[400px] overflow-y-scroll space-y-3 pr-2'
-                  : 'space-y-3'
-              }
-              style={
-                showMore
-                  ? {
-                      scrollbarWidth: 'thin',
-                      scrollbarColor: 'rgba(91, 154, 139, 0.5) transparent',
-                    }
-                  : undefined
-              }
-            >
+            <div ref={scrollContainerRef} className="space-y-3">
               {(commits.length > 0
                 ? processCommits(commits, showMore ? 20 : 5)
                 : timelineEvents
