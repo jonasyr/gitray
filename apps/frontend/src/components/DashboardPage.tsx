@@ -236,7 +236,6 @@ export function DashboardPage({
     }
 
     // Calculate average commits per day for the most active day
-    const totalDaysWithCommits = uniqueDates.length;
     const avgCommitsOnMostActiveDay = mostActiveDay?.[1] || 0;
 
     return {
