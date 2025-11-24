@@ -1,31 +1,30 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { gitService } from '../services/gitService';
-import redis from '../services/cache';
-import { body } from 'express-validator';
+import { query, validationResult, ValidationChain } from 'express-validator';
 import {
-  handleValidationErrors,
-  isSecureGitUrl,
-} from '../middlewares/validation';
-import { withTempRepository } from '../utils/withTempRepository';
-import {
-  ERROR_MESSAGES,
-  HTTP_STATUS,
-  CommitFilterOptions,
-  TIME,
-  ChurnFilterOptions,
-} from '@gitray/shared-types';
+  getCachedCommits,
+  getCachedAggregatedData,
+  getCachedContributors,
+  getCachedChurnData,
+  getCachedSummary,
+  type CommitCacheOptions,
+} from '../services/repositoryCache';
+import { createRequestLogger } from '../services/logger';
 import {
   recordFeatureUsage,
   recordEnhancedCacheOperation,
-  recordDataFreshness,
   getUserType,
   getRepositorySizeCategory,
 } from '../services/metrics';
-import { repositorySummaryService } from '../services/repositorySummaryService';
-import { ValidationError } from '@gitray/shared-types';
-import { getLogger } from '../services/logger';
+import {
+  CommitFilterOptions,
+  ChurnFilterOptions,
+  ERROR_MESSAGES,
+  HTTP_STATUS,
+  ValidationError,
+} from '@gitray/shared-types';
+import { isSecureGitUrl } from '../middlewares/validation';
 
-const logger = getLogger();
+// Remove unused imports: redis, gitService, withTempRepository, repositorySummaryService
 
 // Middleware to set request priority based on route
 const setRequestPriority = (priority: 'low' | 'normal' | 'high') => {
@@ -39,553 +38,457 @@ const setRequestPriority = (priority: 'low' | 'normal' | 'high') => {
 const router = express.Router();
 
 // ---------------------------------------------------------------------------
-// Validation rules
+// Custom validation error handler
 // ---------------------------------------------------------------------------
-const repoUrlValidation = [
-  body('repoUrl')
-    .isURL({ protocols: ['http', 'https'] })
+const handleValidationErrors = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    const logger = createRequestLogger(req);
+    logger.warn('Validation failed', {
+      errors: errors.array(),
+      query: req.query,
+      path: req.path,
+    });
+
+    res.status(HTTP_STATUS.BAD_REQUEST).json({
+      error: 'Validation failed',
+      code: 'VALIDATION_ERROR',
+      errors: errors.array(),
+    });
+    return;
+  }
+  next();
+};
+
+// ---------------------------------------------------------------------------
+// Reusable validation chains
+// ---------------------------------------------------------------------------
+const repoUrlValidation = (): ValidationChain[] => [
+  query('repoUrl')
+    .notEmpty()
+    .withMessage('repoUrl query parameter is required')
+    .isURL({
+      protocols: ['http', 'https'],
+      require_protocol: true,
+      require_valid_protocol: true,
+    })
     .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
     .custom(isSecureGitUrl)
     .withMessage('Invalid or potentially unsafe repository URL'),
-  handleValidationErrors,
 ];
 
-// Additional validation for heatmap and full-data routes
-const heatmapValidation = [
-  ...repoUrlValidation,
-  body('filterOptions')
+const paginationValidation = (): ValidationChain[] => [
+  query('page')
     .optional()
-    .isObject()
-    .withMessage('filterOptions must be an object'),
-  handleValidationErrors,
+    .isInt({ min: 1, max: 1000 })
+    .withMessage('Page must be between 1 and 1000')
+    .toInt(),
+  query('limit')
+    .optional()
+    .isInt({ min: 1, max: 100 })
+    .withMessage('Limit must be between 1 and 100')
+    .toInt(),
 ];
-const fullDataValidation = heatmapValidation;
+
+const dateValidation = (): ValidationChain[] => [
+  query('fromDate')
+    .optional()
+    .isISO8601({ strict: true })
+    .withMessage('fromDate must be a valid ISO 8601 date')
+    .custom((value) => {
+      if (value && new Date(value) > new Date()) {
+        return false;
+      }
+      return true;
+    })
+    .withMessage('fromDate cannot be in the future'),
+  query('toDate')
+    .optional()
+    .isISO8601({ strict: true })
+    .withMessage('toDate must be a valid ISO 8601 date')
+    .custom((value, { req }) => {
+      if (value && new Date(value) > new Date()) {
+        return false;
+      }
+      const fromDate = req.query?.fromDate as string;
+      if (value && fromDate && new Date(value) < new Date(fromDate)) {
+        return false;
+      }
+      return true;
+    })
+    .withMessage('toDate must be after fromDate and not in the future'),
+];
+
+const authorValidation = (): ValidationChain[] => [
+  query('author')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Author must be between 1 and 100 characters')
+    .escape(),
+  query('authors')
+    .optional()
+    .isString()
+    .custom((value) => {
+      const authors = value.split(',');
+      return (
+        authors.length <= 10 &&
+        authors.every((a: string) => a.trim().length > 0)
+      );
+    })
+    .withMessage(
+      'Authors must be comma-separated and maximum 10 authors allowed'
+    ),
+];
+
+const churnValidation = (): ValidationChain[] => [
+  query('minChanges')
+    .optional()
+    .isInt({ min: 1, max: 1000 })
+    .withMessage('minChanges must be between 1 and 1000')
+    .toInt(),
+  query('extensions')
+    .optional()
+    .isString()
+    .custom((value) => {
+      const exts = value.split(',');
+      return (
+        exts.length <= 20 && exts.every((e: string) => e.trim().length > 0)
+      );
+    })
+    .withMessage('Extensions must be comma-separated and maximum 20 allowed'),
+];
 
 // ---------------------------------------------------------------------------
-// POST endpoint to get repository commit data only
+// GET endpoint to get repository commits with pagination (unified cache)
 // ---------------------------------------------------------------------------
-router.post(
-  '/',
-  setRequestPriority('normal'), // Normal priority for basic commit data
-  repoUrlValidation,
+router.get(
+  '/commits',
+  setRequestPriority('normal'),
+  [...repoUrlValidation(), ...paginationValidation()],
+  handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
-    const { repoUrl } = req.body;
+    const logger = createRequestLogger(req);
+    const { repoUrl } = req.query as Record<string, string>;
+    const page = Number.parseInt(req.query.page as string) || 1;
+    const limit = Number.parseInt(req.query.limit as string) || 100;
+    const skip = (page - 1) * limit;
     const userType = getUserType(req);
 
     try {
-      const cacheKey = `commits:${repoUrl}`;
-      let cached = null;
-      let commits = null;
-
-      // Try to get from cache, but handle cache failures gracefully
-      try {
-        cached = await redis.get(cacheKey);
-        if (cached) {
-          commits = JSON.parse(cached);
-          // Record enhanced cache operation and feature usage
-          recordEnhancedCacheOperation(
-            'commits',
-            true,
-            req,
-            repoUrl,
-            commits.length
-          );
-          recordFeatureUsage('repository_commits', userType, true, 'api_call');
-          recordDataFreshness(
-            'commits',
-            0,
-            'hybrid',
-            getRepositorySizeCategory(commits.length)
-          );
-
-          res.status(HTTP_STATUS.OK).json({ commits });
-          return;
-        }
-      } catch (cacheError) {
-        // Cache operation failed, continue to fetch from repository
-        logger.warn(
-          'Cache get operation failed:',
-          (cacheError as Error).message
-        );
-      }
-
-      commits ??= await withTempRepository(repoUrl, (tempDir) =>
-        gitService.getCommits(tempDir)
-      );
-
-      // Record cache miss and successful operation
-      recordEnhancedCacheOperation(
-        'commits',
-        false,
-        req,
+      logger.info('Processing commits request with unified caching', {
         repoUrl,
-        commits ? commits.length : 0
-      );
-      recordFeatureUsage('repository_commits', userType, true, 'api_call');
-
-      // Try to cache the result, but don't fail if cache operation fails
-      if (commits) {
-        try {
-          await redis.set(
-            cacheKey,
-            JSON.stringify(commits),
-            'EX',
-            TIME.HOUR / 1000
-          );
-        } catch (cacheError) {
-          logger.warn(
-            'Cache set operation failed:',
-            (cacheError as Error).message
-          );
-        }
-      }
-
-      res.status(HTTP_STATUS.OK).json({ commits });
-      return;
-    } catch (error) {
-      // Record failed feature usage
-      recordFeatureUsage('repository_commits', userType, false, 'api_call');
-      next(error);
-    }
-  }
-);
-
-// ---------------------------------------------------------------------------
-// POST endpoint to get commit heatmap data
-// ---------------------------------------------------------------------------
-router.post(
-  '/heatmap',
-  setRequestPriority('low'), // Low priority for heatmap data - memory intensive
-  heatmapValidation,
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { repoUrl, filterOptions } = req.body;
-    const userType = getUserType(req);
-
-    try {
-      const cacheKey = `heatmap:${repoUrl}:${JSON.stringify(filterOptions)}`;
-      let cached = null;
-      let heatmapData = null;
-
-      // Try to get from cache, but handle cache failures gracefully
-      try {
-        cached = await redis.get(cacheKey);
-        if (cached) {
-          heatmapData = JSON.parse(cached);
-          // Record enhanced cache hit and feature usage
-          recordEnhancedCacheOperation('heatmap', true, req, repoUrl);
-          recordFeatureUsage('heatmap_view', userType, true, 'api_call');
-          recordDataFreshness('heatmap', 0, 'hybrid');
-
-          res.status(HTTP_STATUS.OK).json({ heatmapData });
-          return;
-        }
-      } catch (cacheError) {
-        // Cache operation failed, continue to fetch from repository
-        logger.warn(
-          'Cache get operation failed:',
-          (cacheError as Error).message
-        );
-      }
-
-      heatmapData ??= await withTempRepository(repoUrl, async (tempDir) => {
-        const commits = await gitService.getCommits(tempDir);
-        return gitService.aggregateCommitsByTime(
-          commits,
-          filterOptions as CommitFilterOptions
-        );
+        page,
+        limit,
       });
 
-      // Record cache miss and successful operation
-      recordEnhancedCacheOperation('heatmap', false, req, repoUrl);
+      // Use unified cache manager (handles all three cache levels automatically)
+      const cacheOptions: CommitCacheOptions = {
+        skip,
+        limit,
+      };
+
+      const commits = await getCachedCommits(repoUrl, cacheOptions);
+
+      // Record successful operation
+      recordFeatureUsage('repository_commits', userType, true, 'api_call');
+
+      logger.info('Commits retrieved successfully', {
+        repoUrl,
+        commitCount: commits.length,
+        page,
+        limit,
+      });
+
+      res.status(HTTP_STATUS.OK).json({ commits, page, limit });
+    } catch (error) {
+      recordFeatureUsage('repository_commits', userType, false, 'api_call');
+      logger.error('Failed to retrieve commits', {
+        repoUrl,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      next(error);
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// GET endpoint to get commit heatmap data with filters (unified cache)
+// ---------------------------------------------------------------------------
+router.get(
+  '/heatmap',
+  setRequestPriority('low'),
+  [...repoUrlValidation(), ...dateValidation(), ...authorValidation()],
+  handleValidationErrors,
+  async (req: Request, res: Response, next: NextFunction) => {
+    const logger = createRequestLogger(req);
+    const { repoUrl, author, authors, fromDate, toDate } = req.query as Record<
+      string,
+      string
+    >;
+    const userType = getUserType(req);
+
+    try {
+      logger.info('Processing heatmap request with unified caching', {
+        repoUrl,
+        hasFilters: !!(author || authors || fromDate || toDate),
+      });
+
+      // Build filter options from query parameters
+      const filters: CommitFilterOptions = {
+        author: author || undefined,
+        authors: authors ? authors.split(',').map((a) => a.trim()) : undefined,
+        fromDate: fromDate || undefined,
+        toDate: toDate || undefined,
+      };
+
+      // Use unified cache manager for aggregated data (Level 3 cache)
+      const heatmapData = await getCachedAggregatedData(repoUrl, filters);
+
+      // Record successful operation
       recordFeatureUsage('heatmap_view', userType, true, 'api_call');
 
-      // Try to cache the result, but don't fail if cache operation fails
-      if (heatmapData) {
-        try {
-          await redis.set(
-            cacheKey,
-            JSON.stringify(heatmapData),
-            'EX',
-            TIME.HOUR / 1000
-          );
-        } catch (cacheError) {
-          logger.warn(
-            'Cache set operation failed:',
-            (cacheError as Error).message
-          );
-        }
-      }
+      logger.info('Heatmap data retrieved successfully', {
+        repoUrl,
+        dataPoints: heatmapData.data.length,
+      });
 
       res.status(HTTP_STATUS.OK).json({ heatmapData });
-      return;
     } catch (error) {
-      // Record failed feature usage
       recordFeatureUsage('heatmap_view', userType, false, 'api_call');
+      logger.error('Failed to retrieve heatmap data', {
+        repoUrl,
+        error: error instanceof Error ? error.message : String(error),
+      });
       next(error);
     }
   }
 );
 
 // ---------------------------------------------------------------------------
-// POST endpoint to get repository top contributors
+// GET endpoint to get repository top contributors with filters (unified cache)
 // ---------------------------------------------------------------------------
-router.post(
+router.get(
   '/contributors',
-  setRequestPriority('normal'), // Normal priority for contributor data
-  repoUrlValidation,
+  setRequestPriority('normal'),
+  [...repoUrlValidation(), ...dateValidation(), ...authorValidation()],
+  handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
-    const { repoUrl, filterOptions } = req.body;
+    const logger = createRequestLogger(req);
+    const { repoUrl, author, authors, fromDate, toDate } = req.query as Record<
+      string,
+      string
+    >;
     const userType = getUserType(req);
 
     try {
-      const cacheKey = `contributors:${repoUrl}:${JSON.stringify(filterOptions || {})}`;
-      let cached = null;
-      let contributors = null;
-
-      // Try to get from cache, but handle cache failures gracefully
-      try {
-        cached = await redis.get(cacheKey);
-        if (cached) {
-          contributors = JSON.parse(cached);
-          // Record enhanced cache operation and feature usage
-          recordEnhancedCacheOperation(
-            'contributors',
-            true,
-            req,
-            repoUrl,
-            contributors.length
-          );
-          recordFeatureUsage('contributors_view', userType, true, 'api_call');
-          recordDataFreshness('contributors', 0, 'hybrid');
-
-          res.status(HTTP_STATUS.OK).json({ contributors });
-          return;
-        }
-      } catch (cacheError) {
-        // Cache operation failed, continue to fetch from repository
-        logger.warn(
-          'Cache get operation failed:',
-          (cacheError as Error).message
-        );
-      }
-
-      // Fetch contributors using the service layer
-      contributors ??= await withTempRepository(repoUrl, (tempDir) =>
-        gitService.getTopContributors(
-          tempDir,
-          filterOptions as CommitFilterOptions
-        )
-      );
-
-      // Record cache miss and successful operation
-      recordEnhancedCacheOperation(
-        'contributors',
-        false,
-        req,
+      logger.info('Processing contributors request with unified caching', {
         repoUrl,
-        contributors ? contributors.length : 0
-      );
+        hasFilters: !!(author || authors || fromDate || toDate),
+      });
+
+      // Build filter options from query parameters
+      const filters: CommitFilterOptions = {
+        author: author || undefined,
+        authors: authors ? authors.split(',').map((a) => a.trim()) : undefined,
+        fromDate: fromDate || undefined,
+        toDate: toDate || undefined,
+      };
+
+      // Use unified cache manager for contributors data
+      const contributors = await getCachedContributors(repoUrl, filters);
+
+      // Record successful operation
       recordFeatureUsage('contributors_view', userType, true, 'api_call');
 
-      // Try to cache the result, but don't fail if cache operation fails
-      if (contributors) {
-        try {
-          await redis.set(
-            cacheKey,
-            JSON.stringify(contributors),
-            'EX',
-            TIME.HOUR / 1000
-          );
-        } catch (cacheError) {
-          logger.warn(
-            'Cache set operation failed:',
-            (cacheError as Error).message
-          );
-        }
-      }
+      logger.info('Contributors retrieved successfully', {
+        repoUrl,
+        contributorCount: contributors.length,
+      });
 
       res.status(HTTP_STATUS.OK).json({ contributors });
-      return;
     } catch (error) {
-      // Record failed feature usage
       recordFeatureUsage('contributors_view', userType, false, 'api_call');
+      logger.error('Failed to retrieve contributors', {
+        repoUrl,
+        error: error instanceof Error ? error.message : String(error),
+      });
       next(error);
     }
   }
 );
 
 // ---------------------------------------------------------------------------
-// POST endpoint to get code churn analysis (file change frequency)
+// GET endpoint to get code churn analysis with filters (unified cache)
 // ---------------------------------------------------------------------------
-router.post(
+router.get(
   '/churn',
-  setRequestPriority('normal'), // Normal priority for churn analysis
-  repoUrlValidation,
+  setRequestPriority('normal'),
+  [...repoUrlValidation(), ...dateValidation(), ...churnValidation()],
+  handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
-    const { repoUrl, filterOptions } = req.body;
+    const logger = createRequestLogger(req);
+    const { repoUrl, fromDate, toDate, minChanges, extensions } =
+      req.query as Record<string, string>;
     const userType = getUserType(req);
 
     try {
-      const cacheKey = `churn:${repoUrl}:${JSON.stringify(filterOptions || {})}`;
-      let cached = null;
-      let churnData = null;
-
-      // Try to get from cache, but handle cache failures gracefully
-      try {
-        cached = await redis.get(cacheKey);
-        if (cached) {
-          churnData = JSON.parse(cached);
-          // Mark as from cache
-          churnData.metadata.fromCache = true;
-
-          // Record enhanced cache operation and feature usage
-          recordEnhancedCacheOperation(
-            'churn',
-            true,
-            req,
-            repoUrl,
-            churnData.files.length
-          );
-          recordFeatureUsage('code_churn_view', userType, true, 'api_call');
-          recordDataFreshness('churn', 0, 'hybrid');
-
-          res.status(HTTP_STATUS.OK).json({ churnData });
-          return;
-        }
-      } catch (cacheError) {
-        // Cache operation failed, continue to fetch from repository
-        logger.warn(
-          'Cache get operation failed:',
-          (cacheError as Error).message
-        );
-      }
-
-      // Fetch churn data using the service layer
-      churnData ??= await withTempRepository(repoUrl, (tempDir) =>
-        gitService.analyzeCodeChurn(
-          tempDir,
-          filterOptions as ChurnFilterOptions
-        )
-      );
-
-      // Record cache miss and successful operation
-      recordEnhancedCacheOperation(
-        'churn',
-        false,
-        req,
+      logger.info('Processing churn analysis request with unified caching', {
         repoUrl,
-        churnData ? churnData.files.length : 0
-      );
+        hasFilters: !!(fromDate || toDate || minChanges || extensions),
+      });
+
+      // Build filter options from query parameters
+      const filters: ChurnFilterOptions = {
+        since: fromDate || undefined,
+        until: toDate || undefined,
+        minChanges: minChanges ? Number.parseInt(minChanges) : undefined,
+        extensions: extensions
+          ? extensions.split(',').map((e) => e.trim())
+          : undefined,
+      };
+
+      // Use unified cache manager for churn data
+      const churnData = await getCachedChurnData(repoUrl, filters);
+
+      // Record successful operation
       recordFeatureUsage('code_churn_view', userType, true, 'api_call');
 
-      // Try to cache the result, but don't fail if cache operation fails
-      if (churnData) {
-        try {
-          // Cache for 1 hour (code churn changes less frequently than commits)
-          await redis.set(
-            cacheKey,
-            JSON.stringify(churnData),
-            'EX',
-            TIME.HOUR / 1000
-          );
-        } catch (cacheError) {
-          logger.warn(
-            'Cache set operation failed:',
-            (cacheError as Error).message
-          );
-        }
-      }
+      logger.info('Churn data retrieved successfully', {
+        repoUrl,
+        fileCount: churnData.files.length,
+      });
 
       res.status(HTTP_STATUS.OK).json({ churnData });
-      return;
     } catch (error) {
-      // Record failed feature usage
       recordFeatureUsage('code_churn_view', userType, false, 'api_call');
+      logger.error('Failed to retrieve churn data', {
+        repoUrl,
+        error: error instanceof Error ? error.message : String(error),
+      });
       next(error);
     }
   }
 );
 
 // ---------------------------------------------------------------------------
-// GET endpoint to get repository summary statistics
+// GET endpoint to get repository summary statistics (unified cache)
 // ---------------------------------------------------------------------------
 router.get(
   '/summary',
-  setRequestPriority('normal'), // Normal priority - lightweight metadata operation
+  setRequestPriority('normal'),
+  [...repoUrlValidation()],
+  handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
-    const { repoUrl } = req.query;
+    const logger = createRequestLogger(req);
+    const { repoUrl } = req.query as Record<string, string>;
     const userType = getUserType(req);
 
-    // Validate repoUrl query parameter
-    if (!repoUrl || typeof repoUrl !== 'string') {
-      recordFeatureUsage('repository_summary', userType, false, 'api_call');
-      return next(new ValidationError('repoUrl query parameter is required'));
-    }
-
-    // Validate URL format and security
     try {
-      const url = new URL(repoUrl);
-      if (!['http:', 'https:'].includes(url.protocol)) {
-        throw new ValidationError('Invalid repository URL protocol');
-      }
-      // Note: Additional validation happens in repositorySummaryService
-    } catch (error) {
-      recordFeatureUsage('repository_summary', userType, false, 'api_call');
-      if (error instanceof ValidationError) {
-        return next(error);
-      }
-      return next(new ValidationError(ERROR_MESSAGES.INVALID_REPO_URL));
-    }
+      logger.info(
+        'Processing repository summary request with unified caching',
+        {
+          repoUrl,
+        }
+      );
 
-    try {
-      const summary =
-        await repositorySummaryService.getRepositorySummary(repoUrl);
+      // Use unified cache manager for summary data
+      const summary = await getCachedSummary(repoUrl);
 
       // Record successful operation
-      recordEnhancedCacheOperation(
-        'summary',
-        summary.metadata.cached,
-        req,
-        repoUrl
-      );
       recordFeatureUsage('repository_summary', userType, true, 'api_call');
-      if (summary.metadata.cached) {
-        recordDataFreshness('summary', 0, 'hybrid');
-      }
+
+      logger.info('Repository summary retrieved successfully', {
+        repoUrl,
+        repositoryName: summary.repository.name,
+      });
 
       res.status(HTTP_STATUS.OK).json({ summary });
     } catch (error) {
-      // Record failed feature usage
       recordFeatureUsage('repository_summary', userType, false, 'api_call');
+      logger.error('Failed to retrieve repository summary', {
+        repoUrl,
+        error: error instanceof Error ? error.message : String(error),
+      });
       next(error);
     }
   }
 );
 
 // ---------------------------------------------------------------------------
-// POST endpoint to fetch both commits and heatmap data in a single request
+// GET endpoint to fetch both commits and heatmap data with pagination and filters (unified cache)
 // ---------------------------------------------------------------------------
-router.post(
+router.get(
   '/full-data',
-  setRequestPriority('low'), // Low priority for full data - very memory intensive
-  fullDataValidation,
+  setRequestPriority('low'),
+  [
+    ...repoUrlValidation(),
+    ...paginationValidation(),
+    ...dateValidation(),
+    ...authorValidation(),
+  ],
+  handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
-    const { repoUrl, filterOptions } = req.body;
+    const logger = createRequestLogger(req);
+    const { repoUrl, author, authors, fromDate, toDate } = req.query as Record<
+      string,
+      string
+    >;
+    const page = Number.parseInt(req.query.page as string) || 1;
+    const limit = Number.parseInt(req.query.limit as string) || 100;
+    const skip = (page - 1) * limit;
     const userType = getUserType(req);
 
     try {
-      const commitsKey = `commits:${repoUrl}`;
-      const heatmapKey = `heatmap:${repoUrl}:${JSON.stringify(filterOptions)}`;
-      let cachedCommits = null;
-      let cachedHeatmap = null;
-
-      // Try to get from cache, but handle cache failures gracefully
-      try {
-        cachedCommits = await redis.get(commitsKey);
-        cachedHeatmap = await redis.get(heatmapKey);
-      } catch (cacheError) {
-        // Cache operation failed, continue to fetch from repository
-        logger.warn(
-          'Cache get operation failed:',
-          (cacheError as Error).message
-        );
-      }
-
-      if (cachedCommits && cachedHeatmap) {
-        let commits, heatmapData;
-        try {
-          commits = JSON.parse(cachedCommits);
-          heatmapData = JSON.parse(cachedHeatmap);
-
-          // Record enhanced cache operations for both data types
-          recordEnhancedCacheOperation(
-            'commits',
-            true,
-            req,
-            repoUrl,
-            commits.length
-          );
-          recordEnhancedCacheOperation('heatmap', true, req, repoUrl);
-          recordFeatureUsage('full_data_view', userType, true, 'api_call');
-          recordDataFreshness(
-            'combined',
-            0,
-            'hybrid',
-            getRepositorySizeCategory(commits.length)
-          );
-
-          res.status(HTTP_STATUS.OK).json({ commits, heatmapData });
-          return;
-        } catch (parseError) {
-          // Corrupted cache data, continue to fetch from repository
-          logger.warn(
-            'Cache data parsing failed:',
-            (parseError as Error).message
-          );
-        }
-      }
-
-      const { commits, heatmapData } = await withTempRepository(
+      logger.info('Processing full-data request with unified caching', {
         repoUrl,
-        async (tempDir) => {
-          const commits = await gitService.getCommits(tempDir);
-          const heatmapData = await gitService.aggregateCommitsByTime(
-            commits,
-            filterOptions as CommitFilterOptions
-          );
-          return { commits, heatmapData };
-        }
-      );
+        page,
+        limit,
+        hasFilters: !!(author || authors || fromDate || toDate),
+      });
 
-      // Record cache miss and successful operation
-      recordEnhancedCacheOperation(
-        'commits',
-        false,
-        req,
-        repoUrl,
-        commits ? commits.length : 0
-      );
-      recordEnhancedCacheOperation('heatmap', false, req, repoUrl);
+      // Build filter options from query parameters
+      const filters: CommitFilterOptions = {
+        author: author || undefined,
+        authors: authors ? authors.split(',').map((a) => a.trim()) : undefined,
+        fromDate: fromDate || undefined,
+        toDate: toDate || undefined,
+      };
+
+      const cacheOptions: CommitCacheOptions = {
+        skip,
+        limit,
+      };
+
+      // Fetch both commits and heatmap data in parallel using unified cache
+      const [commits, heatmapData] = await Promise.all([
+        getCachedCommits(repoUrl, cacheOptions),
+        getCachedAggregatedData(repoUrl, filters),
+      ]);
+
+      // Record successful operation
       recordFeatureUsage('full_data_view', userType, true, 'api_call');
 
-      // Try to cache the results, but don't fail if cache operations fail
-      if (commits) {
-        try {
-          await redis.set(
-            commitsKey,
-            JSON.stringify(commits),
-            'EX',
-            TIME.HOUR / 1000
-          );
-        } catch (cacheError) {
-          logger.warn(
-            'Cache set operation failed for commits:',
-            (cacheError as Error).message
-          );
-        }
-      }
+      logger.info('Full data retrieved successfully', {
+        repoUrl,
+        commitCount: commits.length,
+        dataPoints: heatmapData.data.length,
+        page,
+        limit,
+      });
 
-      if (heatmapData) {
-        try {
-          await redis.set(
-            heatmapKey,
-            JSON.stringify(heatmapData),
-            'EX',
-            TIME.HOUR / 1000
-          );
-        } catch (cacheError) {
-          logger.warn(
-            'Cache set operation failed for heatmap:',
-            (cacheError as Error).message
-          );
-        }
-      }
-
-      res.status(HTTP_STATUS.OK).json({ commits, heatmapData });
-      return;
+      res.status(HTTP_STATUS.OK).json({ commits, heatmapData, page, limit });
     } catch (error) {
-      // Record failed feature usage
       recordFeatureUsage('full_data_view', userType, false, 'api_call');
+      logger.error('Failed to retrieve full data', {
+        repoUrl,
+        error: error instanceof Error ? error.message : String(error),
+      });
       next(error);
     }
   }

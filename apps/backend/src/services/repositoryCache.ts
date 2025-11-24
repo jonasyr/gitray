@@ -19,6 +19,7 @@
 
 import crypto from 'node:crypto';
 import { gitService } from './gitService';
+import { repositorySummaryService } from './repositorySummaryService';
 import { getLogger } from './logger';
 import { withSharedRepository } from './repositoryCoordinator';
 import type { RepositoryHandle } from './repositoryCoordinator';
@@ -47,6 +48,9 @@ import {
   CommitFilterOptions,
   CommitHeatmapData,
   TransactionRollbackError,
+  CodeChurnAnalysis,
+  ChurnFilterOptions,
+  RepositorySummary,
 } from '@gitray/shared-types';
 
 type ContributorAggregation = {
@@ -57,7 +61,11 @@ type ContributorAggregation = {
   contributionPercentage: number;
 };
 
-type AggregatedCacheValue = CommitHeatmapData | ContributorAggregation[];
+type AggregatedCacheValue =
+  | CommitHeatmapData
+  | ContributorAggregation[]
+  | CodeChurnAnalysis
+  | RepositorySummary;
 
 /**
  * UNIFIED REPOSITORY CACHE MANAGER - FIXED VERSION
@@ -391,6 +399,23 @@ export class RepositoryCacheManager {
    */
   private getAggregatedLocks(repoUrl: string): string[] {
     return [`cache-aggregated:${repoUrl}`, ...this.getCommitLocks(repoUrl)];
+  }
+
+  /**
+   * Helper method to generate lock array for churn data operations.
+   * Lock order: cache-churn < cache-filtered < cache-operation < repo-access
+   */
+  private getChurnLocks(repoUrl: string): string[] {
+    return [`cache-churn:${repoUrl}`, ...this.getCommitLocks(repoUrl)];
+  }
+
+  /**
+   * Helper method to generate lock array for repository summary operations.
+   * Lock order: cache-summary < repo-access
+   * Note: Summary doesn't depend on commits cache, uses sparse clone directly
+   */
+  private getSummaryLocks(repoUrl: string): string[] {
+    return [`cache-summary:${repoUrl}`, `repo-access:${repoUrl}`];
   }
 
   /**
@@ -1697,6 +1722,317 @@ export class RepositoryCacheManager {
   }
 
   /**
+   * Retrieves or generates code churn analysis data using the tertiary cache tier.
+   *
+   * This method handles file change frequency analysis by processing commit history
+   * to identify high-churn files that may indicate code quality issues or hotspots.
+   *
+   * Churn data is cached in the aggregated tier since it's computationally expensive
+   * and changes less frequently than individual commits.
+   *
+   * @param repoUrl - Git repository URL
+   * @param filterOptions - Optional filters for churn analysis scope
+   * @returns Promise resolving to code churn analysis results
+   */
+  async getOrGenerateChurnData(
+    repoUrl: string,
+    filterOptions?: ChurnFilterOptions
+  ): Promise<CodeChurnAnalysis> {
+    return withOrderedLocks(this.getChurnLocks(repoUrl), async () => {
+      const startTime = Date.now();
+
+      // Attempt retrieval from aggregated data cache (Tier 3)
+      const churnKey = this.generateChurnKey(repoUrl, filterOptions);
+      const cachedData = await this.aggregatedDataCache.get(churnKey);
+
+      // Type guard to ensure we have CodeChurnAnalysis
+      const isCodeChurnAnalysis = (data: any): data is CodeChurnAnalysis => {
+        return (
+          data !== null &&
+          typeof data === 'object' &&
+          'files' in data &&
+          'metadata' in data &&
+          Array.isArray(data.files)
+        );
+      };
+
+      if (cachedData && isCodeChurnAnalysis(cachedData)) {
+        // Cache hit: Return pre-computed churn analysis
+        this.metrics.operations.aggregatedHits++;
+        this.recordHitTime(startTime);
+        cacheHits.inc({ operation: 'churn' });
+        recordEnhancedCacheOperation('churn', true, undefined, repoUrl);
+
+        // Track data freshness for monitoring
+        const cacheAge = Date.now() - startTime;
+        recordDataFreshness('churn', cacheAge);
+
+        logger.debug('Churn data cache hit', {
+          repoUrl,
+          filters: filterOptions,
+          cacheKey: churnKey,
+          fileCount: cachedData.files.length,
+        });
+
+        return cachedData;
+      }
+
+      // Cache miss: Generate churn data from repository
+      this.metrics.operations.aggregatedMisses++;
+      this.recordMissTime(startTime);
+      cacheMisses.inc({ operation: 'churn' });
+      recordEnhancedCacheOperation('churn', false, undefined, repoUrl);
+
+      logger.debug('Churn data cache miss, analyzing repository', {
+        repoUrl,
+        filters: filterOptions,
+        cacheKey: churnKey,
+      });
+
+      const transaction = this.createTransaction(repoUrl);
+
+      try {
+        // Analyze code churn using shared repository
+        const churnData = await withSharedRepository(
+          repoUrl,
+          async (handle: RepositoryHandle) => {
+            logger.info('Analyzing code churn via shared repository', {
+              repoUrl,
+              commitCount: handle.commitCount,
+              sizeCategory: handle.sizeCategory,
+              isShared: handle.isShared,
+            });
+
+            // Track efficiency gains from repository sharing
+            if (handle.isShared && handle.refCount > 1) {
+              this.metrics.efficiency.duplicateClonesPrevented++;
+              logger.debug('Duplicate clone prevented for churn analysis', {
+                repoUrl,
+                refCount: handle.refCount,
+              });
+            }
+
+            return gitService.analyzeCodeChurn(handle.localPath, filterOptions);
+          }
+        );
+
+        // Defensive programming: Handle null churn data gracefully
+        if (!churnData) {
+          logger.error('gitService.analyzeCodeChurn returned null', {
+            repoUrl,
+          });
+          throw new Error('Failed to analyze code churn: null result');
+        }
+
+        // Cache the churn analysis results
+        const ttl = config.cacheStrategy.cacheKeys.aggregatedDataTTL;
+        await this.transactionalSet(
+          this.aggregatedDataCache,
+          'aggregated',
+          churnKey,
+          churnData,
+          ttl,
+          transaction
+        );
+
+        // Finalize the transaction
+        await this.commitTransaction(transaction);
+
+        logger.debug('Churn data cached with transaction', {
+          repoUrl,
+          filters: filterOptions,
+          fileCount: churnData.files.length,
+          ttl,
+          transactionId: transaction.id,
+        });
+
+        // Update system health metrics
+        updateServiceHealthScore('cache', {
+          cacheHitRate: 1,
+          errorRate: 0,
+        });
+
+        return churnData;
+      } catch (error) {
+        // Track churn analysis failure
+        this.metrics.transactions.failed++;
+
+        // Record comprehensive error details
+        recordDetailedError(
+          'cache',
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            userImpact: 'degraded',
+            recoveryAction: 'retry',
+            severity: 'warning',
+          }
+        );
+
+        // Update system health metrics
+        updateServiceHealthScore('cache', { errorRate: 1 });
+
+        // Rollback transaction to maintain cache consistency
+        await this.rollbackTransaction(transaction);
+
+        logger.error('Failed to cache churn data, transaction rolled back', {
+          repoUrl,
+          transactionId: transaction.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Retrieves or generates repository summary statistics using the aggregated cache tier.
+   *
+   * This method handles repository metadata extraction using sparse clones for efficiency.
+   * Summary data includes repository age, commit count, contributors, and activity status.
+   *
+   * Unlike other cache methods, this uses the repositorySummaryService which performs
+   * a sparse clone to minimize bandwidth and storage requirements.
+   *
+   * @param repoUrl - Git repository URL
+   * @returns Promise resolving to repository summary
+   */
+  async getOrGenerateSummary(repoUrl: string): Promise<RepositorySummary> {
+    return withOrderedLocks(this.getSummaryLocks(repoUrl), async () => {
+      const startTime = Date.now();
+
+      // Attempt retrieval from aggregated data cache (Tier 3)
+      const summaryKey = this.generateSummaryKey(repoUrl);
+      const cachedData = await this.aggregatedDataCache.get(summaryKey);
+
+      // Type guard to ensure we have RepositorySummary
+      const isRepositorySummary = (data: any): data is RepositorySummary => {
+        return (
+          data !== null &&
+          typeof data === 'object' &&
+          'repository' in data &&
+          'created' in data &&
+          'stats' in data
+        );
+      };
+
+      if (cachedData && isRepositorySummary(cachedData)) {
+        // Cache hit: Return cached summary
+        this.metrics.operations.aggregatedHits++;
+        this.recordHitTime(startTime);
+        cacheHits.inc({ operation: 'summary' });
+        recordEnhancedCacheOperation('summary', true, undefined, repoUrl);
+
+        // Track data freshness
+        const cacheAge = Date.now() - startTime;
+        recordDataFreshness('summary', cacheAge);
+
+        logger.debug('Summary cache hit', {
+          repoUrl,
+          cacheKey: summaryKey,
+        });
+
+        // Update metadata to reflect cached status
+        return {
+          ...cachedData,
+          metadata: {
+            ...cachedData.metadata,
+            cached: true,
+            dataSource: 'cache',
+          },
+        };
+      }
+
+      // Cache miss: Generate summary from repository
+      this.metrics.operations.aggregatedMisses++;
+      this.recordMissTime(startTime);
+      cacheMisses.inc({ operation: 'summary' });
+      recordEnhancedCacheOperation('summary', false, undefined, repoUrl);
+
+      logger.debug('Summary cache miss, generating from repository', {
+        repoUrl,
+        cacheKey: summaryKey,
+      });
+
+      const transaction = this.createTransaction(repoUrl);
+
+      try {
+        // Use repositorySummaryService which handles sparse clones internally
+        // Note: This service already uses coordinatedOperation, so no need for withSharedRepository
+        const summary =
+          await repositorySummaryService.getRepositorySummary(repoUrl);
+
+        // Defensive programming: Validate summary structure
+        if (!summary || !summary.repository) {
+          logger.error('repositorySummaryService returned invalid summary', {
+            repoUrl,
+          });
+          throw new Error(
+            'Failed to generate repository summary: invalid result'
+          );
+        }
+
+        // Cache the summary data - use repositoryInfoTTL (2 hours, longer than aggregated data)
+        const ttl = config.cacheStrategy.cacheKeys.repositoryInfoTTL;
+        await this.transactionalSet(
+          this.aggregatedDataCache,
+          'aggregated',
+          summaryKey,
+          summary,
+          ttl,
+          transaction
+        );
+
+        // Finalize the transaction
+        await this.commitTransaction(transaction);
+
+        logger.debug('Summary cached with transaction', {
+          repoUrl,
+          repositoryName: summary.repository.name,
+          ttl,
+          transactionId: transaction.id,
+        });
+
+        // Update system health metrics
+        updateServiceHealthScore('cache', {
+          cacheHitRate: 1,
+          errorRate: 0,
+        });
+
+        return summary;
+      } catch (error) {
+        // Track summary generation failure
+        this.metrics.transactions.failed++;
+
+        // Record comprehensive error details
+        recordDetailedError(
+          'cache',
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            userImpact: 'degraded',
+            recoveryAction: 'retry',
+            severity: 'warning',
+          }
+        );
+
+        // Update system health metrics
+        updateServiceHealthScore('cache', { errorRate: 1 });
+
+        // Rollback transaction to maintain cache consistency
+        await this.rollbackTransaction(transaction);
+
+        logger.error('Failed to cache summary, transaction rolled back', {
+          repoUrl,
+          transactionId: transaction.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
+        throw error;
+      }
+    });
+  }
+
+  /**
    * Performs comprehensive cache invalidation across all tiers for a repository.
    *
    * When repository data changes (new commits, branch updates), all cached data
@@ -2010,6 +2346,24 @@ export class RepositoryCacheManager {
   ): string {
     const filterHash = this.hashObject(filterOptions ?? {});
     const key = `contributors:${this.hashUrl(repoUrl)}:${filterHash}`;
+    this.trackCacheKey(key);
+    return key;
+  }
+
+  /** Generate cache key for churn data */
+  private generateChurnKey(
+    repoUrl: string,
+    filterOptions?: ChurnFilterOptions
+  ): string {
+    const filterHash = this.hashObject(filterOptions ?? {});
+    const key = `churn_data:${this.hashUrl(repoUrl)}:${filterHash}`;
+    this.trackCacheKey(key);
+    return key;
+  }
+
+  /** Generate cache key for repository summary */
+  private generateSummaryKey(repoUrl: string): string {
+    const key = `repository_summary:${this.hashUrl(repoUrl)}`;
     this.trackCacheKey(key);
     return key;
   }
@@ -2631,4 +2985,36 @@ export async function getCachedContributors(
   }>
 > {
   return repositoryCache.getOrGenerateContributors(repoUrl, filterOptions);
+}
+
+/**
+ * Retrieves code churn analysis for a repository.
+ *
+ * Returns cached data when available, or generates fresh analysis by
+ * examining file change frequency patterns across commit history.
+ *
+ * @param repoUrl - Repository URL to analyze
+ * @param filterOptions - Optional filters for churn analysis scope
+ * @returns Promise resolving to code churn analysis results
+ */
+export async function getCachedChurnData(
+  repoUrl: string,
+  filterOptions?: ChurnFilterOptions
+): Promise<CodeChurnAnalysis> {
+  return repositoryCache.getOrGenerateChurnData(repoUrl, filterOptions);
+}
+
+/**
+ * Retrieves repository summary statistics.
+ *
+ * Returns cached summary when available, or generates fresh statistics by
+ * performing a sparse clone to extract repository metadata.
+ *
+ * @param repoUrl - Repository URL to analyze
+ * @returns Promise resolving to repository summary
+ */
+export async function getCachedSummary(
+  repoUrl: string
+): Promise<RepositorySummary> {
+  return repositoryCache.getOrGenerateSummary(repoUrl);
 }

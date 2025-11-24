@@ -3,107 +3,49 @@ import request from 'supertest';
 import express, { Application } from 'express';
 
 // Mock all external dependencies BEFORE imports
-const mockGitService = {
-  getCommits: vi.fn(),
-  aggregateCommitsByTime: vi.fn(),
-  getTopContributors: vi.fn(),
-  analyzeCodeChurn: vi.fn(),
+const mockRepositoryCache = {
+  getCachedCommits: vi.fn(),
+  getCachedAggregatedData: vi.fn(),
+  getCachedContributors: vi.fn(),
+  getCachedChurnData: vi.fn(),
+  getCachedSummary: vi.fn(),
 };
-
-const mockRedis = {
-  get: vi.fn(),
-  set: vi.fn(),
-};
-
-const mockWithTempRepository = vi.fn();
 
 const mockMetrics = {
   recordFeatureUsage: vi.fn(),
   recordEnhancedCacheOperation: vi.fn(),
-  recordDataFreshness: vi.fn(),
   getUserType: vi.fn(),
   getRepositorySizeCategory: vi.fn(),
 };
 
-const mockRepositorySummaryService = {
-  getRepositorySummary: vi.fn(),
+const mockLogger = {
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
 };
 
-// Create middleware function that can be chained
-const createValidationMiddleware = () => {
-  const middleware = vi.fn((req: any, res: any, next: any) => next()) as any;
-  middleware.isURL = vi.fn(() => middleware);
-  middleware.withMessage = vi.fn(() => middleware);
-  middleware.matches = vi.fn(() => middleware);
-  middleware.optional = vi.fn(() => middleware);
-  middleware.isObject = vi.fn(() => middleware);
-  middleware.custom = vi.fn(() => middleware);
-  return middleware;
-};
+// Mock modules
+vi.mock('../../../src/services/repositoryCache', () => mockRepositoryCache);
 
-// Mock modules with proper middleware functions
-vi.mock('../../../src/services/gitService', () => ({
-  __esModule: true,
-  gitService: mockGitService,
-}));
+vi.mock('../../../src/services/metrics', () => mockMetrics);
 
-vi.mock('../../../src/services/cache', () => ({
-  __esModule: true,
-  default: mockRedis,
-}));
-
-vi.mock('../../../src/utils/withTempRepository', () => ({
-  __esModule: true,
-  withTempRepository: mockWithTempRepository,
-}));
-
-vi.mock('../../../src/services/metrics', () => ({
-  __esModule: true,
-  ...mockMetrics,
-}));
-
-vi.mock('express-validator', () => ({
-  __esModule: true,
-  body: vi.fn(() => createValidationMiddleware()),
+vi.mock('../../../src/services/logger', () => ({
+  getLogger: () => mockLogger,
+  createRequestLogger: vi.fn(() => mockLogger),
 }));
 
 vi.mock('../../../src/middlewares/validation', () => ({
-  __esModule: true,
-  handleValidationErrors: vi.fn((req: any, res: any, next: any) => next()),
   isSecureGitUrl: vi.fn(() => Promise.resolve(true)),
 }));
 
-vi.mock('../../../src/services/repositorySummaryService', () => ({
-  __esModule: true,
-  repositorySummaryService: mockRepositorySummaryService,
-}));
-
 vi.mock('@gitray/shared-types', () => {
-  const TIME = {
-    SECOND: 1000,
-    MINUTE: 60 * 1000,
-    HOUR: 60 * 60 * 1000,
-    DAY: 24 * 60 * 60 * 1000,
-    WEEK: 7 * 24 * 60 * 60 * 1000,
-  };
-
-  class GitrayError extends Error {
-    constructor(
-      message: string,
-      public readonly statusCode: number = 500,
-      public readonly code?: string
-    ) {
-      super(message);
-      this.name = 'GitrayError';
-    }
-  }
-
-  class ValidationError extends GitrayError {
+  class ValidationError extends Error {
     constructor(
       message: string,
       public readonly errors?: any[]
     ) {
-      super(message, 400, 'VALIDATION_ERROR');
+      super(message);
       this.name = 'ValidationError';
     }
   }
@@ -118,20 +60,18 @@ vi.mock('@gitray/shared-types', () => {
       BAD_REQUEST: 400,
       INTERNAL_SERVER_ERROR: 500,
     },
-    TIME,
-    RATE_LIMIT: {
-      WINDOW_MS: 15 * TIME.MINUTE,
-      MAX_REQUESTS: 100,
-      MESSAGE: 'Too many requests from this IP, please try again later.',
-    },
-    GitrayError,
     ValidationError,
     CommitFilterOptions: {},
     ChurnFilterOptions: {},
+    GIT_SERVICE: {
+      MAX_CONCURRENT_PROCESSES: 3,
+      CLONE_DEPTH: 50,
+      TIMEOUT_MS: 30000,
+    },
   };
 });
 
-describe('RepositoryRoutes Unit Tests', () => {
+describe('RepositoryRoutes Unit Tests (Refactored with Unified Cache)', () => {
   let app: Application;
 
   beforeEach(async () => {
@@ -140,9 +80,6 @@ describe('RepositoryRoutes Unit Tests', () => {
     // Set up default mock returns
     mockMetrics.getUserType.mockReturnValue('anonymous');
     mockMetrics.getRepositorySizeCategory.mockReturnValue('medium');
-    mockMetrics.recordFeatureUsage.mockResolvedValue(undefined);
-    mockMetrics.recordEnhancedCacheOperation.mockResolvedValue(undefined);
-    mockMetrics.recordDataFreshness.mockResolvedValue(undefined);
 
     // Set up Express app
     app = express();
@@ -152,13 +89,16 @@ describe('RepositoryRoutes Unit Tests', () => {
     const { default: repositoryRoutes } = await import(
       '../../../src/routes/repositoryRoutes'
     );
-    app.use('/', repositoryRoutes);
+    app.use('/api/repositories', repositoryRoutes);
 
     // Add error handler
-    app.use((err: any, req: any, res: any) => {
-      res.status(err.status || 500).json({
-        error: err.message || 'Internal server error',
-      });
+    app.use((err: any, req: any, res: any, next: any) => {
+      if (!res.headersSent) {
+        res.status(err.statusCode || 500).json({
+          error: err.message || 'Internal server error',
+          code: err.code || 'INTERNAL_ERROR',
+        });
+      }
     });
   });
 
@@ -166,8 +106,8 @@ describe('RepositoryRoutes Unit Tests', () => {
     vi.resetModules();
   });
 
-  describe('POST / - Get Repository Commits', () => {
-    test('should return cached commits when cache hit occurs', async () => {
+  describe('GET /commits - Repository Commits with Unified Cache', () => {
+    test('should return commits using unified cache service', async () => {
       // ARRANGE
       const mockCommits = [
         {
@@ -178,25 +118,28 @@ describe('RepositoryRoutes Unit Tests', () => {
           authorEmail: 'test@example.com',
         },
       ];
-      const repoUrl = 'https://github.com/user/repo.git';
 
-      mockRedis.get.mockResolvedValue(JSON.stringify(mockCommits));
+      mockRepositoryCache.getCachedCommits.mockResolvedValue(mockCommits);
 
       // ACT
-      const response = await request(app).post('/').send({ repoUrl });
+      const response = await request(app).get(
+        '/api/repositories/commits?repoUrl=https://github.com/test/repo&page=1&limit=100'
+      );
 
       // ASSERT
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ commits: mockCommits });
-      expect(mockRedis.get).toHaveBeenCalledWith(`commits:${repoUrl}`);
-      expect(mockWithTempRepository).not.toHaveBeenCalled();
-      expect(mockMetrics.recordEnhancedCacheOperation).toHaveBeenCalledWith(
-        'commits',
-        true,
-        expect.any(Object),
-        repoUrl,
-        mockCommits.length
+      expect(response.body).toHaveProperty('commits');
+      expect(response.body.commits).toEqual(mockCommits);
+      expect(response.body.page).toBe(1);
+      expect(response.body.limit).toBe(100);
+
+      // Verify unified cache was called with correct parameters
+      expect(mockRepositoryCache.getCachedCommits).toHaveBeenCalledWith(
+        'https://github.com/test/repo',
+        { skip: 0, limit: 100 }
       );
+
+      // Verify metrics were recorded
       expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
         'repository_commits',
         'anonymous',
@@ -205,616 +148,145 @@ describe('RepositoryRoutes Unit Tests', () => {
       );
     });
 
-    test('should fetch and cache commits when cache miss occurs', async () => {
+    test('should validate repoUrl is required', async () => {
+      // ACT
+      const response = await request(app).get('/api/repositories/commits');
+
+      // ASSERT
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.code).toBe('VALIDATION_ERROR');
+    });
+
+    test('should handle pagination parameters', async () => {
+      mockRepositoryCache.getCachedCommits.mockResolvedValue([]);
+
+      // ACT
+      const response = await request(app).get(
+        '/api/repositories/commits?repoUrl=https://github.com/test/repo&page=3&limit=50'
+      );
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(mockRepositoryCache.getCachedCommits).toHaveBeenCalledWith(
+        'https://github.com/test/repo',
+        { skip: 100, limit: 50 } // (page-1) * limit = (3-1) * 50 = 100
+      );
+    });
+  });
+
+  describe('GET /heatmap - Commit Heatmap with Unified Cache', () => {
+    test('should return heatmap data using unified cache service', async () => {
       // ARRANGE
-      const mockCommits = [
+      const mockHeatmapData = {
+        timePeriod: 'month',
+        data: [
+          { date: '2023-01', count: 10 },
+          { date: '2023-02', count: 15 },
+        ],
+        metadata: { totalCommits: 25 },
+      };
+
+      mockRepositoryCache.getCachedAggregatedData.mockResolvedValue(
+        mockHeatmapData
+      );
+
+      // ACT
+      const response = await request(app).get(
+        '/api/repositories/heatmap?repoUrl=https://github.com/test/repo'
+      );
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('heatmapData');
+      expect(response.body.heatmapData).toEqual(mockHeatmapData);
+
+      // Verify unified cache was called
+      expect(mockRepositoryCache.getCachedAggregatedData).toHaveBeenCalledWith(
+        'https://github.com/test/repo',
         {
-          sha: 'def456',
-          message: 'New commit',
-          date: '2023-01-02T00:00:00Z',
-          authorName: 'Developer',
-          authorEmail: 'dev@example.com',
+          author: undefined,
+          authors: undefined,
+          fromDate: undefined,
+          toDate: undefined,
+        }
+      );
+    });
+
+    test('should apply filter options from query parameters', async () => {
+      mockRepositoryCache.getCachedAggregatedData.mockResolvedValue({
+        timePeriod: 'month',
+        data: [],
+        metadata: {},
+      });
+
+      // ACT
+      const response = await request(app).get(
+        '/api/repositories/heatmap?repoUrl=https://github.com/test/repo&author=john&fromDate=2023-01-01&toDate=2023-12-31'
+      );
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(mockRepositoryCache.getCachedAggregatedData).toHaveBeenCalledWith(
+        'https://github.com/test/repo',
+        {
+          author: 'john',
+          authors: undefined,
+          fromDate: '2023-01-01',
+          toDate: '2023-12-31',
+        }
+      );
+    });
+  });
+
+  describe('GET /contributors - Top Contributors with Unified Cache', () => {
+    test('should return contributors using unified cache service', async () => {
+      // ARRANGE
+      const mockContributors = [
+        {
+          login: 'user1',
+          commitCount: 50,
+          linesAdded: 1000,
+          linesDeleted: 200,
+          contributionPercentage: 60,
         },
       ];
-      const repoUrl = 'https://github.com/user/repo.git';
 
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockResolvedValue(mockCommits);
-      mockRedis.set.mockResolvedValue('OK');
+      mockRepositoryCache.getCachedContributors.mockResolvedValue(
+        mockContributors
+      );
 
       // ACT
-      const response = await request(app).post('/').send({ repoUrl });
+      const response = await request(app).get(
+        '/api/repositories/contributors?repoUrl=https://github.com/test/repo'
+      );
 
       // ASSERT
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ commits: mockCommits });
-      expect(mockWithTempRepository).toHaveBeenCalledWith(
-        repoUrl,
-        expect.any(Function)
-      );
-      expect(mockRedis.set).toHaveBeenCalledWith(
-        `commits:${repoUrl}`,
-        JSON.stringify(mockCommits),
-        'EX',
-        3600
-      );
-      expect(mockMetrics.recordEnhancedCacheOperation).toHaveBeenCalledWith(
-        'commits',
-        false,
-        expect.any(Object),
-        repoUrl,
-        mockCommits.length
-      );
-    });
+      expect(response.body).toHaveProperty('contributors');
+      expect(response.body.contributors).toEqual(mockContributors);
 
-    test('should handle repository fetch errors and record failed feature usage', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      const fetchError = new Error('Repository not found');
-
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockRejectedValue(fetchError);
-
-      // ACT
-      const response = await request(app).post('/').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(500);
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'repository_commits',
-        'anonymous',
-        false,
-        'api_call'
-      );
-    });
-
-    test('should handle different user types for metrics', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      mockMetrics.getUserType.mockReturnValue('premium');
-      mockRedis.get.mockResolvedValue(JSON.stringify([]));
-
-      // ACT
-      await request(app).post('/').send({ repoUrl });
-
-      // ASSERT
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'repository_commits',
-        'premium',
-        true,
-        'api_call'
+      expect(mockRepositoryCache.getCachedContributors).toHaveBeenCalledWith(
+        'https://github.com/test/repo',
+        {
+          author: undefined,
+          authors: undefined,
+          fromDate: undefined,
+          toDate: undefined,
+        }
       );
     });
   });
 
-  describe('POST /heatmap - Get Heatmap Data', () => {
-    test('should return cached heatmap data when cache hit occurs', async () => {
+  describe('GET /churn - Code Churn Analysis with Unified Cache', () => {
+    test('should return churn data using unified cache service', async () => {
       // ARRANGE
-      const mockHeatmapData = {
-        timePeriod: 'day',
-        data: [{ date: '2023-01-01', commits: 5 }],
-        metadata: { maxCommitCount: 5, totalCommits: 5 },
-      };
-      const repoUrl = 'https://github.com/user/repo.git';
-      const filterOptions = { author: 'testuser' };
-
-      mockRedis.get.mockResolvedValue(JSON.stringify(mockHeatmapData));
-
-      // ACT
-      const response = await request(app)
-        .post('/heatmap')
-        .send({ repoUrl, filterOptions });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ heatmapData: mockHeatmapData });
-      expect(mockRedis.get).toHaveBeenCalledWith(
-        `heatmap:${repoUrl}:${JSON.stringify(filterOptions)}`
-      );
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'heatmap_view',
-        'anonymous',
-        true,
-        'api_call'
-      );
-    });
-
-    test('should generate and cache heatmap data when cache miss occurs', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      const filterOptions = { fromDate: '2023-01-01' };
-      const mockCommits = [{ sha: 'abc123', date: '2023-01-01T12:00:00Z' }];
-      const mockHeatmapData = {
-        timePeriod: 'day',
-        data: [{ date: '2023-01-01', commits: 1 }],
-        metadata: { maxCommitCount: 1, totalCommits: 1 },
-      };
-
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockImplementation(async (url, callback) => {
-        return await callback('/tmp/repo');
-      });
-      mockGitService.getCommits.mockResolvedValue(mockCommits);
-      mockGitService.aggregateCommitsByTime.mockResolvedValue(mockHeatmapData);
-      mockRedis.set.mockResolvedValue('OK');
-
-      // ACT
-      const response = await request(app)
-        .post('/heatmap')
-        .send({ repoUrl, filterOptions });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ heatmapData: mockHeatmapData });
-      expect(mockGitService.aggregateCommitsByTime).toHaveBeenCalledWith(
-        mockCommits,
-        filterOptions
-      );
-      expect(mockRedis.set).toHaveBeenCalledWith(
-        `heatmap:${repoUrl}:${JSON.stringify(filterOptions)}`,
-        JSON.stringify(mockHeatmapData),
-        'EX',
-        3600
-      );
-    });
-
-    test('should handle aggregation errors and record failed metrics', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      const aggregationError = new Error('Aggregation failed');
-
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockRejectedValue(aggregationError);
-
-      // ACT
-      const response = await request(app).post('/heatmap').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(500);
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'heatmap_view',
-        'anonymous',
-        false,
-        'api_call'
-      );
-    });
-
-    test('should handle undefined filter options gracefully', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      const mockHeatmapData = { timePeriod: 'day', data: [], metadata: {} };
-
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockImplementation(async (url, callback) => {
-        return await callback('/tmp/repo');
-      });
-      mockGitService.getCommits.mockResolvedValue([]);
-      mockGitService.aggregateCommitsByTime.mockResolvedValue(mockHeatmapData);
-
-      // ACT
-      const response = await request(app).post('/heatmap').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(mockGitService.aggregateCommitsByTime).toHaveBeenCalledWith(
-        [],
-        undefined
-      );
-    });
-  });
-
-  describe('POST /full-data - Get Combined Data', () => {
-    test('should return cached data when both commits and heatmap are cached', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      const filterOptions = { author: 'testuser' };
-      const mockCommits = [{ sha: 'abc123', message: 'Test' }];
-      const mockHeatmapData = { timePeriod: 'day', data: [] };
-
-      mockRedis.get
-        .mockResolvedValueOnce(JSON.stringify(mockCommits))
-        .mockResolvedValueOnce(JSON.stringify(mockHeatmapData));
-
-      // ACT
-      const response = await request(app)
-        .post('/full-data')
-        .send({ repoUrl, filterOptions });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({
-        commits: mockCommits,
-        heatmapData: mockHeatmapData,
-      });
-      expect(mockRedis.get).toHaveBeenCalledWith(`commits:${repoUrl}`);
-      expect(mockRedis.get).toHaveBeenCalledWith(
-        `heatmap:${repoUrl}:${JSON.stringify(filterOptions)}`
-      );
-      expect(mockWithTempRepository).not.toHaveBeenCalled();
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'full_data_view',
-        'anonymous',
-        true,
-        'api_call'
-      );
-    });
-
-    test('should fetch and cache both data types when cache miss occurs', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      const filterOptions = { fromDate: '2023-01-01' };
-      const mockCommits = [{ sha: 'def456', message: 'New commit' }];
-      const mockHeatmapData = { timePeriod: 'day', data: [{ commits: 1 }] };
-
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockImplementation(async (url, callback) => {
-        return await callback('/tmp/repo');
-      });
-      mockGitService.getCommits.mockResolvedValue(mockCommits);
-      mockGitService.aggregateCommitsByTime.mockResolvedValue(mockHeatmapData);
-      mockRedis.set.mockResolvedValue('OK');
-
-      // ACT
-      const response = await request(app)
-        .post('/full-data')
-        .send({ repoUrl, filterOptions });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({
-        commits: mockCommits,
-        heatmapData: mockHeatmapData,
-      });
-      expect(mockRedis.set).toHaveBeenCalledWith(
-        `commits:${repoUrl}`,
-        JSON.stringify(mockCommits),
-        'EX',
-        3600
-      );
-      expect(mockRedis.set).toHaveBeenCalledWith(
-        `heatmap:${repoUrl}:${JSON.stringify(filterOptions)}`,
-        JSON.stringify(mockHeatmapData),
-        'EX',
-        3600
-      );
-      expect(mockMetrics.recordEnhancedCacheOperation).toHaveBeenCalledTimes(2);
-    });
-
-    test('should handle partial cache hits correctly', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      const mockCommits = [{ sha: 'cached', message: 'From cache' }];
-
-      // Only commits are cached, heatmap is not
-      mockRedis.get
-        .mockResolvedValueOnce(JSON.stringify(mockCommits))
-        .mockResolvedValueOnce(null);
-
-      mockWithTempRepository.mockImplementation(async (url, callback) => {
-        return await callback('/tmp/repo');
-      });
-      mockGitService.getCommits.mockResolvedValue(mockCommits);
-      mockGitService.aggregateCommitsByTime.mockResolvedValue({
-        timePeriod: 'day',
-        data: [],
-      });
-
-      // ACT
-      const response = await request(app).post('/full-data').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(mockWithTempRepository).toHaveBeenCalled();
-      expect(mockMetrics.recordEnhancedCacheOperation).toHaveBeenCalledWith(
-        'commits',
-        false,
-        expect.any(Object),
-        repoUrl,
-        mockCommits.length
-      );
-    });
-
-    test('should handle data processing errors and record failures', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      const processingError = new Error('Data processing failed');
-
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockRejectedValue(processingError);
-
-      // ACT
-      const response = await request(app).post('/full-data').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(500);
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'full_data_view',
-        'anonymous',
-        false,
-        'api_call'
-      );
-    });
-  });
-
-  describe('Cache Operations', () => {
-    test('should handle cache get failures gracefully', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      const cacheError = new Error('Cache connection failed');
-
-      mockRedis.get.mockRejectedValue(cacheError);
-      mockWithTempRepository.mockResolvedValue([]);
-
-      // ACT
-      const response = await request(app).post('/').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(mockWithTempRepository).toHaveBeenCalled();
-    });
-
-    test('should handle cache set failures without affecting response', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      const mockCommits = [{ sha: 'abc123' }];
-
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockResolvedValue(mockCommits);
-      mockRedis.set.mockRejectedValue(new Error('Cache write failed'));
-
-      // ACT
-      const response = await request(app).post('/').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ commits: mockCommits });
-    });
-
-    test('should handle corrupted cache data gracefully', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-
-      mockRedis.get.mockResolvedValue('invalid json data');
-      mockWithTempRepository.mockResolvedValue([]);
-
-      // ACT
-      const response = await request(app).post('/').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(mockWithTempRepository).toHaveBeenCalled();
-    });
-  });
-
-  describe('Metrics Recording', () => {
-    test('should record different repository size categories', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/large-repo.git';
-      const largeCommitSet = Array(5000).fill({ sha: 'abc' });
-
-      mockMetrics.getRepositorySizeCategory.mockReturnValue('large');
-      mockRedis.get.mockResolvedValue(JSON.stringify(largeCommitSet));
-
-      // ACT
-      await request(app).post('/').send({ repoUrl });
-
-      // ASSERT
-      expect(mockMetrics.recordDataFreshness).toHaveBeenCalledWith(
-        'commits',
-        0,
-        'hybrid',
-        'large'
-      );
-    });
-
-    test('should record authenticated user metrics correctly', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-
-      mockMetrics.getUserType.mockReturnValue('authenticated');
-      mockRedis.get.mockResolvedValue(JSON.stringify([]));
-
-      // ACT
-      await request(app).post('/heatmap').send({ repoUrl });
-
-      // ASSERT
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'heatmap_view',
-        'authenticated',
-        true,
-        'api_call'
-      );
-    });
-
-    test('should handle metrics recording failures silently', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-
-      mockMetrics.recordFeatureUsage.mockRejectedValue(
-        new Error('Metrics service down')
-      );
-      mockRedis.get.mockResolvedValue(JSON.stringify([]));
-
-      // ACT
-      const response = await request(app).post('/').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      // Metrics failure should not affect the main operation
-    });
-  });
-
-  describe('Error Boundary Tests', () => {
-    test('should handle unexpected errors in middleware chain', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-
-      // Force an unexpected error in the middleware chain
-      mockMetrics.getUserType.mockImplementation(() => {
-        throw new Error('Unexpected middleware error');
-      });
-
-      // ACT
-      const response = await request(app).post('/').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(500);
-    });
-
-    test('should handle empty response data gracefully', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockResolvedValue(undefined);
-
-      // ACT
-      const response = await request(app).post('/').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ commits: undefined });
-    });
-  });
-
-  describe('POST /churn - Get Code Churn Analysis', () => {
-    test('should return cached churn data when cache hit occurs', async () => {
-      // ARRANGE
-      const mockChurnData = {
-        files: [
-          {
-            path: 'src/api/auth.ts',
-            changes: 47,
-            risk: 'high',
-            extension: '.ts',
-            firstChange: '2023-01-01T12:00:00Z',
-            lastChange: '2023-12-31T12:00:00Z',
-            authorCount: 5,
-          },
-          {
-            path: 'src/components/Dashboard.tsx',
-            changes: 38,
-            risk: 'high',
-            extension: '.tsx',
-            firstChange: '2023-02-01T12:00:00Z',
-            lastChange: '2023-12-15T12:00:00Z',
-            authorCount: 3,
-          },
-        ],
-        metadata: {
-          totalFiles: 2,
-          totalChanges: 85,
-          riskThresholds: { high: 30, medium: 15, low: 0 },
-          dateRange: { from: '2023-01-01', to: '2023-12-31' },
-          highRiskCount: 2,
-          mediumRiskCount: 0,
-          lowRiskCount: 0,
-          analyzedAt: '2024-01-01T00:00:00Z',
-          processingTime: 150,
-        },
-      };
-      const repoUrl = 'https://github.com/user/repo.git';
-
-      mockRedis.get.mockResolvedValue(JSON.stringify(mockChurnData));
-
-      // ACT
-      const response = await request(app).post('/churn').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body.churnData).toEqual({
-        ...mockChurnData,
-        metadata: { ...mockChurnData.metadata, fromCache: true },
-      });
-      expect(mockRedis.get).toHaveBeenCalledWith(`churn:${repoUrl}:{}`);
-      expect(mockWithTempRepository).not.toHaveBeenCalled();
-      expect(mockMetrics.recordEnhancedCacheOperation).toHaveBeenCalledWith(
-        'churn',
-        true,
-        expect.any(Object),
-        repoUrl,
-        mockChurnData.files.length
-      );
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'code_churn_view',
-        'anonymous',
-        true,
-        'api_call'
-      );
-    });
-
-    test('should analyze and cache churn data when cache miss occurs', async () => {
-      // ARRANGE
-      const mockChurnData = {
-        files: [
-          {
-            path: 'src/utils/helpers.ts',
-            changes: 32,
-            risk: 'high',
-            extension: '.ts',
-            firstChange: '2023-03-01T12:00:00Z',
-            lastChange: '2023-11-20T12:00:00Z',
-            authorCount: 8,
-          },
-        ],
-        metadata: {
-          totalFiles: 1,
-          totalChanges: 32,
-          riskThresholds: { high: 30, medium: 15, low: 0 },
-          dateRange: { from: '2023-01-01', to: '2023-12-31' },
-          highRiskCount: 1,
-          mediumRiskCount: 0,
-          lowRiskCount: 0,
-          analyzedAt: '2024-01-01T00:00:00Z',
-          processingTime: 200,
-        },
-      };
-      const repoUrl = 'https://github.com/user/repo.git';
-
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockResolvedValue(mockChurnData);
-      mockRedis.set.mockResolvedValue('OK');
-
-      // ACT
-      const response = await request(app).post('/churn').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ churnData: mockChurnData });
-      expect(mockWithTempRepository).toHaveBeenCalledWith(
-        repoUrl,
-        expect.any(Function)
-      );
-      expect(mockRedis.set).toHaveBeenCalledWith(
-        `churn:${repoUrl}:{}`,
-        JSON.stringify(mockChurnData),
-        'EX',
-        3600
-      );
-      expect(mockMetrics.recordEnhancedCacheOperation).toHaveBeenCalledWith(
-        'churn',
-        false,
-        expect.any(Object),
-        repoUrl,
-        mockChurnData.files.length
-      );
-    });
-
-    test('should apply filter options to churn analysis', async () => {
-      // ARRANGE
-      const filterOptions = {
-        since: '2023-01-01',
-        until: '2023-12-31',
-        extensions: ['ts', 'tsx'],
-        minChanges: 10,
-      };
       const mockChurnData = {
         files: [
           {
             path: 'src/index.ts',
             changes: 25,
-            risk: 'medium',
-            extension: '.ts',
+            risk: 'high',
           },
         ],
         metadata: {
@@ -822,527 +294,50 @@ describe('RepositoryRoutes Unit Tests', () => {
           totalChanges: 25,
           riskThresholds: { high: 30, medium: 15, low: 0 },
           dateRange: { from: '2023-01-01', to: '2023-12-31' },
-          highRiskCount: 0,
-          mediumRiskCount: 1,
-          lowRiskCount: 0,
-          analyzedAt: '2024-01-01T00:00:00Z',
-          filterOptions,
-        },
-      };
-      const repoUrl = 'https://github.com/user/repo.git';
-
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockImplementation(async (url, callback) => {
-        return await callback('/tmp/repo');
-      });
-      mockGitService.analyzeCodeChurn.mockResolvedValue(mockChurnData);
-      mockRedis.set.mockResolvedValue('OK');
-
-      // ACT
-      const response = await request(app)
-        .post('/churn')
-        .send({ repoUrl, filterOptions });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ churnData: mockChurnData });
-      expect(mockGitService.analyzeCodeChurn).toHaveBeenCalledWith(
-        '/tmp/repo',
-        filterOptions
-      );
-      expect(mockRedis.set).toHaveBeenCalledWith(
-        `churn:${repoUrl}:${JSON.stringify(filterOptions)}`,
-        JSON.stringify(mockChurnData),
-        'EX',
-        3600
-      );
-    });
-
-    test('should handle analysis errors and record failed feature usage', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      const analysisError = new Error('Churn analysis failed');
-
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockRejectedValue(analysisError);
-
-      // ACT
-      const response = await request(app).post('/churn').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(500);
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'code_churn_view',
-        'anonymous',
-        false,
-        'api_call'
-      );
-    });
-
-    test('should handle different user types for churn metrics', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      mockMetrics.getUserType.mockReturnValue('premium');
-      mockRedis.get.mockResolvedValue(
-        JSON.stringify({ files: [], metadata: {} })
-      );
-
-      // ACT
-      await request(app).post('/churn').send({ repoUrl });
-
-      // ASSERT
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'code_churn_view',
-        'premium',
-        true,
-        'api_call'
-      );
-    });
-
-    test('should handle cache failures gracefully and fetch from repository', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      const cacheError = new Error('Cache connection failed');
-      const mockChurnData = { files: [], metadata: {} };
-
-      mockRedis.get.mockRejectedValue(cacheError);
-      mockWithTempRepository.mockResolvedValue(mockChurnData);
-
-      // ACT
-      const response = await request(app).post('/churn').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(mockWithTempRepository).toHaveBeenCalled();
-    });
-
-    test('should handle cache set failures without affecting response', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/repo.git';
-      const mockChurnData = {
-        files: [{ path: 'test.ts', changes: 5, risk: 'low' }],
-        metadata: { totalFiles: 1 },
-      };
-
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockResolvedValue(mockChurnData);
-      mockRedis.set.mockRejectedValue(new Error('Cache write failed'));
-
-      // ACT
-      const response = await request(app).post('/churn').send({ repoUrl });
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ churnData: mockChurnData });
-    });
-
-    test('should handle empty churn results', async () => {
-      // ARRANGE
-      const repoUrl = 'https://github.com/user/empty-repo.git';
-      const emptyChurnData = {
-        files: [],
-        metadata: {
-          totalFiles: 0,
-          totalChanges: 0,
-          riskThresholds: { high: 30, medium: 15, low: 0 },
-          dateRange: { from: '2023-01-01', to: '2023-12-31' },
-          highRiskCount: 0,
+          highRiskCount: 1,
           mediumRiskCount: 0,
           lowRiskCount: 0,
-          analyzedAt: '2024-01-01T00:00:00Z',
+          analyzedAt: '2023-12-31T23:59:59Z',
         },
       };
 
-      mockRedis.get.mockResolvedValue(null);
-      mockWithTempRepository.mockResolvedValue(emptyChurnData);
+      mockRepositoryCache.getCachedChurnData.mockResolvedValue(mockChurnData);
 
       // ACT
-      const response = await request(app).post('/churn').send({ repoUrl });
+      const response = await request(app).get(
+        '/api/repositories/churn?repoUrl=https://github.com/test/repo&minChanges=10'
+      );
 
       // ASSERT
       expect(response.status).toBe(200);
-      expect(response.body.churnData.files).toHaveLength(0);
-      expect(response.body.churnData.metadata.totalFiles).toBe(0);
+      expect(response.body).toHaveProperty('churnData');
+      expect(response.body.churnData).toEqual(mockChurnData);
+
+      expect(mockRepositoryCache.getCachedChurnData).toHaveBeenCalledWith(
+        'https://github.com/test/repo',
+        {
+          since: undefined,
+          until: undefined,
+          minChanges: 10,
+          extensions: undefined,
+        }
+      );
     });
   });
 
-  describe('GET /summary - Get Repository Summary Statistics', () => {
-    beforeEach(async () => {
-      vi.clearAllMocks();
-      mockMetrics.getUserType.mockReturnValue('anonymous');
-    });
-
-    test('should return repository summary when service succeeds', async () => {
+  describe('GET /summary - Repository Summary with Unified Cache', () => {
+    test('should return repository summary using unified cache service', async () => {
       // ARRANGE
       const mockSummary = {
         repository: {
-          name: 'Hello-World',
-          owner: 'octocat',
-          url: 'https://github.com/octocat/Hello-World.git',
-          platform: 'github' as const,
+          name: 'test-repo',
+          owner: 'test-owner',
+          url: 'https://github.com/test/repo',
+          platform: 'github',
         },
         created: {
-          date: '2011-03-22T00:00:00.000Z',
-          source: 'first-commit' as const,
-        },
-        age: {
-          years: 13,
-          months: 8,
-          formatted: '13.7y',
-        },
-        lastCommit: {
-          date: '2025-11-15T10:30:00.000Z',
-          relativeTime: '4 days ago',
-          sha: 'abc123',
-          author: 'Test Author',
-        },
-        stats: {
-          totalCommits: 100,
-          contributors: 5,
-          status: 'active' as const,
-        },
-        metadata: {
-          cached: false,
-          dataSource: 'git-sparse-clone' as const,
-          createdDateAccuracy: 'approximate' as const,
-          bandwidthSaved: '95-99% vs full clone',
-          lastUpdated: '2025-11-19T10:00:00.000Z',
-        },
-      };
-
-      mockRepositorySummaryService.getRepositorySummary.mockResolvedValue(
-        mockSummary
-      );
-
-      // ACT
-      const response = await request(app).get(
-        '/summary?repoUrl=https://github.com/octocat/Hello-World.git'
-      );
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ summary: mockSummary });
-      expect(
-        mockRepositorySummaryService.getRepositorySummary
-      ).toHaveBeenCalledWith('https://github.com/octocat/Hello-World.git');
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'repository_summary',
-        'anonymous',
-        true,
-        'api_call'
-      );
-    });
-
-    test('should return 400 when repoUrl query parameter is missing', async () => {
-      // ACT
-      const response = await request(app).get('/summary');
-
-      // ASSERT
-      expect(response.status).toBe(400);
-      expect(
-        mockRepositorySummaryService.getRepositorySummary
-      ).not.toHaveBeenCalled();
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'repository_summary',
-        'anonymous',
-        false,
-        'api_call'
-      );
-    });
-
-    test('should return 400 when repoUrl is not a string', async () => {
-      // ACT
-      const response = await request(app).get('/summary?repoUrl=');
-
-      // ASSERT
-      expect(response.status).toBe(400);
-      expect(
-        mockRepositorySummaryService.getRepositorySummary
-      ).not.toHaveBeenCalled();
-    });
-
-    test('should return 400 when repoUrl has invalid protocol', async () => {
-      // ACT
-      const response = await request(app).get(
-        '/summary?repoUrl=ftp://invalid.com/repo.git'
-      );
-
-      // ASSERT
-      expect(response.status).toBe(400);
-      expect(
-        mockRepositorySummaryService.getRepositorySummary
-      ).not.toHaveBeenCalled();
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'repository_summary',
-        'anonymous',
-        false,
-        'api_call'
-      );
-    });
-
-    test('should handle service errors and return 500', async () => {
-      // ARRANGE
-      const serviceError = new Error('Repository not found');
-      mockRepositorySummaryService.getRepositorySummary.mockRejectedValue(
-        serviceError
-      );
-
-      // ACT
-      const response = await request(app).get(
-        '/summary?repoUrl=https://github.com/test/notfound.git'
-      );
-
-      // ASSERT
-      expect(response.status).toBe(500);
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'repository_summary',
-        'anonymous',
-        false,
-        'api_call'
-      );
-    });
-
-    test('should record cache hit when summary is cached', async () => {
-      // ARRANGE
-      const cachedSummary = {
-        repository: {
-          name: 'cached-repo',
-          owner: 'test',
-          url: 'https://github.com/test/cached-repo.git',
-          platform: 'github' as const,
-        },
-        created: {
-          date: '2020-01-01T00:00:00.000Z',
-          source: 'first-commit' as const,
-        },
-        age: {
-          years: 5,
-          months: 0,
-          formatted: '5.0y',
-        },
-        lastCommit: {
-          date: '2025-11-19T00:00:00.000Z',
-          relativeTime: '1 day ago',
-          sha: 'def456',
-          author: 'Cached Author',
-        },
-        stats: {
-          totalCommits: 500,
-          contributors: 10,
-          status: 'active' as const,
-        },
-        metadata: {
-          cached: true,
-          dataSource: 'cache' as const,
-          createdDateAccuracy: 'approximate' as const,
-          bandwidthSaved: '95-99% vs full clone',
-          lastUpdated: '2025-11-18T10:00:00.000Z',
-        },
-      };
-
-      mockRepositorySummaryService.getRepositorySummary.mockResolvedValue(
-        cachedSummary
-      );
-
-      // ACT
-      const response = await request(app).get(
-        '/summary?repoUrl=https://github.com/test/cached-repo.git'
-      );
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body.summary.metadata.cached).toBe(true);
-      expect(mockMetrics.recordEnhancedCacheOperation).toHaveBeenCalledWith(
-        'summary',
-        true,
-        expect.any(Object),
-        'https://github.com/test/cached-repo.git'
-      );
-      expect(mockMetrics.recordDataFreshness).toHaveBeenCalledWith(
-        'summary',
-        0,
-        'hybrid'
-      );
-    });
-
-    test('should record cache miss when summary is fetched fresh', async () => {
-      // ARRANGE
-      const freshSummary = {
-        repository: {
-          name: 'fresh-repo',
-          owner: 'test',
-          url: 'https://github.com/test/fresh-repo.git',
-          platform: 'github' as const,
-        },
-        created: {
-          date: '2023-01-01T00:00:00.000Z',
-          source: 'first-commit' as const,
-        },
-        age: {
-          years: 2,
-          months: 0,
-          formatted: '2.0y',
-        },
-        lastCommit: {
-          date: '2025-11-19T10:00:00.000Z',
-          relativeTime: 'just now',
-          sha: 'ghi789',
-          author: 'Fresh Author',
-        },
-        stats: {
-          totalCommits: 250,
-          contributors: 3,
-          status: 'active' as const,
-        },
-        metadata: {
-          cached: false,
-          dataSource: 'git-sparse-clone' as const,
-          createdDateAccuracy: 'approximate' as const,
-          bandwidthSaved: '95-99% vs full clone',
-          lastUpdated: '2025-11-19T10:00:00.000Z',
-        },
-      };
-
-      mockRepositorySummaryService.getRepositorySummary.mockResolvedValue(
-        freshSummary
-      );
-
-      // ACT
-      const response = await request(app).get(
-        '/summary?repoUrl=https://github.com/test/fresh-repo.git'
-      );
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body.summary.metadata.cached).toBe(false);
-      expect(mockMetrics.recordEnhancedCacheOperation).toHaveBeenCalledWith(
-        'summary',
-        false,
-        expect.any(Object),
-        'https://github.com/test/fresh-repo.git'
-      );
-      expect(mockMetrics.recordDataFreshness).not.toHaveBeenCalled();
-    });
-
-    test('should handle different user types for summary metrics', async () => {
-      // ARRANGE
-      mockMetrics.getUserType.mockReturnValue('premium');
-      const mockSummary = {
-        repository: {
-          name: 'test',
-          owner: 'test',
-          url: 'https://github.com/test/test.git',
-          platform: 'github' as const,
-        },
-        created: {
-          date: '2020-01-01T00:00:00.000Z',
-          source: 'first-commit' as const,
-        },
-        age: { years: 5, months: 0, formatted: '5.0y' },
-        lastCommit: {
-          date: '2025-11-19T00:00:00.000Z',
-          relativeTime: 'now',
-          sha: 'abc',
-          author: 'Test',
-        },
-        stats: {
-          totalCommits: 100,
-          contributors: 5,
-          status: 'active' as const,
-        },
-        metadata: {
-          cached: false,
-          dataSource: 'git-sparse-clone' as const,
-          createdDateAccuracy: 'approximate' as const,
-          bandwidthSaved: '95-99% vs full clone',
-          lastUpdated: '2025-11-19T00:00:00.000Z',
-        },
-      };
-
-      mockRepositorySummaryService.getRepositorySummary.mockResolvedValue(
-        mockSummary
-      );
-
-      // ACT
-      await request(app).get(
-        '/summary?repoUrl=https://github.com/test/test.git'
-      );
-
-      // ASSERT
-      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
-        'repository_summary',
-        'premium',
-        true,
-        'api_call'
-      );
-    });
-
-    test('should handle empty repository (status: empty)', async () => {
-      // ARRANGE
-      const emptySummary = {
-        repository: {
-          name: 'empty-repo',
-          owner: 'test',
-          url: 'https://github.com/test/empty-repo.git',
-          platform: 'github' as const,
-        },
-        created: {
-          date: '',
-          source: 'first-commit' as const,
-        },
-        age: {
-          years: 0,
-          months: 0,
-          formatted: '0.0y',
-        },
-        lastCommit: {
-          date: '',
-          relativeTime: 'no commits',
-          sha: '',
-          author: '',
-        },
-        stats: {
-          totalCommits: 0,
-          contributors: 0,
-          status: 'empty' as const,
-        },
-        metadata: {
-          cached: false,
-          dataSource: 'git-sparse-clone' as const,
-          createdDateAccuracy: 'approximate' as const,
-          bandwidthSaved: '95-99% vs full clone',
-          lastUpdated: '2025-11-19T10:00:00.000Z',
-        },
-      };
-
-      mockRepositorySummaryService.getRepositorySummary.mockResolvedValue(
-        emptySummary
-      );
-
-      // ACT
-      const response = await request(app).get(
-        '/summary?repoUrl=https://github.com/test/empty-repo.git'
-      );
-
-      // ASSERT
-      expect(response.status).toBe(200);
-      expect(response.body.summary.stats.status).toBe('empty');
-      expect(response.body.summary.stats.totalCommits).toBe(0);
-      expect(response.body.summary.lastCommit.relativeTime).toBe('no commits');
-    });
-
-    test('should handle different repository platforms (GitLab, Bitbucket)', async () => {
-      // ARRANGE - GitLab
-      const gitlabSummary = {
-        repository: {
-          name: 'gitlab-repo',
-          owner: 'test',
-          url: 'https://gitlab.com/test/gitlab-repo.git',
-          platform: 'gitlab' as const,
-        },
-        created: {
-          date: '2021-01-01T00:00:00.000Z',
-          source: 'first-commit' as const,
+          date: '2020-01-01T00:00:00Z',
+          source: 'first-commit',
         },
         age: {
           years: 4,
@@ -1350,37 +345,95 @@ describe('RepositoryRoutes Unit Tests', () => {
           formatted: '4.0y',
         },
         lastCommit: {
-          date: '2025-11-01T00:00:00.000Z',
-          relativeTime: '18 days ago',
-          sha: 'gitlab123',
-          author: 'GitLab User',
+          date: '2023-12-31T23:59:59Z',
+          relativeTime: '1 day ago',
+          sha: 'xyz789',
+          author: 'Test User',
         },
         stats: {
-          totalCommits: 300,
-          contributors: 7,
-          status: 'inactive' as const,
+          totalCommits: 500,
+          contributors: 10,
+          status: 'active',
         },
         metadata: {
-          cached: false,
-          dataSource: 'git-sparse-clone' as const,
-          createdDateAccuracy: 'approximate' as const,
-          bandwidthSaved: '95-99% vs full clone',
-          lastUpdated: '2025-11-19T10:00:00.000Z',
+          cached: true,
+          dataSource: 'cache',
         },
       };
 
-      mockRepositorySummaryService.getRepositorySummary.mockResolvedValue(
-        gitlabSummary
-      );
+      mockRepositoryCache.getCachedSummary.mockResolvedValue(mockSummary);
 
       // ACT
       const response = await request(app).get(
-        '/summary?repoUrl=https://gitlab.com/test/gitlab-repo.git'
+        '/api/repositories/summary?repoUrl=https://github.com/test/repo'
       );
 
       // ASSERT
       expect(response.status).toBe(200);
-      expect(response.body.summary.repository.platform).toBe('gitlab');
+      expect(response.body).toHaveProperty('summary');
+      expect(response.body.summary).toEqual(mockSummary);
+
+      expect(mockRepositoryCache.getCachedSummary).toHaveBeenCalledWith(
+        'https://github.com/test/repo'
+      );
+    });
+  });
+
+  describe('GET /full-data - Combined Data with Unified Cache', () => {
+    test('should return both commits and heatmap using parallel cache calls', async () => {
+      // ARRANGE
+      const mockCommits = [{ sha: 'abc123', message: 'Test' }];
+      const mockHeatmapData = {
+        timePeriod: 'month',
+        data: [{ date: '2023-01', count: 10 }],
+        metadata: {},
+      };
+
+      mockRepositoryCache.getCachedCommits.mockResolvedValue(mockCommits);
+      mockRepositoryCache.getCachedAggregatedData.mockResolvedValue(
+        mockHeatmapData
+      );
+
+      // ACT
+      const response = await request(app).get(
+        '/api/repositories/full-data?repoUrl=https://github.com/test/repo&page=1&limit=100'
+      );
+
+      // ASSERT
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('commits');
+      expect(response.body).toHaveProperty('heatmapData');
+      expect(response.body.commits).toEqual(mockCommits);
+      expect(response.body.heatmapData).toEqual(mockHeatmapData);
+
+      // Verify both cache services were called
+      expect(mockRepositoryCache.getCachedCommits).toHaveBeenCalledTimes(1);
+      expect(mockRepositoryCache.getCachedAggregatedData).toHaveBeenCalledTimes(
+        1
+      );
+    });
+  });
+
+  describe('Error Handling', () => {
+    test('should handle cache service errors gracefully', async () => {
+      // ARRANGE
+      mockRepositoryCache.getCachedCommits.mockRejectedValue(
+        new Error('Cache service error')
+      );
+
+      // ACT
+      const response = await request(app).get(
+        '/api/repositories/commits?repoUrl=https://github.com/test/repo'
+      );
+
+      // ASSERT
+      expect(response.status).toBe(500);
+      expect(mockMetrics.recordFeatureUsage).toHaveBeenCalledWith(
+        'repository_commits',
+        'anonymous',
+        false,
+        'api_call'
+      );
     });
   });
 });
