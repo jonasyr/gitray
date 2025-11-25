@@ -9,6 +9,15 @@ import {
   Sparkles,
   BarChart3,
   DollarSign,
+  Flame,
+  Zap,
+  Target,
+  Trophy,
+  Star,
+  Rocket,
+  Crown,
+  Medal,
+  Award,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
@@ -72,6 +81,81 @@ const formatAge = (years: number, months: number): string => {
   }
 
   return parts.length > 0 ? parts.join(' ') : '0 months';
+};
+
+// Gamification: Get motivational message and icon based on streak length
+const getStreakMotivation = (streak: number) => {
+  if (streak === 0) {
+    return {
+      message: 'Start your journey today!',
+      icon: Target,
+      color: 'text-muted-foreground',
+      bgColor: 'bg-muted/30',
+    };
+  } else if (streak === 1) {
+    return {
+      message: 'Great start! Keep going!',
+      icon: Zap,
+      color: 'text-blue-400',
+      bgColor: 'bg-blue-500/10',
+    };
+  } else if (streak >= 2 && streak <= 4) {
+    return {
+      message: 'Building momentum!',
+      icon: TrendingUp,
+      color: 'text-cyan-400',
+      bgColor: 'bg-cyan-500/10',
+    };
+  } else if (streak >= 5 && streak <= 9) {
+    return {
+      message: "You're on fire! 🔥",
+      icon: Flame,
+      color: 'text-orange-400',
+      bgColor: 'bg-orange-500/10',
+    };
+  } else if (streak >= 10 && streak <= 20) {
+    return {
+      message: 'Impressive dedication!',
+      icon: Star,
+      color: 'text-yellow-400',
+      bgColor: 'bg-yellow-500/10',
+    };
+  } else if (streak >= 21 && streak <= 29) {
+    return {
+      message: 'Unstoppable force!',
+      icon: Rocket,
+      color: 'text-purple-400',
+      bgColor: 'bg-purple-500/10',
+    };
+  } else if (streak >= 30 && streak <= 59) {
+    return {
+      message: 'Achievement unlocked!',
+      icon: Trophy,
+      color: 'text-amber-400',
+      bgColor: 'bg-amber-500/10',
+    };
+  } else if (streak >= 60 && streak <= 99) {
+    return {
+      message: 'Legendary streak!',
+      icon: Medal,
+      color: 'text-red-400',
+      bgColor: 'bg-red-500/10',
+    };
+  } else if (streak >= 100 && streak <= 364) {
+    return {
+      message: 'Hall of Fame!',
+      icon: Crown,
+      color: 'text-yellow-300',
+      bgColor: 'bg-yellow-500/20',
+    };
+  } else {
+    return {
+      message: 'Absolute Legend!',
+      icon: Award,
+      color: 'text-pink-400',
+      bgColor: 'bg-pink-500/20',
+    };
+  }
 };
 
 export function DashboardPage({
@@ -552,14 +636,36 @@ export function DashboardPage({
                   </Card>
                   <Card className="bg-muted/50">
                     <CardContent className="pt-6">
-                      <p className="text-sm text-muted-foreground mb-1">
-                        Current Streak
-                      </p>
-                      <p className="text-xl font-semibold">
+                      <div className="flex items-start justify-between mb-2">
+                        <p className="text-sm text-muted-foreground">
+                          Current Streak
+                        </p>
+                        {(() => {
+                          const motivation = getStreakMotivation(
+                            peakActivity.currentStreak
+                          );
+                          const MotivationIcon = motivation.icon;
+                          return (
+                            <div
+                              className={`rounded-full p-1.5 ${motivation.bgColor}`}
+                            >
+                              <MotivationIcon
+                                className={`h-4 w-4 ${motivation.color}`}
+                              />
+                            </div>
+                          );
+                        })()}
+                      </div>
+                      <p className="text-xl font-semibold mb-1">
                         {peakActivity.currentStreak} days
                       </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Keep it up!
+                      <p
+                        className={`text-xs font-medium ${getStreakMotivation(peakActivity.currentStreak).color}`}
+                      >
+                        {
+                          getStreakMotivation(peakActivity.currentStreak)
+                            .message
+                        }
                       </p>
                     </CardContent>
                   </Card>
