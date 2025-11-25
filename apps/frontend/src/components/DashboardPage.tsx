@@ -275,7 +275,7 @@ export function DashboardPage({
     status: summary?.stats.status ?? 'unknown',
   };
   return (
-    <div className="container px-4 md:px-8 py-6 md:py-8 space-y-6 md:space-y-8">
+    <div className="container mx-auto px-4 md:px-6 lg:px-8 py-6 md:py-8 space-y-6 md:space-y-8 max-w-7xl">
       <div className="flex flex-col gap-4">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 md:h-12 md:w-12 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center flex-shrink-0">
