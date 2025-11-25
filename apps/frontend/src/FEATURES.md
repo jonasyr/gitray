@@ -212,7 +212,6 @@ All features are populated with realistic mockup data:
 ## Technical Implementation
 
 ### Components Created
-- `ContributionRanking.tsx` - Leaderboard with detailed contributor stats
 - `CodeChurnChart.tsx` - Bug hotspot analysis with risk visualization
 - `FileTypeList.tsx` - Comprehensive file categorization
 - `GraphViewTimeline.tsx` - Interactive branch and commit timeline

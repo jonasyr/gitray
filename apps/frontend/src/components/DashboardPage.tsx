@@ -25,7 +25,6 @@ import { Alert, AlertDescription } from './ui/alert';
 import { CommitHeatmap } from './CommitHeatmap';
 import { FileDistributionChart } from './FileDistributionChart';
 import { ActivityChart } from './ActivityChart';
-import { ContributionRanking } from './ContributionRanking';
 import { CodeChurnChart } from './CodeChurnChart';
 import { FileTypeList } from './FileTypeList';
 import { GraphViewTimeline } from './GraphViewTimeline';
@@ -340,10 +339,10 @@ export function DashboardPage({
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
-            className="grid gap-4 md:gap-6 md:grid-cols-2 lg:grid-cols-3"
+            className="grid gap-4 md:gap-6 md:grid-cols-3"
           >
             {/* Repo Summary Card */}
-            <Card className="md:col-span-2 lg:row-span-2 hover:shadow-lg transition-shadow">
+            <Card className="md:col-span-2 hover:shadow-lg transition-shadow">
               <CardHeader>
                 <CardTitle className="text-lg md:text-xl">
                   Repository Summary
@@ -443,8 +442,19 @@ export function DashboardPage({
               </CardContent>
             </Card>
 
+            {/* Activity Snapshot Card */}
+            <Card className="md:col-span-2 hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle>Activity Snapshot</CardTitle>
+                <CardDescription>Commits over the last 30 days</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ActivityChart commits={commits} />
+              </CardContent>
+            </Card>
+
             {/* File Distribution Card */}
-            <Card className="md:col-span-2 lg:col-span-1">
+            <Card className="hover:shadow-lg transition-shadow">
               <CardHeader>
                 <CardTitle>File Distribution</CardTitle>
                 <CardDescription>Languages by percentage</CardDescription>
@@ -461,25 +471,6 @@ export function DashboardPage({
                 </div>
               </CardContent>
             </Card>
-
-            {/* Activity Snapshot Card */}
-            <Card className="md:col-span-2">
-              <CardHeader>
-                <CardTitle>Activity Snapshot</CardTitle>
-                <CardDescription>Commits over the last 30 days</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ActivityChart commits={commits} />
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.1 }}
-          >
-            <ContributionRanking />
           </motion.div>
         </TabsContent>
 
