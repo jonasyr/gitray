@@ -48,12 +48,15 @@ const newsItems = [
 export function NewsDrawer({ open, onClose }: NewsDrawerProps) {
   return (
     <Sheet open={open} onOpenChange={onClose}>
-      <SheetContent side="right" className="w-full sm:max-w-md p-6">
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-md p-6 flex flex-col"
+      >
         <SheetHeader>
           <SheetTitle>What's New</SheetTitle>
         </SheetHeader>
 
-        <div className="mt-6 space-y-6">
+        <div className="mt-6 space-y-6 overflow-y-auto flex-1 pr-2">
           {newsItems.map((item, index) => (
             <div
               key={index}
