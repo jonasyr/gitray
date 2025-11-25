@@ -349,3 +349,4 @@ apps/backend/logs/
 
 # VS Code MCP configuration
 .vscode/mcp.json
+.playwright-mcp/
