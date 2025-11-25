@@ -335,3 +335,4 @@ apps/backend/logs/
 .claude*
 .mcp.json
 .serena
+.github/instructions/sonarqube_mcp.instructions.md
