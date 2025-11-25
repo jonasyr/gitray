@@ -25,11 +25,11 @@ function convertCommitsToHeatmapData(
     commitsByDate.set(dateStr, (commitsByDate.get(dateStr) || 0) + 1);
   });
 
-  // Generate data for last 365 days, filling gaps with 0
+  // Generate data for last 365 days (52 weeks), filling gaps with 0
   const data = [];
   const today = new Date();
 
-  for (let i = 365; i >= 0; i--) {
+  for (let i = 364; i >= 0; i--) {
     const date = new Date(today);
     date.setDate(date.getDate() - i);
     const dateStr = date.toISOString().split('T')[0];
@@ -142,31 +142,42 @@ export function CommitHeatmap({ commits }: CommitHeatmapProps) {
 
           <TooltipProvider>
             <div className="flex gap-1">
-              {weeks.map((week, weekIndex) => (
-                <div key={weekIndex} className="flex flex-col gap-1">
-                  {weekIndex % 4 === 0 && (
-                    <div className="h-3 text-xs text-muted-foreground leading-3">
-                      {months[new Date(week[0].date).getMonth()]}
-                    </div>
-                  )}
-                  {weekIndex % 4 !== 0 && <div className="h-3" />}
-                  {week.map((day) => (
-                    <Tooltip key={day.date}>
-                      <TooltipTrigger asChild>
-                        <div
-                          className={`h-3 w-3 rounded-sm ${getColor(day.count)} transition-all hover:ring-2 hover:ring-primary cursor-pointer`}
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p className="text-xs">
-                          {day.count} {day.count === 1 ? 'commit' : 'commits'}{' '}
-                          on {new Date(day.date).toLocaleDateString()}
-                        </p>
-                      </TooltipContent>
-                    </Tooltip>
-                  ))}
-                </div>
-              ))}
+              {weeks.map((week, weekIndex) => {
+                // Check if this week contains the first day of a new month
+                const currentMonth = new Date(week[0].date).getMonth();
+                const previousMonth =
+                  weekIndex > 0
+                    ? new Date(weeks[weekIndex - 1][0].date).getMonth()
+                    : -1;
+                const isNewMonth = currentMonth !== previousMonth;
+
+                return (
+                  <div key={weekIndex} className="flex flex-col gap-1">
+                    {isNewMonth ? (
+                      <div className="h-3 text-xs text-muted-foreground leading-3">
+                        {months[currentMonth]}
+                      </div>
+                    ) : (
+                      <div className="h-3" />
+                    )}
+                    {week.map((day) => (
+                      <Tooltip key={day.date}>
+                        <TooltipTrigger asChild>
+                          <div
+                            className={`h-3 w-3 rounded-sm ${getColor(day.count)} transition-all hover:ring-2 hover:ring-primary cursor-pointer`}
+                          />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p className="text-xs">
+                            {day.count} {day.count === 1 ? 'commit' : 'commits'}{' '}
+                            on {new Date(day.date).toLocaleDateString()}
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    ))}
+                  </div>
+                );
+              })}
             </div>
           </TooltipProvider>
         </div>
