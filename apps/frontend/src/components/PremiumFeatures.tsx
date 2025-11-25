@@ -330,7 +330,7 @@ export function PremiumFeatures({
   return (
     <div className="space-y-6">
       <Tabs defaultValue="features" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-1">
+        <TabsList>
           <TabsTrigger value="features">Premium Features</TabsTrigger>
         </TabsList>
 
