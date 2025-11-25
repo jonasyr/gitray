@@ -174,6 +174,7 @@ export function CodeChurnChart({ churnData }: CodeChurnChartProps) {
                     tickLine={false}
                   />
                   <Tooltip
+                    cursor={{ height: 17 }}
                     contentStyle={{
                       backgroundColor: 'hsl(var(--background))',
                       border: '1px solid hsl(var(--border))',
