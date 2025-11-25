@@ -1564,6 +1564,12 @@ export class RepositoryCacheManager {
     repoUrl: string,
     filterOptions?: CommitFilterOptions
   ): Promise<CommitHeatmapData> {
+    logger.info('getCachedAggregatedData called', {
+      repoUrl,
+      filterOptions,
+      hasFilters: !!filterOptions && Object.keys(filterOptions).length > 0,
+    });
+
     // FIX: Use withOrderedLocks to prevent deadlock with getOrParseCommits
     return withOrderedLocks(this.getAggregatedLocks(repoUrl), async () => {
       const startTime = Date.now();
@@ -1573,7 +1579,25 @@ export class RepositoryCacheManager {
         repoUrl,
         filterOptions
       );
+      logger.info('Generated aggregated cache key', {
+        repoUrl,
+        aggregatedKey,
+        filterOptions,
+      });
       const cachedData = await this.aggregatedDataCache.get(aggregatedKey);
+
+      logger.info('Aggregated cache lookup result', {
+        repoUrl,
+        hasCachedData: !!cachedData,
+        cachedDataType: cachedData ? typeof cachedData : 'null',
+        isArray: Array.isArray(cachedData),
+        cachedDataKeys:
+          cachedData &&
+          typeof cachedData === 'object' &&
+          !Array.isArray(cachedData)
+            ? Object.keys(cachedData)
+            : null,
+      });
 
       // Type guard to ensure we have CommitHeatmapData
       const isCommitHeatmapData = (data: any): data is CommitHeatmapData => {
@@ -1585,7 +1609,19 @@ export class RepositoryCacheManager {
         );
       };
 
-      if (cachedData && isCommitHeatmapData(cachedData)) {
+      const passesTypeGuard = cachedData && isCommitHeatmapData(cachedData);
+      logger.info('Type guard check', {
+        repoUrl,
+        passesTypeGuard,
+        hasTimePeriod:
+          cachedData &&
+          typeof cachedData === 'object' &&
+          'timePeriod' in cachedData,
+        hasData:
+          cachedData && typeof cachedData === 'object' && 'data' in cachedData,
+      });
+
+      if (passesTypeGuard) {
         // Cache hit: Return pre-computed visualization data
         this.metrics.operations.aggregatedHits++;
         this.recordHitTime(startTime);
@@ -1631,12 +1667,21 @@ export class RepositoryCacheManager {
 
       try {
         // Convert filter options to commit cache options for consistency
-        const commitOptions: CommitCacheOptions = {
-          author: filterOptions?.author,
-          authors: filterOptions?.authors,
-          fromDate: filterOptions?.fromDate,
-          toDate: filterOptions?.toDate,
-        };
+        // Build commitOptions without undefined properties to ensure consistent cache keys
+        // This prevents { author: undefined, ... } from hashing differently than {}
+        const commitOptions: CommitCacheOptions = {};
+        if (filterOptions?.author !== undefined) {
+          commitOptions.author = filterOptions.author;
+        }
+        if (filterOptions?.authors !== undefined) {
+          commitOptions.authors = filterOptions.authors;
+        }
+        if (filterOptions?.fromDate !== undefined) {
+          commitOptions.fromDate = filterOptions.fromDate;
+        }
+        if (filterOptions?.toDate !== undefined) {
+          commitOptions.toDate = filterOptions.toDate;
+        }
 
         /*
          * FIX: All locks already held by outer withOrderedLocks in correct order.
@@ -1650,21 +1695,29 @@ export class RepositoryCacheManager {
 
         let aggregatedData: CommitHeatmapData;
 
-        // Defensive programming: Handle null commits gracefully
-        if (commits) {
-          // Generate visualization data from filtered commits
-          aggregatedData = await gitService.aggregateCommitsByTime(
-            commits,
-            filterOptions
-          );
-        } else {
-          logger.warn(
-            'getOrParseFilteredCommits returned null, using empty array',
-            { repoUrl }
-          );
+        // Defensive programming: Handle null or empty commits gracefully
+        if (!commits || commits.length === 0) {
+          logger.warn('No commits available for aggregation', {
+            repoUrl,
+            filterOptions,
+            commitsIsNull: commits === null,
+            commitsLength: commits?.length || 0,
+            commitOptionsUsed: commitOptions,
+          });
           // Generate empty aggregated data structure
           aggregatedData = await gitService.aggregateCommitsByTime(
             [],
+            filterOptions
+          );
+        } else {
+          // Generate visualization data from filtered commits
+          logger.debug('Aggregating commits by time', {
+            repoUrl,
+            commitsCount: commits.length,
+            filterOptions,
+          });
+          aggregatedData = await gitService.aggregateCommitsByTime(
+            commits,
             filterOptions
           );
         }
@@ -1690,6 +1743,9 @@ export class RepositoryCacheManager {
           totalCommits: aggregatedData.metadata?.totalCommits ?? 0,
           ttl,
           transactionId: transaction.id,
+          aggregatedDataType: typeof aggregatedData,
+          hasTimePeriod: 'timePeriod' in aggregatedData,
+          hasData: 'data' in aggregatedData,
         });
 
         // Update system health metrics
@@ -2696,6 +2752,17 @@ export class RepositoryCacheManager {
         commits = [];
         logger.warn('gitService.getCommits returned null, using empty array', {
           repoUrl,
+        });
+      } else if (commits.length === 0) {
+        logger.warn('Git service returned zero commits', {
+          repoUrl,
+          message:
+            'Repository might be empty or git operations may have failed',
+        });
+      } else {
+        logger.debug('Raw commits fetched successfully', {
+          repoUrl,
+          commitCount: commits.length,
         });
       }
 

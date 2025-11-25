@@ -240,12 +240,20 @@ router.get(
       });
 
       // Build filter options from query parameters
-      const filters: CommitFilterOptions = {
-        author: author || undefined,
-        authors: authors ? authors.split(',').map((a) => a.trim()) : undefined,
-        fromDate: fromDate || undefined,
-        toDate: toDate || undefined,
-      };
+      // Only include defined properties to ensure consistent cache keys
+      const filters: CommitFilterOptions = {};
+      if (author) {
+        filters.author = author;
+      }
+      if (authors) {
+        filters.authors = authors.split(',').map((a) => a.trim());
+      }
+      if (fromDate) {
+        filters.fromDate = fromDate;
+      }
+      if (toDate) {
+        filters.toDate = toDate;
+      }
 
       // Use unified cache manager for aggregated data (Level 3 cache)
       const heatmapData = await getCachedAggregatedData(repoUrl, filters);
@@ -293,12 +301,20 @@ router.get(
       });
 
       // Build filter options from query parameters
-      const filters: CommitFilterOptions = {
-        author: author || undefined,
-        authors: authors ? authors.split(',').map((a) => a.trim()) : undefined,
-        fromDate: fromDate || undefined,
-        toDate: toDate || undefined,
-      };
+      // Only include defined properties to ensure consistent cache keys
+      const filters: CommitFilterOptions = {};
+      if (author) {
+        filters.author = author;
+      }
+      if (authors) {
+        filters.authors = authors.split(',').map((a) => a.trim());
+      }
+      if (fromDate) {
+        filters.fromDate = fromDate;
+      }
+      if (toDate) {
+        filters.toDate = toDate;
+      }
 
       // Use unified cache manager for contributors data
       const contributors = await getCachedContributors(repoUrl, filters);
@@ -453,33 +469,62 @@ router.get(
       });
 
       // Build filter options from query parameters
-      const filters: CommitFilterOptions = {
-        author: author || undefined,
-        authors: authors ? authors.split(',').map((a) => a.trim()) : undefined,
-        fromDate: fromDate || undefined,
-        toDate: toDate || undefined,
-      };
+      // Only include defined properties to ensure consistent cache keys
+      const filters: CommitFilterOptions = {};
+      if (author) {
+        filters.author = author;
+      }
+      if (authors) {
+        filters.authors = authors.split(',').map((a) => a.trim());
+      }
+      if (fromDate) {
+        filters.fromDate = fromDate;
+      }
+      if (toDate) {
+        filters.toDate = toDate;
+      }
 
       const cacheOptions: CommitCacheOptions = {
         skip,
         limit,
       };
 
-      // Fetch both commits and heatmap data in parallel using unified cache
-      const [commits, heatmapData] = await Promise.all([
-        getCachedCommits(repoUrl, cacheOptions),
-        getCachedAggregatedData(repoUrl, filters),
-      ]);
+      // FIX: Fetch sequentially instead of parallel to avoid lock contention
+      // When both functions try to acquire overlapping locks in parallel,
+      // it can cause cache corruption where commits end up in heatmapData
+      const commits = await getCachedCommits(repoUrl, cacheOptions);
+      const heatmapData = await getCachedAggregatedData(repoUrl, filters);
 
       // Record successful operation
       recordFeatureUsage('full_data_view', userType, true, 'api_call');
 
+      // Defensive check: Ensure heatmapData is actually CommitHeatmapData
+      const isValidHeatmap =
+        heatmapData &&
+        typeof heatmapData === 'object' &&
+        !Array.isArray(heatmapData) &&
+        'timePeriod' in heatmapData &&
+        'data' in heatmapData;
+
+      if (!isValidHeatmap) {
+        logger.warn(
+          'Invalid heatmap data structure detected, expected CommitHeatmapData',
+          {
+            repoUrl,
+            heatmapDataType: typeof heatmapData,
+            isArray: Array.isArray(heatmapData),
+            actualType: Array.isArray(heatmapData) ? 'Commit[]' : 'unknown',
+          }
+        );
+      }
+
       logger.info('Full data retrieved successfully', {
         repoUrl,
-        commitCount: commits.length,
-        dataPoints: heatmapData.data.length,
+        commitCount: commits?.length ?? 0,
+        dataPoints: isValidHeatmap ? heatmapData.data.length : 0,
         page,
         limit,
+        heatmapIsValid: isValidHeatmap,
       });
 
       res.status(HTTP_STATUS.OK).json({ commits, heatmapData, page, limit });
