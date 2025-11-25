@@ -36,7 +36,7 @@ export function SettingsDrawer({
           <SheetTitle>Settings</SheetTitle>
         </SheetHeader>
 
-        <Tabs defaultValue="general" className="mt-6">
+        <Tabs defaultValue="general" className="mt-6 px-4 pb-4">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="appearance">Appearance</TabsTrigger>

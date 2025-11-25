@@ -48,7 +48,7 @@ const newsItems = [
 export function NewsDrawer({ open, onClose }: NewsDrawerProps) {
   return (
     <Sheet open={open} onOpenChange={onClose}>
-      <SheetContent side="right" className="w-full sm:max-w-md">
+      <SheetContent side="right" className="w-full sm:max-w-md p-6">
         <SheetHeader>
           <SheetTitle>What's New</SheetTitle>
         </SheetHeader>
