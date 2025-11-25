@@ -864,38 +864,47 @@ describe('RepositoryCache - Fast High Coverage', () => {
       expect(duration).toBeLessThan(5000);
     });
 
-    test('lock helper methods return correct lock arrays', () => {
-      // Test getCommitLocks
-      const commitLocks = (repositoryCache as any).getCommitLocks(
-        'https://github.com/test/repo.git'
-      );
-      expect(commitLocks).toEqual([
-        'cache-filtered:https://github.com/test/repo.git',
-        'cache-operation:https://github.com/test/repo.git',
-        'repo-access:https://github.com/test/repo.git',
-      ]);
+    test('lock helper methods return correct lock arrays (deadlock prevention)', () => {
+      const repoUrl = 'https://github.com/test/repo.git';
 
-      // Test getContributorLocks
+      // Test getCommitLocks - should NOT include repo-access
+      const commitLocks = (repositoryCache as any).getCommitLocks(repoUrl);
+      expect(commitLocks).toEqual([
+        `cache-filtered:${repoUrl}`,
+        `cache-operation:${repoUrl}`,
+      ]);
+      expect(commitLocks).not.toContain(`repo-access:${repoUrl}`);
+
+      // Test getContributorLocks - should NOT include repo-access
       const contributorLocks = (repositoryCache as any).getContributorLocks(
-        'https://github.com/test/repo.git'
+        repoUrl
       );
       expect(contributorLocks).toEqual([
-        'cache-contributors:https://github.com/test/repo.git',
-        'cache-filtered:https://github.com/test/repo.git',
-        'cache-operation:https://github.com/test/repo.git',
-        'repo-access:https://github.com/test/repo.git',
+        `cache-contributors:${repoUrl}`,
+        `cache-filtered:${repoUrl}`,
+        `cache-operation:${repoUrl}`,
       ]);
+      expect(contributorLocks).not.toContain(`repo-access:${repoUrl}`);
 
-      // Test getAggregatedLocks
+      // Test getAggregatedLocks - should NOT include repo-access
       const aggregatedLocks = (repositoryCache as any).getAggregatedLocks(
-        'https://github.com/test/repo.git'
+        repoUrl
       );
       expect(aggregatedLocks).toEqual([
-        'cache-aggregated:https://github.com/test/repo.git',
-        'cache-filtered:https://github.com/test/repo.git',
-        'cache-operation:https://github.com/test/repo.git',
-        'repo-access:https://github.com/test/repo.git',
+        `cache-aggregated:${repoUrl}`,
+        `cache-filtered:${repoUrl}`,
+        `cache-operation:${repoUrl}`,
       ]);
+      expect(aggregatedLocks).not.toContain(`repo-access:${repoUrl}`);
+
+      // Test getChurnLocks - should NOT include repo-access
+      const churnLocks = (repositoryCache as any).getChurnLocks(repoUrl);
+      expect(churnLocks).toEqual([
+        `cache-churn:${repoUrl}`,
+        `cache-filtered:${repoUrl}`,
+        `cache-operation:${repoUrl}`,
+      ]);
+      expect(churnLocks).not.toContain(`repo-access:${repoUrl}`);
     });
   });
 });

@@ -76,6 +76,13 @@ type AggregatedCacheValue =
  * 3. ✅ Atomic multi-tier cache updates
  * 4. ✅ Enhanced error handling and recovery
  * 5. ✅ Pattern-based cache key management
+ * 6. ✅ DEADLOCK FIX: Removed repo-access from cache lock arrays to prevent nested acquisition
+ *
+ * LOCK ARCHITECTURE:
+ * - Cache operations acquire ONLY cache-level locks (cache-*, not repo-*)
+ * - Repository access managed exclusively by withSharedRepository()
+ * - Prevents nested acquisition of repo-access lock (which caused deadlocks)
+ * - Lock ordering maintained via withOrderedLocks() for cache-level locks
  */
 
 /**
@@ -375,19 +382,25 @@ export class RepositoryCacheManager {
   /**
    * Helper method to generate standard lock array for commit operations.
    * Ensures consistent lock ordering across all methods to prevent deadlocks.
-   * Lock order: cache-filtered < cache-operation < repo-access (alphabetical)
+   *
+   * IMPORTANT: Does NOT include 'repo-access' lock because:
+   * - repo-access is managed exclusively by withSharedRepository()
+   * - Including it here causes nested lock acquisition (deadlock)
+   * - Cache operations only need cache-level locks
+   *
+   * Lock order: cache-filtered < cache-operation (alphabetical)
    */
   private getCommitLocks(repoUrl: string): string[] {
     return [
       `cache-filtered:${repoUrl}`,
       `cache-operation:${repoUrl}`,
-      `repo-access:${repoUrl}`,
+      // repo-access is acquired by withSharedRepository() - DO NOT add here
     ];
   }
 
   /**
    * Helper method to generate lock array for contributor operations.
-   * Lock order: cache-contributors < cache-filtered < cache-operation < repo-access
+   * Lock order: cache-contributors < cache-filtered < cache-operation
    */
   private getContributorLocks(repoUrl: string): string[] {
     return [`cache-contributors:${repoUrl}`, ...this.getCommitLocks(repoUrl)];
@@ -395,7 +408,7 @@ export class RepositoryCacheManager {
 
   /**
    * Helper method to generate lock array for aggregated data operations.
-   * Lock order: cache-aggregated < cache-filtered < cache-operation < repo-access
+   * Lock order: cache-aggregated < cache-filtered < cache-operation
    */
   private getAggregatedLocks(repoUrl: string): string[] {
     return [`cache-aggregated:${repoUrl}`, ...this.getCommitLocks(repoUrl)];
@@ -403,7 +416,7 @@ export class RepositoryCacheManager {
 
   /**
    * Helper method to generate lock array for churn data operations.
-   * Lock order: cache-churn < cache-filtered < cache-operation < repo-access
+   * Lock order: cache-churn < cache-filtered < cache-operation
    */
   private getChurnLocks(repoUrl: string): string[] {
     return [`cache-churn:${repoUrl}`, ...this.getCommitLocks(repoUrl)];
