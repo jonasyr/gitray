@@ -8,6 +8,7 @@ import {
   AlertCircle,
   Sparkles,
   BarChart3,
+  DollarSign,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
@@ -305,7 +306,7 @@ export function DashboardPage({
         className="space-y-6"
       >
         <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
-          <TabsList className="inline-flex md:grid w-auto md:w-full grid-cols-5 h-auto min-w-max">
+          <TabsList className="!flex md:!grid w-auto md:!w-full md:grid-cols-6 h-auto min-w-max">
             <TabsTrigger value="overview" className="gap-2">
               <TrendingUp className="h-4 w-4" />
               <span className="hidden sm:inline">Overview</span>
@@ -330,6 +331,11 @@ export function DashboardPage({
               <Lock className="h-4 w-4" />
               <span className="hidden sm:inline">Premium</span>
               <span className="sm:hidden">Pro</span>
+            </TabsTrigger>
+            <TabsTrigger value="pricing" className="gap-2">
+              <DollarSign className="h-4 w-4" />
+              <span className="hidden sm:inline">Plans & Pricing</span>
+              <span className="sm:hidden">Price</span>
             </TabsTrigger>
           </TabsList>
         </div>
@@ -600,6 +606,10 @@ export function DashboardPage({
 
         <TabsContent value="paid" className="space-y-6">
           <PremiumFeatures />
+        </TabsContent>
+
+        <TabsContent value="pricing" className="space-y-6">
+          <PremiumFeatures showPricingOnly />
         </TabsContent>
       </Tabs>
     </div>

@@ -203,13 +203,135 @@ const pricingPlans = [
   },
 ];
 
-export function PremiumFeatures() {
+interface PremiumFeaturesProps {
+  showPricingOnly?: boolean;
+}
+
+export function PremiumFeatures({
+  showPricingOnly = false,
+}: PremiumFeaturesProps) {
+  if (showPricingOnly) {
+    return (
+      <div className="space-y-6">
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          {pricingPlans.map((plan, index) => (
+            <Card
+              key={index}
+              className={`relative ${
+                plan.highlighted ? 'border-primary shadow-lg scale-105' : ''
+              }`}
+            >
+              {plan.highlighted && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                  <Badge className="bg-primary">Most Popular</Badge>
+                </div>
+              )}
+              <CardHeader>
+                <CardTitle>{plan.name}</CardTitle>
+                <div className="mt-4">
+                  <span className="text-3xl font-bold">{plan.price}</span>
+                  <span className="text-muted-foreground text-sm">
+                    {plan.price !== 'Custom' && `/${plan.period}`}
+                  </span>
+                </div>
+                <CardDescription>{plan.description}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <ul className="space-y-2">
+                  {plan.features.map((feature, featureIndex) => (
+                    <li
+                      key={featureIndex}
+                      className="flex items-start gap-2 text-sm"
+                    >
+                      <div className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <div className="h-2 w-2 rounded-full bg-primary" />
+                      </div>
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Button
+                  className="w-full"
+                  variant={plan.highlighted ? 'default' : 'outline'}
+                  disabled={plan.name === 'Free'}
+                >
+                  {plan.cta}
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Compare All Plans</CardTitle>
+            <CardDescription>
+              Choose the plan that best fits your needs
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left p-3 font-semibold">Feature</th>
+                    {pricingPlans.map((plan, index) => (
+                      <th key={index} className="p-3 font-semibold">
+                        {plan.name}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b">
+                    <td className="p-3">Repositories</td>
+                    <td className="p-3 text-center">Up to 3</td>
+                    <td className="p-3 text-center">Unlimited</td>
+                    <td className="p-3 text-center">Unlimited</td>
+                    <td className="p-3 text-center">Unlimited</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="p-3">Data Retention</td>
+                    <td className="p-3 text-center">7 days</td>
+                    <td className="p-3 text-center">30 days</td>
+                    <td className="p-3 text-center">90 days</td>
+                    <td className="p-3 text-center">Unlimited</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="p-3">AI Insights</td>
+                    <td className="p-3 text-center">-</td>
+                    <td className="p-3 text-center">✓</td>
+                    <td className="p-3 text-center">✓</td>
+                    <td className="p-3 text-center">✓ + Offline</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="p-3">Team Collaboration</td>
+                    <td className="p-3 text-center">-</td>
+                    <td className="p-3 text-center">-</td>
+                    <td className="p-3 text-center">✓</td>
+                    <td className="p-3 text-center">✓</td>
+                  </tr>
+                  <tr>
+                    <td className="p-3">Desktop App</td>
+                    <td className="p-3 text-center">-</td>
+                    <td className="p-3 text-center">-</td>
+                    <td className="p-3 text-center">-</td>
+                    <td className="p-3 text-center">✓</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <Tabs defaultValue="features" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-1">
           <TabsTrigger value="features">Premium Features</TabsTrigger>
-          <TabsTrigger value="pricing">Plans & Pricing</TabsTrigger>
         </TabsList>
 
         <TabsContent value="features" className="space-y-6">
@@ -290,119 +412,6 @@ export function PremiumFeatures() {
               <p className="text-xs text-muted-foreground">
                 14-day free trial · No credit card required
               </p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="pricing" className="space-y-6">
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-            {pricingPlans.map((plan, index) => (
-              <Card
-                key={index}
-                className={`relative ${
-                  plan.highlighted ? 'border-primary shadow-lg scale-105' : ''
-                }`}
-              >
-                {plan.highlighted && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <Badge className="bg-primary">Most Popular</Badge>
-                  </div>
-                )}
-                <CardHeader>
-                  <CardTitle>{plan.name}</CardTitle>
-                  <div className="mt-4">
-                    <span className="text-3xl font-bold">{plan.price}</span>
-                    <span className="text-muted-foreground text-sm">
-                      {plan.price !== 'Custom' && `/${plan.period}`}
-                    </span>
-                  </div>
-                  <CardDescription>{plan.description}</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <ul className="space-y-2">
-                    {plan.features.map((feature, featureIndex) => (
-                      <li
-                        key={featureIndex}
-                        className="flex items-start gap-2 text-sm"
-                      >
-                        <div className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <div className="h-2 w-2 rounded-full bg-primary" />
-                        </div>
-                        <span>{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  <Button
-                    className="w-full"
-                    variant={plan.highlighted ? 'default' : 'outline'}
-                    disabled={plan.name === 'Free'}
-                  >
-                    {plan.cta}
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Compare All Plans</CardTitle>
-              <CardDescription>
-                Choose the plan that best fits your needs
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left p-3 font-semibold">Feature</th>
-                      {pricingPlans.map((plan, index) => (
-                        <th key={index} className="p-3 font-semibold">
-                          {plan.name}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="border-b">
-                      <td className="p-3">Repositories</td>
-                      <td className="p-3 text-center">Up to 3</td>
-                      <td className="p-3 text-center">Unlimited</td>
-                      <td className="p-3 text-center">Unlimited</td>
-                      <td className="p-3 text-center">Unlimited</td>
-                    </tr>
-                    <tr className="border-b">
-                      <td className="p-3">Data Retention</td>
-                      <td className="p-3 text-center">7 days</td>
-                      <td className="p-3 text-center">30 days</td>
-                      <td className="p-3 text-center">90 days</td>
-                      <td className="p-3 text-center">Unlimited</td>
-                    </tr>
-                    <tr className="border-b">
-                      <td className="p-3">AI Insights</td>
-                      <td className="p-3 text-center">-</td>
-                      <td className="p-3 text-center">✓</td>
-                      <td className="p-3 text-center">✓</td>
-                      <td className="p-3 text-center">✓ + Offline</td>
-                    </tr>
-                    <tr className="border-b">
-                      <td className="p-3">Team Collaboration</td>
-                      <td className="p-3 text-center">-</td>
-                      <td className="p-3 text-center">-</td>
-                      <td className="p-3 text-center">✓</td>
-                      <td className="p-3 text-center">✓</td>
-                    </tr>
-                    <tr>
-                      <td className="p-3">Desktop App</td>
-                      <td className="p-3 text-center">-</td>
-                      <td className="p-3 text-center">-</td>
-                      <td className="p-3 text-center">-</td>
-                      <td className="p-3 text-center">✓</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
             </CardContent>
           </Card>
         </TabsContent>
