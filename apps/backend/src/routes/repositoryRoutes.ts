@@ -27,6 +27,7 @@ import {
   buildCommitFilters,
   setupRouteRequest,
   recordRouteSuccess,
+  recordRouteError,
 } from '../utils/routeHelpers';
 
 // Remove unused imports: redis, gitService, withTempRepository, repositorySummaryService
@@ -209,12 +210,14 @@ router.get(
         { commitCount: commits.length, page, limit }
       );
     } catch (error) {
-      recordFeatureUsage('repository_commits', userType, false, 'api_call');
-      logger.error('Failed to retrieve commits', {
+      recordRouteError(
+        'repository_commits',
+        userType,
+        logger,
         repoUrl,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      next(error);
+        error,
+        next
+      );
     }
   }
 );
@@ -257,12 +260,7 @@ router.get(
         { dataPoints: heatmapData.data.length }
       );
     } catch (error) {
-      recordFeatureUsage('heatmap_view', userType, false, 'api_call');
-      logger.error('Failed to retrieve heatmap data', {
-        repoUrl,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      next(error);
+      recordRouteError('heatmap_view', userType, logger, repoUrl, error, next);
     }
   }
 );
@@ -305,12 +303,14 @@ router.get(
         { contributorCount: contributors.length }
       );
     } catch (error) {
-      recordFeatureUsage('contributors_view', userType, false, 'api_call');
-      logger.error('Failed to retrieve contributors', {
+      recordRouteError(
+        'contributors_view',
+        userType,
+        logger,
         repoUrl,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      next(error);
+        error,
+        next
+      );
     }
   }
 );
@@ -360,12 +360,14 @@ router.get(
         { fileCount: churnData.files.length }
       );
     } catch (error) {
-      recordFeatureUsage('code_churn_view', userType, false, 'api_call');
-      logger.error('Failed to retrieve churn data', {
+      recordRouteError(
+        'code_churn_view',
+        userType,
+        logger,
         repoUrl,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      next(error);
+        error,
+        next
+      );
     }
   }
 );
@@ -403,12 +405,14 @@ router.get(
         { repositoryName: summary.repository.name }
       );
     } catch (error) {
-      recordFeatureUsage('repository_summary', userType, false, 'api_call');
-      logger.error('Failed to retrieve repository summary', {
+      recordRouteError(
+        'repository_summary',
+        userType,
+        logger,
         repoUrl,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      next(error);
+        error,
+        next
+      );
     }
   }
 );
@@ -495,12 +499,14 @@ router.get(
         }
       );
     } catch (error) {
-      recordFeatureUsage('full_data_view', userType, false, 'api_call');
-      logger.error('Failed to retrieve full data', {
+      recordRouteError(
+        'full_data_view',
+        userType,
+        logger,
         repoUrl,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      next(error);
+        error,
+        next
+      );
     }
   }
 );

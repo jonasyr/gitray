@@ -78,6 +78,48 @@ export function recordRouteSuccess<T>(
 }
 
 /**
+ * Records failed route operation with metrics and logging.
+ * Standardizes error handling across all repository endpoints.
+ *
+ * This helper consolidates three common operations when errors occur:
+ * - Recording failure metrics for monitoring
+ * - Logging error details with context
+ * - Propagating error to Express error handler middleware
+ *
+ * @param featureName - Feature identifier for metrics (e.g., 'repository_commits')
+ * @param userType - User type from metrics service
+ * @param logger - Request-scoped logger instance
+ * @param repoUrl - Repository URL for logging context
+ * @param error - The error that occurred
+ * @param next - Express next function for error propagation
+ *
+ * @example
+ * } catch (error) {
+ *   recordRouteError('repository_commits', userType, logger, repoUrl, error, next);
+ * }
+ */
+export function recordRouteError(
+  featureName: string,
+  userType: string,
+  logger: any,
+  repoUrl: string,
+  error: unknown,
+  next: any
+): void {
+  // Record failure metrics
+  recordFeatureUsage(featureName, userType, false, 'api_call');
+
+  // Log error with context
+  logger.error(`Failed to retrieve ${featureName}`, {
+    repoUrl,
+    error: error instanceof Error ? error.message : String(error),
+  });
+
+  // Propagate error to Express error handler
+  next(error);
+}
+
+/**
  * Builds CommitFilterOptions from Express query parameters.
  * Only includes defined properties to ensure consistent cache keys.
  *
