@@ -1071,20 +1071,14 @@ export class RepositoryCacheManager {
 
       if (commits) {
         // Cache hit: Update metrics and return cached data immediately
-        this.metrics.operations.rawHits++;
-        this.recordHitTime(startTime);
-        cacheHits.inc({ operation: 'raw_commits' });
-        recordEnhancedCacheOperation(
+        this.recordCacheHit(
           'raw_commits',
-          true,
-          undefined,
+          'rawHits',
+          startTime,
           repoUrl,
-          commits.length
+          commits.length,
+          'commits'
         );
-
-        // Track data freshness for cache effectiveness analysis
-        const cacheAge = Date.now() - startTime;
-        recordDataFreshness('commits', cacheAge);
 
         logger.debug('Raw commits cache hit', {
           repoUrl,
@@ -1243,20 +1237,14 @@ export class RepositoryCacheManager {
 
       if (filteredCommits) {
         // Cache hit: Return filtered data immediately
-        this.metrics.operations.filteredHits++;
-        this.recordHitTime(startTime);
-        cacheHits.inc({ operation: 'filtered_commits' });
-        recordEnhancedCacheOperation(
+        this.recordCacheHit(
           'filtered_commits',
-          true,
-          undefined,
+          'filteredHits',
+          startTime,
           repoUrl,
-          filteredCommits.length
+          filteredCommits.length,
+          'commits'
         );
-
-        // Track data freshness for filtered cache effectiveness
-        const cacheAge = Date.now() - startTime;
-        recordDataFreshness('commits', cacheAge);
 
         logger.debug('Filtered commits cache hit', {
           repoUrl,
@@ -1415,14 +1403,14 @@ export class RepositoryCacheManager {
 
       if (cachedData && isContributorArray(cachedData)) {
         // Cache hit: Return cached contributor data
-        this.metrics.operations.aggregatedHits++;
-        this.recordHitTime(startTime);
-        cacheHits.inc({ operation: 'contributors' });
-        recordEnhancedCacheOperation('contributors', true, undefined, repoUrl);
-
-        // Track data freshness
-        const cacheAge = Date.now() - startTime;
-        recordDataFreshness('contributors', cacheAge);
+        this.recordCacheHit(
+          'contributors',
+          'aggregatedHits',
+          startTime,
+          repoUrl,
+          undefined,
+          'contributors'
+        );
 
         logger.debug('Contributors cache hit', {
           repoUrl,
@@ -1623,19 +1611,14 @@ export class RepositoryCacheManager {
 
       if (passesTypeGuard) {
         // Cache hit: Return pre-computed visualization data
-        this.metrics.operations.aggregatedHits++;
-        this.recordHitTime(startTime);
-        cacheHits.inc({ operation: 'aggregated_data' });
-        recordEnhancedCacheOperation(
+        this.recordCacheHit(
           'aggregated_data',
-          true,
+          'aggregatedHits',
+          startTime,
+          repoUrl,
           undefined,
-          repoUrl
+          'aggregated_data'
         );
-
-        // Track data freshness for aggregated cache monitoring
-        const cacheAge = Date.now() - startTime;
-        recordDataFreshness('aggregated_data', cacheAge);
 
         logger.debug('Aggregated data cache hit', {
           repoUrl,
@@ -1827,14 +1810,14 @@ export class RepositoryCacheManager {
 
       if (cachedData && isCodeChurnAnalysis(cachedData)) {
         // Cache hit: Return pre-computed churn analysis
-        this.metrics.operations.aggregatedHits++;
-        this.recordHitTime(startTime);
-        cacheHits.inc({ operation: 'churn' });
-        recordEnhancedCacheOperation('churn', true, undefined, repoUrl);
-
-        // Track data freshness for monitoring
-        const cacheAge = Date.now() - startTime;
-        recordDataFreshness('churn', cacheAge);
+        this.recordCacheHit(
+          'churn',
+          'aggregatedHits',
+          startTime,
+          repoUrl,
+          undefined,
+          'churn'
+        );
 
         logger.debug('Churn data cache hit', {
           repoUrl,
@@ -1987,14 +1970,14 @@ export class RepositoryCacheManager {
 
       if (cachedData && isRepositorySummary(cachedData)) {
         // Cache hit: Return cached summary
-        this.metrics.operations.aggregatedHits++;
-        this.recordHitTime(startTime);
-        cacheHits.inc({ operation: 'summary' });
-        recordEnhancedCacheOperation('summary', true, undefined, repoUrl);
-
-        // Track data freshness
-        const cacheAge = Date.now() - startTime;
-        recordDataFreshness('summary', cacheAge);
+        this.recordCacheHit(
+          'summary',
+          'aggregatedHits',
+          startTime,
+          repoUrl,
+          undefined,
+          'summary'
+        );
 
         logger.debug('Summary cache hit', {
           repoUrl,
@@ -2643,6 +2626,49 @@ export class RepositoryCacheManager {
   }
 
   /**
+   * Records comprehensive cache hit metrics and tracking.
+   * Centralizes the common pattern of recording:
+   * - Internal metrics counters
+   * - Prometheus cache hit metrics
+   * - Enhanced cache operation tracking
+   * - Data freshness monitoring (optional, for aggregated data)
+   *
+   * This helper eliminates duplication across 8 cache hit locations.
+   *
+   * @param operation - Operation name for Prometheus metrics (e.g., 'raw_commits', 'contributors')
+   * @param metricsField - Internal metrics field to increment ('rawHits', 'filteredHits', 'aggregatedHits')
+   * @param startTime - Operation start timestamp for timing calculations
+   * @param repoUrl - Repository URL for enhanced cache operation tracking
+   * @param dataCount - Optional data count for enhanced metrics (used for raw/filtered commits)
+   * @param dataType - Optional data type for freshness tracking (used for aggregated data types)
+   */
+  private recordCacheHit(
+    operation: string,
+    metricsField: 'rawHits' | 'filteredHits' | 'aggregatedHits',
+    startTime: number,
+    repoUrl: string,
+    dataCount?: number,
+    dataType?: string
+  ): void {
+    this.metrics.operations[metricsField]++;
+    this.recordHitTime(startTime);
+    cacheHits.inc({ operation });
+    recordEnhancedCacheOperation(
+      operation,
+      true,
+      undefined,
+      repoUrl,
+      dataCount
+    );
+
+    // Track data freshness if dataType provided (for aggregated data types)
+    if (dataType) {
+      const cacheAge = Date.now() - startTime;
+      recordDataFreshness(dataType, cacheAge);
+    }
+  }
+
+  /**
    * Internal raw commits retrieval without external locking.
    *
    * This method is used within ordered lock contexts to prevent deadlocks.
@@ -2683,20 +2709,14 @@ export class RepositoryCacheManager {
     }
 
     if (commits) {
-      this.metrics.operations.rawHits++;
-      this.recordHitTime(startTime);
-      cacheHits.inc({ operation: 'raw_commits' });
-      recordEnhancedCacheOperation(
+      this.recordCacheHit(
         'raw_commits',
-        true,
-        undefined,
+        'rawHits',
+        startTime,
         repoUrl,
-        commits.length
+        commits.length,
+        'commits'
       );
-
-      // Record data freshness
-      const cacheAge = Date.now() - startTime;
-      recordDataFreshness('commits', cacheAge);
 
       logger.debug('Raw commits cache hit', {
         repoUrl,
@@ -2849,20 +2869,14 @@ export class RepositoryCacheManager {
     let filteredCommits = await this.filteredCommitsCache.get(filteredKey);
 
     if (filteredCommits) {
-      this.metrics.operations.filteredHits++;
-      this.recordHitTime(startTime);
-      cacheHits.inc({ operation: 'filtered_commits' });
-      recordEnhancedCacheOperation(
+      this.recordCacheHit(
         'filtered_commits',
-        true,
-        undefined,
+        'filteredHits',
+        startTime,
         repoUrl,
-        filteredCommits.length
+        filteredCommits.length,
+        'commits'
       );
-
-      // Record data freshness
-      const cacheAge = Date.now() - startTime;
-      recordDataFreshness('commits', cacheAge);
 
       logger.debug('Filtered commits cache hit', {
         repoUrl,
