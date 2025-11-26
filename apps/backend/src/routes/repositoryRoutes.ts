@@ -23,7 +23,7 @@ import {
   ValidationError,
 } from '@gitray/shared-types';
 import { isSecureGitUrl } from '../middlewares/validation';
-import { buildCommitFilters } from '../utils/routeHelpers';
+import { buildCommitFilters, setupRouteRequest } from '../utils/routeHelpers';
 
 // Remove unused imports: redis, gitService, withTempRepository, repositorySummaryService
 
@@ -174,12 +174,10 @@ router.get(
   [...repoUrlValidation(), ...paginationValidation()],
   handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
-    const logger = createRequestLogger(req);
-    const { repoUrl } = req.query as Record<string, string>;
+    const { logger, repoUrl, userType } = setupRouteRequest(req);
     const page = Number.parseInt(req.query.page as string) || 1;
     const limit = Number.parseInt(req.query.limit as string) || 100;
     const skip = (page - 1) * limit;
-    const userType = getUserType(req);
 
     try {
       logger.info('Processing commits request with unified caching', {
@@ -227,12 +225,11 @@ router.get(
   [...repoUrlValidation(), ...dateValidation(), ...authorValidation()],
   handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
-    const logger = createRequestLogger(req);
-    const { repoUrl, author, authors, fromDate, toDate } = req.query as Record<
+    const { logger, repoUrl, userType } = setupRouteRequest(req);
+    const { author, authors, fromDate, toDate } = req.query as Record<
       string,
       string
     >;
-    const userType = getUserType(req);
 
     try {
       logger.info('Processing heatmap request with unified caching', {
@@ -275,12 +272,11 @@ router.get(
   [...repoUrlValidation(), ...dateValidation(), ...authorValidation()],
   handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
-    const logger = createRequestLogger(req);
-    const { repoUrl, author, authors, fromDate, toDate } = req.query as Record<
+    const { logger, repoUrl, userType } = setupRouteRequest(req);
+    const { author, authors, fromDate, toDate } = req.query as Record<
       string,
       string
     >;
-    const userType = getUserType(req);
 
     try {
       logger.info('Processing contributors request with unified caching', {
@@ -323,10 +319,11 @@ router.get(
   [...repoUrlValidation(), ...dateValidation(), ...churnValidation()],
   handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
-    const logger = createRequestLogger(req);
-    const { repoUrl, fromDate, toDate, minChanges, extensions } =
-      req.query as Record<string, string>;
-    const userType = getUserType(req);
+    const { logger, repoUrl, userType } = setupRouteRequest(req);
+    const { fromDate, toDate, minChanges, extensions } = req.query as Record<
+      string,
+      string
+    >;
 
     try {
       logger.info('Processing churn analysis request with unified caching', {
@@ -376,9 +373,7 @@ router.get(
   [...repoUrlValidation()],
   handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
-    const logger = createRequestLogger(req);
-    const { repoUrl } = req.query as Record<string, string>;
-    const userType = getUserType(req);
+    const { logger, repoUrl, userType } = setupRouteRequest(req);
 
     try {
       logger.info(
@@ -425,15 +420,14 @@ router.get(
   ],
   handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
-    const logger = createRequestLogger(req);
-    const { repoUrl, author, authors, fromDate, toDate } = req.query as Record<
+    const { logger, repoUrl, userType } = setupRouteRequest(req);
+    const { author, authors, fromDate, toDate } = req.query as Record<
       string,
       string
     >;
     const page = Number.parseInt(req.query.page as string) || 1;
     const limit = Number.parseInt(req.query.limit as string) || 100;
     const skip = (page - 1) * limit;
-    const userType = getUserType(req);
 
     try {
       logger.info('Processing full-data request with unified caching', {

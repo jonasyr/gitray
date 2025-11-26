@@ -1,4 +1,31 @@
+import { Request } from 'express';
 import { CommitFilterOptions } from '@gitray/shared-types';
+import { createRequestLogger } from '../services/logger';
+import { getUserType } from '../services/metrics';
+
+/**
+ * Extracts common request initialization for route handlers.
+ * Reduces duplication across all repository route endpoints.
+ *
+ * This helper consolidates the standard setup that every route handler needs:
+ * - Request-scoped logger with correlation ID
+ * - Repository URL from query parameters
+ * - User type for metrics tracking
+ *
+ * @param req - Express request object
+ * @returns Object containing logger, repoUrl, and userType
+ *
+ * @example
+ * const { logger, repoUrl, userType } = setupRouteRequest(req);
+ * logger.info('Processing request', { repoUrl });
+ */
+export function setupRouteRequest(req: Request) {
+  const logger = createRequestLogger(req);
+  const { repoUrl } = req.query as Record<string, string>;
+  const userType = getUserType(req);
+
+  return { logger, repoUrl, userType };
+}
 
 /**
  * Builds CommitFilterOptions from Express query parameters.
