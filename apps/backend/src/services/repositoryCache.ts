@@ -1090,10 +1090,7 @@ export class RepositoryCacheManager {
       }
 
       // Cache miss: Fetch from Git repository and cache the result
-      this.metrics.operations.rawMisses++;
-      this.recordMissTime(startTime);
-      cacheMisses.inc({ operation: 'raw_commits' });
-      recordEnhancedCacheOperation('raw_commits', false, undefined, repoUrl);
+      this.recordCacheMiss('raw_commits', 'rawMisses', startTime, repoUrl);
 
       logger.info('Raw commits cache miss, fetching from repository', {
         repoUrl,
@@ -1257,13 +1254,10 @@ export class RepositoryCacheManager {
       }
 
       // Cache miss: Generate filtered data from raw commits
-      this.metrics.operations.filteredMisses++;
-      this.recordMissTime(startTime);
-      cacheMisses.inc({ operation: 'filtered_commits' });
-      recordEnhancedCacheOperation(
+      this.recordCacheMiss(
         'filtered_commits',
-        false,
-        undefined,
+        'filteredMisses',
+        startTime,
         repoUrl
       );
 
@@ -1423,10 +1417,12 @@ export class RepositoryCacheManager {
       }
 
       // Cache miss: Generate contributor data
-      this.metrics.operations.aggregatedMisses++;
-      this.recordMissTime(startTime);
-      cacheMisses.inc({ operation: 'contributors' });
-      recordEnhancedCacheOperation('contributors', false, undefined, repoUrl);
+      this.recordCacheMiss(
+        'contributors',
+        'aggregatedMisses',
+        startTime,
+        repoUrl
+      );
 
       logger.debug('Contributors cache miss, generating from commits', {
         repoUrl,
@@ -1630,13 +1626,10 @@ export class RepositoryCacheManager {
       }
 
       // Cache miss: Generate aggregated data from filtered commits
-      this.metrics.operations.aggregatedMisses++;
-      this.recordMissTime(startTime);
-      cacheMisses.inc({ operation: 'aggregated_data' });
-      recordEnhancedCacheOperation(
+      this.recordCacheMiss(
         'aggregated_data',
-        false,
-        undefined,
+        'aggregatedMisses',
+        startTime,
         repoUrl
       );
 
@@ -1830,10 +1823,7 @@ export class RepositoryCacheManager {
       }
 
       // Cache miss: Generate churn data from repository
-      this.metrics.operations.aggregatedMisses++;
-      this.recordMissTime(startTime);
-      cacheMisses.inc({ operation: 'churn' });
-      recordEnhancedCacheOperation('churn', false, undefined, repoUrl);
+      this.recordCacheMiss('churn', 'aggregatedMisses', startTime, repoUrl);
 
       logger.debug('Churn data cache miss, analyzing repository', {
         repoUrl,
@@ -1996,10 +1986,7 @@ export class RepositoryCacheManager {
       }
 
       // Cache miss: Generate summary from repository
-      this.metrics.operations.aggregatedMisses++;
-      this.recordMissTime(startTime);
-      cacheMisses.inc({ operation: 'summary' });
-      recordEnhancedCacheOperation('summary', false, undefined, repoUrl);
+      this.recordCacheMiss('summary', 'aggregatedMisses', startTime, repoUrl);
 
       logger.debug('Summary cache miss, generating from repository', {
         repoUrl,
@@ -2669,6 +2656,32 @@ export class RepositoryCacheManager {
   }
 
   /**
+   * Records comprehensive cache miss metrics and tracking.
+   * Centralizes the common pattern of recording:
+   * - Internal metrics counters
+   * - Prometheus cache miss metrics
+   * - Enhanced cache operation tracking
+   *
+   * This helper eliminates duplication across 8 cache miss locations.
+   *
+   * @param operation - Operation name for Prometheus metrics (e.g., 'raw_commits', 'contributors')
+   * @param metricsField - Internal metrics field to increment ('rawMisses', 'filteredMisses', 'aggregatedMisses')
+   * @param startTime - Operation start timestamp for timing calculations
+   * @param repoUrl - Repository URL for enhanced cache operation tracking
+   */
+  private recordCacheMiss(
+    operation: string,
+    metricsField: 'rawMisses' | 'filteredMisses' | 'aggregatedMisses',
+    startTime: number,
+    repoUrl: string
+  ): void {
+    this.metrics.operations[metricsField]++;
+    this.recordMissTime(startTime);
+    cacheMisses.inc({ operation });
+    recordEnhancedCacheOperation(operation, false, undefined, repoUrl);
+  }
+
+  /**
    * Internal raw commits retrieval without external locking.
    *
    * This method is used within ordered lock contexts to prevent deadlocks.
@@ -2728,10 +2741,7 @@ export class RepositoryCacheManager {
     }
 
     // Cache miss - need to fetch from repository with transaction
-    this.metrics.operations.rawMisses++;
-    this.recordMissTime(startTime);
-    cacheMisses.inc({ operation: 'raw_commits' });
-    recordEnhancedCacheOperation('raw_commits', false, undefined, repoUrl);
+    this.recordCacheMiss('raw_commits', 'rawMisses', startTime, repoUrl);
 
     logger.info('Raw commits cache miss, fetching from repository', {
       repoUrl,
@@ -2889,10 +2899,12 @@ export class RepositoryCacheManager {
     }
 
     // Cache miss - get raw commits and apply filters with transaction
-    this.metrics.operations.filteredMisses++;
-    this.recordMissTime(startTime);
-    cacheMisses.inc({ operation: 'filtered_commits' });
-    recordEnhancedCacheOperation('filtered_commits', false, undefined, repoUrl);
+    this.recordCacheMiss(
+      'filtered_commits',
+      'filteredMisses',
+      startTime,
+      repoUrl
+    );
 
     logger.debug(
       'Filtered commits cache miss, applying filters to raw commits',
