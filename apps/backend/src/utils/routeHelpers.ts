@@ -1,7 +1,7 @@
-import { Request } from 'express';
-import { CommitFilterOptions } from '@gitray/shared-types';
+import { Request, Response } from 'express';
+import { CommitFilterOptions, HTTP_STATUS } from '@gitray/shared-types';
 import { createRequestLogger } from '../services/logger';
-import { getUserType } from '../services/metrics';
+import { getUserType, recordFeatureUsage } from '../services/metrics';
 
 /**
  * Extracts common request initialization for route handlers.
@@ -25,6 +25,56 @@ export function setupRouteRequest(req: Request) {
   const userType = getUserType(req);
 
   return { logger, repoUrl, userType };
+}
+
+/**
+ * Records successful route operation with metrics and logging.
+ * Standardizes success path across all repository endpoints.
+ *
+ * This helper consolidates three common operations after successful data retrieval:
+ * - Recording success metrics for monitoring
+ * - Logging operation completion with context
+ * - Sending HTTP 200 response with data
+ *
+ * @param featureName - Feature identifier for metrics (e.g., 'repository_commits')
+ * @param userType - User type from metrics service
+ * @param logger - Request-scoped logger instance
+ * @param repoUrl - Repository URL for logging context
+ * @param data - Response data to send to client
+ * @param res - Express response object
+ * @param additionalLogData - Optional extra fields for success log
+ *
+ * @example
+ * recordRouteSuccess(
+ *   'repository_commits',
+ *   userType,
+ *   logger,
+ *   repoUrl,
+ *   { commits, page, limit },
+ *   res,
+ *   { commitCount: commits.length, page, limit }
+ * );
+ */
+export function recordRouteSuccess<T>(
+  featureName: string,
+  userType: string,
+  logger: any,
+  repoUrl: string,
+  data: T,
+  res: any,
+  additionalLogData?: Record<string, any>
+): void {
+  // Record success metrics
+  recordFeatureUsage(featureName, userType, true, 'api_call');
+
+  // Log successful operation
+  logger.info(`${featureName} retrieved successfully`, {
+    repoUrl,
+    ...additionalLogData,
+  });
+
+  // Send response
+  res.status(HTTP_STATUS.OK).json(data);
 }
 
 /**

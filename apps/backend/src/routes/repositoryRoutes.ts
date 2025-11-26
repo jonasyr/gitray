@@ -23,7 +23,11 @@ import {
   ValidationError,
 } from '@gitray/shared-types';
 import { isSecureGitUrl } from '../middlewares/validation';
-import { buildCommitFilters, setupRouteRequest } from '../utils/routeHelpers';
+import {
+  buildCommitFilters,
+  setupRouteRequest,
+  recordRouteSuccess,
+} from '../utils/routeHelpers';
 
 // Remove unused imports: redis, gitService, withTempRepository, repositorySummaryService
 
@@ -194,17 +198,16 @@ router.get(
 
       const commits = await getCachedCommits(repoUrl, cacheOptions);
 
-      // Record successful operation
-      recordFeatureUsage('repository_commits', userType, true, 'api_call');
-
-      logger.info('Commits retrieved successfully', {
+      // Record successful operation with helper
+      recordRouteSuccess(
+        'repository_commits',
+        userType,
+        logger,
         repoUrl,
-        commitCount: commits.length,
-        page,
-        limit,
-      });
-
-      res.status(HTTP_STATUS.OK).json({ commits, page, limit });
+        { commits, page, limit },
+        res,
+        { commitCount: commits.length, page, limit }
+      );
     } catch (error) {
       recordFeatureUsage('repository_commits', userType, false, 'api_call');
       logger.error('Failed to retrieve commits', {
@@ -243,15 +246,16 @@ router.get(
       // Use unified cache manager for aggregated data (Level 3 cache)
       const heatmapData = await getCachedAggregatedData(repoUrl, filters);
 
-      // Record successful operation
-      recordFeatureUsage('heatmap_view', userType, true, 'api_call');
-
-      logger.info('Heatmap data retrieved successfully', {
+      // Record successful operation with helper
+      recordRouteSuccess(
+        'heatmap_view',
+        userType,
+        logger,
         repoUrl,
-        dataPoints: heatmapData.data.length,
-      });
-
-      res.status(HTTP_STATUS.OK).json({ heatmapData });
+        { heatmapData },
+        res,
+        { dataPoints: heatmapData.data.length }
+      );
     } catch (error) {
       recordFeatureUsage('heatmap_view', userType, false, 'api_call');
       logger.error('Failed to retrieve heatmap data', {
@@ -290,15 +294,16 @@ router.get(
       // Use unified cache manager for contributors data
       const contributors = await getCachedContributors(repoUrl, filters);
 
-      // Record successful operation
-      recordFeatureUsage('contributors_view', userType, true, 'api_call');
-
-      logger.info('Contributors retrieved successfully', {
+      // Record successful operation with helper
+      recordRouteSuccess(
+        'contributors_view',
+        userType,
+        logger,
         repoUrl,
-        contributorCount: contributors.length,
-      });
-
-      res.status(HTTP_STATUS.OK).json({ contributors });
+        { contributors },
+        res,
+        { contributorCount: contributors.length }
+      );
     } catch (error) {
       recordFeatureUsage('contributors_view', userType, false, 'api_call');
       logger.error('Failed to retrieve contributors', {
@@ -344,15 +349,16 @@ router.get(
       // Use unified cache manager for churn data
       const churnData = await getCachedChurnData(repoUrl, filters);
 
-      // Record successful operation
-      recordFeatureUsage('code_churn_view', userType, true, 'api_call');
-
-      logger.info('Churn data retrieved successfully', {
+      // Record successful operation with helper
+      recordRouteSuccess(
+        'code_churn_view',
+        userType,
+        logger,
         repoUrl,
-        fileCount: churnData.files.length,
-      });
-
-      res.status(HTTP_STATUS.OK).json({ churnData });
+        { churnData },
+        res,
+        { fileCount: churnData.files.length }
+      );
     } catch (error) {
       recordFeatureUsage('code_churn_view', userType, false, 'api_call');
       logger.error('Failed to retrieve churn data', {
@@ -386,15 +392,16 @@ router.get(
       // Use unified cache manager for summary data
       const summary = await getCachedSummary(repoUrl);
 
-      // Record successful operation
-      recordFeatureUsage('repository_summary', userType, true, 'api_call');
-
-      logger.info('Repository summary retrieved successfully', {
+      // Record successful operation with helper
+      recordRouteSuccess(
+        'repository_summary',
+        userType,
+        logger,
         repoUrl,
-        repositoryName: summary.repository.name,
-      });
-
-      res.status(HTTP_STATUS.OK).json({ summary });
+        { summary },
+        res,
+        { repositoryName: summary.repository.name }
+      );
     } catch (error) {
       recordFeatureUsage('repository_summary', userType, false, 'api_call');
       logger.error('Failed to retrieve repository summary', {
@@ -451,9 +458,6 @@ router.get(
       const commits = await getCachedCommits(repoUrl, cacheOptions);
       const heatmapData = await getCachedAggregatedData(repoUrl, filters);
 
-      // Record successful operation
-      recordFeatureUsage('full_data_view', userType, true, 'api_call');
-
       // Defensive check: Ensure heatmapData is actually CommitHeatmapData
       const isValidHeatmap =
         heatmapData &&
@@ -474,16 +478,22 @@ router.get(
         );
       }
 
-      logger.info('Full data retrieved successfully', {
+      // Record successful operation with helper
+      recordRouteSuccess(
+        'full_data_view',
+        userType,
+        logger,
         repoUrl,
-        commitCount: commits?.length ?? 0,
-        dataPoints: isValidHeatmap ? heatmapData.data.length : 0,
-        page,
-        limit,
-        heatmapIsValid: isValidHeatmap,
-      });
-
-      res.status(HTTP_STATUS.OK).json({ commits, heatmapData, page, limit });
+        { commits, heatmapData, page, limit },
+        res,
+        {
+          commitCount: commits?.length ?? 0,
+          dataPoints: isValidHeatmap ? heatmapData.data.length : 0,
+          page,
+          limit,
+          heatmapIsValid: isValidHeatmap,
+        }
+      );
     } catch (error) {
       recordFeatureUsage('full_data_view', userType, false, 'api_call');
       logger.error('Failed to retrieve full data', {
