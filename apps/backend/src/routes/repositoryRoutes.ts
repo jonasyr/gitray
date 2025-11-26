@@ -23,6 +23,7 @@ import {
   ValidationError,
 } from '@gitray/shared-types';
 import { isSecureGitUrl } from '../middlewares/validation';
+import { buildCommitFilters } from '../utils/routeHelpers';
 
 // Remove unused imports: redis, gitService, withTempRepository, repositorySummaryService
 
@@ -239,21 +240,8 @@ router.get(
         hasFilters: !!(author || authors || fromDate || toDate),
       });
 
-      // Build filter options from query parameters
-      // Only include defined properties to ensure consistent cache keys
-      const filters: CommitFilterOptions = {};
-      if (author) {
-        filters.author = author;
-      }
-      if (authors) {
-        filters.authors = authors.split(',').map((a) => a.trim());
-      }
-      if (fromDate) {
-        filters.fromDate = fromDate;
-      }
-      if (toDate) {
-        filters.toDate = toDate;
-      }
+      // Build filter options from query parameters using helper function
+      const filters = buildCommitFilters({ author, authors, fromDate, toDate });
 
       // Use unified cache manager for aggregated data (Level 3 cache)
       const heatmapData = await getCachedAggregatedData(repoUrl, filters);
@@ -300,21 +288,8 @@ router.get(
         hasFilters: !!(author || authors || fromDate || toDate),
       });
 
-      // Build filter options from query parameters
-      // Only include defined properties to ensure consistent cache keys
-      const filters: CommitFilterOptions = {};
-      if (author) {
-        filters.author = author;
-      }
-      if (authors) {
-        filters.authors = authors.split(',').map((a) => a.trim());
-      }
-      if (fromDate) {
-        filters.fromDate = fromDate;
-      }
-      if (toDate) {
-        filters.toDate = toDate;
-      }
+      // Build filter options from query parameters using helper function
+      const filters = buildCommitFilters({ author, authors, fromDate, toDate });
 
       // Use unified cache manager for contributors data
       const contributors = await getCachedContributors(repoUrl, filters);
@@ -468,21 +443,8 @@ router.get(
         hasFilters: !!(author || authors || fromDate || toDate),
       });
 
-      // Build filter options from query parameters
-      // Only include defined properties to ensure consistent cache keys
-      const filters: CommitFilterOptions = {};
-      if (author) {
-        filters.author = author;
-      }
-      if (authors) {
-        filters.authors = authors.split(',').map((a) => a.trim());
-      }
-      if (fromDate) {
-        filters.fromDate = fromDate;
-      }
-      if (toDate) {
-        filters.toDate = toDate;
-      }
+      // Build filter options from query parameters using helper function
+      const filters = buildCommitFilters({ author, authors, fromDate, toDate });
 
       const cacheOptions: CommitCacheOptions = {
         skip,
