@@ -1158,7 +1158,7 @@ export class RepositoryCacheManager {
           }
         );
       } catch (error) {
-        await this.handleTransactionError(
+        return this.handleTransactionError(
           transaction,
           error,
           repoUrl,
@@ -1446,7 +1446,7 @@ export class RepositoryCacheManager {
           }
         );
       } catch (error) {
-        await this.handleTransactionError(
+        return this.handleTransactionError(
           transaction,
           error,
           repoUrl,
@@ -1639,7 +1639,7 @@ export class RepositoryCacheManager {
           }
         );
       } catch (error) {
-        await this.handleTransactionError(
+        return this.handleTransactionError(
           transaction,
           error,
           repoUrl,
@@ -1765,7 +1765,7 @@ export class RepositoryCacheManager {
           }
         );
       } catch (error) {
-        await this.handleTransactionError(
+        return this.handleTransactionError(
           transaction,
           error,
           repoUrl,
