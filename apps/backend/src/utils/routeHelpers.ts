@@ -1,5 +1,9 @@
 import { Request, Response } from 'express';
-import { CommitFilterOptions, HTTP_STATUS } from '@gitray/shared-types';
+import {
+  CommitFilterOptions,
+  ChurnFilterOptions,
+  HTTP_STATUS,
+} from '@gitray/shared-types';
 import { createRequestLogger } from '../services/logger';
 import { getUserType, recordFeatureUsage } from '../services/metrics';
 
@@ -158,6 +162,104 @@ export function buildCommitFilters(query: {
   }
   if (query.toDate) {
     filters.toDate = query.toDate;
+  }
+
+  return filters;
+}
+
+/**
+ * Extracted pagination parameters from Express query parameters.
+ * Provides consistent pagination logic across all paginated routes.
+ *
+ * This helper eliminates duplication in routes that need pagination.
+ * It handles default values and ensures consistent page/limit/skip calculations.
+ *
+ * @param query - Express request query object containing pagination parameters
+ * @returns PaginationParams with page, limit, and skip values
+ *
+ * @example
+ * const { page, limit, skip } = extractPaginationParams(req.query);
+ * // Returns: { page: 1, limit: 100, skip: 0 } with defaults
+ */
+export interface PaginationParams {
+  page: number;
+  limit: number;
+  skip: number;
+}
+
+export function extractPaginationParams(query: {
+  page?: string;
+  limit?: string;
+}): PaginationParams {
+  const page = Number.parseInt(query.page || '1') || 1;
+  const limit = Number.parseInt(query.limit || '100') || 100;
+  const skip = (page - 1) * limit;
+
+  return { page, limit, skip };
+}
+
+/**
+ * Extracts filter parameters from Express query parameters.
+ * Provides consistent extraction of author/date filter parameters.
+ *
+ * This helper eliminates duplication in routes that need filter parameters.
+ * Simply destructures the filter fields from query for cleaner code.
+ *
+ * @param query - Express request query object containing filter parameters
+ * @returns Object with optional filter fields
+ *
+ * @example
+ * const { author, authors, fromDate, toDate } = extractFilterParams(req.query);
+ */
+export function extractFilterParams(
+  query: Record<string, string | undefined>
+): {
+  author?: string;
+  authors?: string;
+  fromDate?: string;
+  toDate?: string;
+} {
+  const { author, authors, fromDate, toDate } = query;
+  return { author, authors, fromDate, toDate };
+}
+
+/**
+ * Builds ChurnFilterOptions from Express query parameters.
+ * Only includes defined properties to ensure consistent cache keys.
+ *
+ * This helper mirrors the pattern of buildCommitFilters but for churn analysis.
+ * By excluding undefined properties, it ensures cache key consistency.
+ *
+ * @param query - Express request query object containing churn filter parameters
+ * @returns ChurnFilterOptions with only defined properties
+ *
+ * @example
+ * const filters = buildChurnFilters({
+ *   fromDate: '2024-01-01',
+ *   minChanges: '5',
+ *   extensions: 'ts,tsx'
+ * });
+ * // Returns: { since: '2024-01-01', minChanges: 5, extensions: ['ts', 'tsx'] }
+ */
+export function buildChurnFilters(query: {
+  fromDate?: string;
+  toDate?: string;
+  minChanges?: string;
+  extensions?: string;
+}): ChurnFilterOptions {
+  const filters: ChurnFilterOptions = {};
+
+  if (query.fromDate) {
+    filters.since = query.fromDate;
+  }
+  if (query.toDate) {
+    filters.until = query.toDate;
+  }
+  if (query.minChanges) {
+    filters.minChanges = Number.parseInt(query.minChanges);
+  }
+  if (query.extensions) {
+    filters.extensions = query.extensions.split(',').map((e) => e.trim());
   }
 
   return filters;

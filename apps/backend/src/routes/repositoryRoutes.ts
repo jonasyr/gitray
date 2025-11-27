@@ -25,6 +25,9 @@ import {
 import { isSecureGitUrl } from '../middlewares/validation';
 import {
   buildCommitFilters,
+  buildChurnFilters,
+  extractPaginationParams,
+  extractFilterParams,
   setupRouteRequest,
   recordRouteSuccess,
   recordRouteError,
@@ -180,9 +183,7 @@ router.get(
   handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
     const { logger, repoUrl, userType } = setupRouteRequest(req);
-    const page = Number.parseInt(req.query.page as string) || 1;
-    const limit = Number.parseInt(req.query.limit as string) || 100;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = extractPaginationParams(req.query);
 
     try {
       logger.info('Processing commits request with unified caching', {
@@ -232,10 +233,9 @@ router.get(
   handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
     const { logger, repoUrl, userType } = setupRouteRequest(req);
-    const { author, authors, fromDate, toDate } = req.query as Record<
-      string,
-      string
-    >;
+    const { author, authors, fromDate, toDate } = extractFilterParams(
+      req.query as Record<string, string>
+    );
 
     try {
       logger.info('Processing heatmap request with unified caching', {
@@ -275,10 +275,9 @@ router.get(
   handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
     const { logger, repoUrl, userType } = setupRouteRequest(req);
-    const { author, authors, fromDate, toDate } = req.query as Record<
-      string,
-      string
-    >;
+    const { author, authors, fromDate, toDate } = extractFilterParams(
+      req.query as Record<string, string>
+    );
 
     try {
       logger.info('Processing contributors request with unified caching', {
@@ -336,15 +335,13 @@ router.get(
         hasFilters: !!(fromDate || toDate || minChanges || extensions),
       });
 
-      // Build filter options from query parameters
-      const filters: ChurnFilterOptions = {
-        since: fromDate || undefined,
-        until: toDate || undefined,
-        minChanges: minChanges ? Number.parseInt(minChanges) : undefined,
-        extensions: extensions
-          ? extensions.split(',').map((e) => e.trim())
-          : undefined,
-      };
+      // Build filter options from query parameters using helper
+      const filters = buildChurnFilters({
+        fromDate,
+        toDate,
+        minChanges,
+        extensions,
+      });
 
       // Use unified cache manager for churn data
       const churnData = await getCachedChurnData(repoUrl, filters);
@@ -432,13 +429,10 @@ router.get(
   handleValidationErrors,
   async (req: Request, res: Response, next: NextFunction) => {
     const { logger, repoUrl, userType } = setupRouteRequest(req);
-    const { author, authors, fromDate, toDate } = req.query as Record<
-      string,
-      string
-    >;
-    const page = Number.parseInt(req.query.page as string) || 1;
-    const limit = Number.parseInt(req.query.limit as string) || 100;
-    const skip = (page - 1) * limit;
+    const { author, authors, fromDate, toDate } = extractFilterParams(
+      req.query as Record<string, string>
+    );
+    const { page, limit, skip } = extractPaginationParams(req.query);
 
     try {
       logger.info('Processing full-data request with unified caching', {
