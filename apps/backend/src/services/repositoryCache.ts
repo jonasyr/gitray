@@ -1158,33 +1158,12 @@ export class RepositoryCacheManager {
           }
         );
       } catch (error) {
-        // Increment transaction failure counter for monitoring
-        this.metrics.transactions.failed++;
-
-        // Record comprehensive error details for debugging and alerting
-        recordDetailedError(
-          'cache',
-          error instanceof Error ? error : new Error(String(error)),
-          {
-            userImpact: 'degraded',
-            recoveryAction: 'retry',
-            severity: 'warning',
-          }
-        );
-
-        // Update system health metrics to reflect the failure
-        updateServiceHealthScore('cache', { errorRate: 1 });
-
-        // Rollback all cache changes to maintain consistency
-        await this.rollbackTransaction(transaction);
-
-        logger.error('Failed to cache raw commits, transaction rolled back', {
+        await this.handleTransactionError(
+          transaction,
+          error,
           repoUrl,
-          transactionId: transaction.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-
-        throw error;
+          'raw commits'
+        );
       }
     });
   }
@@ -1467,33 +1446,12 @@ export class RepositoryCacheManager {
           }
         );
       } catch (error) {
-        // Track contributor generation failure
-        this.metrics.transactions.failed++;
-
-        // Record comprehensive error details
-        recordDetailedError(
-          'cache',
-          error instanceof Error ? error : new Error(String(error)),
-          {
-            userImpact: 'degraded',
-            recoveryAction: 'retry',
-            severity: 'warning',
-          }
-        );
-
-        // Update system health metrics
-        updateServiceHealthScore('cache', { errorRate: 1 });
-
-        // Rollback transaction to maintain cache consistency
-        await this.rollbackTransaction(transaction);
-
-        logger.error('Failed to cache contributors, transaction rolled back', {
+        await this.handleTransactionError(
+          transaction,
+          error,
           repoUrl,
-          transactionId: transaction.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-
-        throw error;
+          'contributors'
+        );
       }
     });
   }
@@ -1681,36 +1639,12 @@ export class RepositoryCacheManager {
           }
         );
       } catch (error) {
-        // Track aggregation failure for system monitoring
-        this.metrics.transactions.failed++;
-
-        // Record comprehensive error details for debugging complex aggregations
-        recordDetailedError(
-          'cache',
-          error instanceof Error ? error : new Error(String(error)),
-          {
-            userImpact: 'degraded',
-            recoveryAction: 'retry',
-            severity: 'warning',
-          }
+        await this.handleTransactionError(
+          transaction,
+          error,
+          repoUrl,
+          'aggregated data'
         );
-
-        // Update system health metrics
-        updateServiceHealthScore('cache', { errorRate: 1 });
-
-        // Rollback transaction to maintain cache consistency
-        await this.rollbackTransaction(transaction);
-
-        logger.error(
-          'Failed to cache aggregated data, transaction rolled back',
-          {
-            repoUrl,
-            transactionId: transaction.id,
-            error: error instanceof Error ? error.message : String(error),
-          }
-        );
-
-        throw error;
       }
     });
   }
@@ -1831,33 +1765,12 @@ export class RepositoryCacheManager {
           }
         );
       } catch (error) {
-        // Track churn analysis failure
-        this.metrics.transactions.failed++;
-
-        // Record comprehensive error details
-        recordDetailedError(
-          'cache',
-          error instanceof Error ? error : new Error(String(error)),
-          {
-            userImpact: 'degraded',
-            recoveryAction: 'retry',
-            severity: 'warning',
-          }
-        );
-
-        // Update system health metrics
-        updateServiceHealthScore('cache', { errorRate: 1 });
-
-        // Rollback transaction to maintain cache consistency
-        await this.rollbackTransaction(transaction);
-
-        logger.error('Failed to cache churn data, transaction rolled back', {
+        await this.handleTransactionError(
+          transaction,
+          error,
           repoUrl,
-          transactionId: transaction.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-
-        throw error;
+          'churn data'
+        );
       }
     });
   }
@@ -2742,6 +2655,61 @@ export class RepositoryCacheManager {
     });
     updateServiceHealthScore('cache', { cacheHitRate: 1, errorRate: 0 });
     return data;
+  }
+
+  /**
+   * Handles transaction errors with consistent cleanup and logging.
+   * Consolidates error handling logic across all cache methods.
+   *
+   * This helper ensures all cache failures follow the same pattern:
+   * - Record failure metrics
+   * - Update health scores
+   * - Rollback transactions
+   * - Log errors with context
+   * - Re-throw for upstream handling
+   *
+   * @param transaction - Transaction to rollback
+   * @param error - Error that occurred
+   * @param repoUrl - Repository URL for logging context
+   * @param operationName - Operation name for error message
+   * @param logContext - Optional additional context for logs
+   * @throws The original error after cleanup
+   */
+  private async handleTransactionError(
+    transaction: CacheTransaction,
+    error: unknown,
+    repoUrl: string,
+    operationName: string,
+    logContext?: Record<string, any>
+  ): Promise<never> {
+    // Increment transaction failure counter for monitoring
+    this.metrics.transactions.failed++;
+
+    // Record comprehensive error details for debugging and alerting
+    recordDetailedError(
+      'cache',
+      error instanceof Error ? error : new Error(String(error)),
+      {
+        userImpact: 'degraded',
+        recoveryAction: 'retry',
+        severity: 'warning',
+      }
+    );
+
+    // Update system health metrics to reflect the failure
+    updateServiceHealthScore('cache', { errorRate: 1 });
+
+    // Rollback all cache changes to maintain consistency
+    await this.rollbackTransaction(transaction);
+
+    logger.error(`Failed to cache ${operationName}, transaction rolled back`, {
+      repoUrl,
+      transactionId: transaction.id,
+      error: error instanceof Error ? error.message : String(error),
+      ...logContext,
+    });
+
+    throw error;
   }
 
   /**
