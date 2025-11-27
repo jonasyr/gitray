@@ -1071,22 +1071,20 @@ export class RepositoryCacheManager {
 
       if (commits) {
         // Cache hit: Update metrics and return cached data immediately
-        this.recordCacheHit(
+        return this.handleCacheHit(
+          'Raw commits',
           'raw_commits',
           'rawHits',
           startTime,
           repoUrl,
+          commits,
+          {
+            commitsCount: commits.length,
+            cacheKey: rawKey,
+          },
           commits.length,
           'commits'
         );
-
-        logger.debug('Raw commits cache hit', {
-          repoUrl,
-          commitsCount: commits.length,
-          cacheKey: rawKey,
-        });
-
-        return commits;
       }
 
       // Cache miss: Fetch from Git repository and cache the result
@@ -2679,6 +2677,68 @@ export class RepositoryCacheManager {
     this.recordMissTime(startTime);
     cacheMisses.inc({ operation });
     recordEnhancedCacheOperation(operation, false, undefined, repoUrl);
+  }
+
+  /**
+   * Handles cache hit path with logging and metrics.
+   * Consolidates the duplicate pattern of recording cache hits and returning cached data.
+   *
+   * Eliminates ~60 lines of duplication across 4 cache methods.
+   *
+   * @param cacheType - Human-readable cache type for logging (e.g., 'Raw commits', 'Aggregated data')
+   * @param operation - Operation name for Prometheus metrics (e.g., 'raw_commits', 'contributors')
+   * @param metricsField - Internal metrics field to increment
+   * @param startTime - Operation start timestamp
+   * @param repoUrl - Repository URL
+   * @param data - The cached data to return
+   * @param logContext - Additional context for debug logging
+   * @returns The cached data
+   */
+  /**
+   * Handles cache hit path with logging and metrics.
+   * Consolidates the duplicate pattern of recording cache hits and returning cached data.
+   *
+   * Eliminates ~60 lines of duplication across 4 cache methods.
+   *
+   * @param cacheType - Human-readable cache type for logging (e.g., 'Raw commits', 'Aggregated data')
+   * @param operation - Operation name for Prometheus metrics (e.g., 'raw_commits', 'contributors')
+   * @param metricsField - Internal metrics field to increment
+   * @param startTime - Operation start timestamp
+   * @param repoUrl - Repository URL
+   * @param data - The cached data to return
+   * @param logContext - Additional context for debug logging
+   * @param dataCount - Optional data count for enhanced metrics (used for raw/filtered commits)
+   * @param dataType - Optional data type for freshness tracking (used for aggregated data types)
+   * @returns The cached data
+   */
+  private handleCacheHit<T>(
+    cacheType: string,
+    operation: string,
+    metricsField: 'rawHits' | 'filteredHits' | 'aggregatedHits',
+    startTime: number,
+    repoUrl: string,
+    data: T,
+    logContext?: Record<string, any>,
+    dataCount?: number,
+    dataType?: string
+  ): T {
+    // Record metrics with optional data count and type
+    this.recordCacheHit(
+      operation,
+      metricsField,
+      startTime,
+      repoUrl,
+      dataCount,
+      dataType
+    );
+
+    // Log cache hit with context
+    logger.debug(`${cacheType} cache hit`, {
+      repoUrl,
+      ...logContext,
+    });
+
+    return data;
   }
 
   /**
