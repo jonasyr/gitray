@@ -334,5 +334,12 @@ apps/backend/logs/
 
 .claude*
 .mcp.json
-.serena
+# Serena MCP - ignore cache but track memories and config
+.serena/cache/
+# Track Serena memories and project configuration
+!.serena/
+!.serena/.gitignore
+!.serena/project.yml
+!.serena/memories/
+!.serena/memories/*.md
 .github/instructions/sonarqube_mcp.instructions.md
