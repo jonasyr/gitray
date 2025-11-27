@@ -1143,33 +1143,20 @@ export class RepositoryCacheManager {
 
         // Store the fetched data in cache using transactional consistency
         const ttl = config.cacheStrategy.cacheKeys.rawCommitsTTL;
-        await this.transactionalSet(
+        return this.handleTransactionSuccess(
           this.rawCommitsCache,
           'raw',
           rawKey,
           commits,
           ttl,
-          transaction
-        );
-
-        // Finalize the transaction - all operations succeeded
-        await this.commitTransaction(transaction);
-
-        logger.info('Raw commits cached with transaction', {
+          transaction,
           repoUrl,
-          commitsCount: commits.length,
-          ttl,
-          sizeCategory: getRepositorySizeCategory(commits.length),
-          transactionId: transaction.id,
-        });
-
-        // Update system health metrics with successful operation
-        updateServiceHealthScore('cache', {
-          cacheHitRate: 1.0,
-          errorRate: 0.0,
-        });
-
-        return commits;
+          'Raw commits cached with transaction',
+          {
+            commitsCount: commits.length,
+            sizeCategory: getRepositorySizeCategory(commits.length),
+          }
+        );
       } catch (error) {
         // Increment transaction failure counter for monitoring
         this.metrics.transactions.failed++;
@@ -1465,33 +1452,20 @@ export class RepositoryCacheManager {
 
         // Cache the contributors data
         const ttl = config.cacheStrategy.cacheKeys.aggregatedDataTTL;
-        await this.transactionalSet(
+        return this.handleTransactionSuccess(
           this.aggregatedDataCache,
           'aggregated',
           contributorsKey,
           contributors,
           ttl,
-          transaction
-        );
-
-        // Finalize the transaction
-        await this.commitTransaction(transaction);
-
-        logger.debug('Contributors cached with transaction', {
+          transaction,
           repoUrl,
-          filters: filterOptions,
-          contributorsCount: contributors.length,
-          ttl,
-          transactionId: transaction.id,
-        });
-
-        // Update system health metrics
-        updateServiceHealthScore('cache', {
-          cacheHitRate: 1,
-          errorRate: 0,
-        });
-
-        return contributors;
+          'Contributors cached with transaction',
+          {
+            filters: filterOptions,
+            contributorsCount: contributors.length,
+          }
+        );
       } catch (error) {
         // Track contributor generation failure
         this.metrics.transactions.failed++;
@@ -1688,37 +1662,24 @@ export class RepositoryCacheManager {
 
         // Cache the computationally expensive aggregated results
         const ttl = config.cacheStrategy.cacheKeys.aggregatedDataTTL;
-        await this.transactionalSet(
+        return this.handleTransactionSuccess(
           this.aggregatedDataCache,
           'aggregated',
           aggregatedKey,
           aggregatedData,
           ttl,
-          transaction
-        );
-
-        // Finalize the transaction
-        await this.commitTransaction(transaction);
-
-        logger.debug('Aggregated data cached with transaction', {
+          transaction,
           repoUrl,
-          filters: filterOptions,
-          dataPoints: aggregatedData.data.length,
-          totalCommits: aggregatedData.metadata?.totalCommits ?? 0,
-          ttl,
-          transactionId: transaction.id,
-          aggregatedDataType: typeof aggregatedData,
-          hasTimePeriod: 'timePeriod' in aggregatedData,
-          hasData: 'data' in aggregatedData,
-        });
-
-        // Update system health metrics
-        updateServiceHealthScore('cache', {
-          cacheHitRate: 1,
-          errorRate: 0,
-        });
-
-        return aggregatedData;
+          'Aggregated data cached with transaction',
+          {
+            filters: filterOptions,
+            dataPoints: aggregatedData.data.length,
+            totalCommits: aggregatedData.metadata?.totalCommits ?? 0,
+            aggregatedDataType: typeof aggregatedData,
+            hasTimePeriod: 'timePeriod' in aggregatedData,
+            hasData: 'data' in aggregatedData,
+          }
+        );
       } catch (error) {
         // Track aggregation failure for system monitoring
         this.metrics.transactions.failed++;
@@ -1855,33 +1816,20 @@ export class RepositoryCacheManager {
 
         // Cache the churn analysis results
         const ttl = config.cacheStrategy.cacheKeys.aggregatedDataTTL;
-        await this.transactionalSet(
+        return this.handleTransactionSuccess(
           this.aggregatedDataCache,
           'aggregated',
           churnKey,
           churnData,
           ttl,
-          transaction
-        );
-
-        // Finalize the transaction
-        await this.commitTransaction(transaction);
-
-        logger.debug('Churn data cached with transaction', {
+          transaction,
           repoUrl,
-          filters: filterOptions,
-          fileCount: churnData.files.length,
-          ttl,
-          transactionId: transaction.id,
-        });
-
-        // Update system health metrics
-        updateServiceHealthScore('cache', {
-          cacheHitRate: 1,
-          errorRate: 0,
-        });
-
-        return churnData;
+          'Churn data cached with transaction',
+          {
+            filters: filterOptions,
+            fileCount: churnData.files.length,
+          }
+        );
       } catch (error) {
         // Track churn analysis failure
         this.metrics.transactions.failed++;
@@ -2755,6 +2703,45 @@ export class RepositoryCacheManager {
       repoUrl,
       ...logContext,
     });
+  }
+
+  /**
+   * Consolidates successful transaction caching operations.
+   * Reduces duplication across all cache methods by standardizing
+   * the success path for caching operations.
+   *
+   * @param cache - Cache instance to store data in
+   * @param cacheType - Cache tier identifier ('raw', 'aggregated')
+   * @param key - Cache key for storing the data
+   * @param data - Data to cache
+   * @param ttl - Time-to-live in seconds
+   * @param transaction - Transaction object for atomicity
+   * @param repoUrl - Repository URL for logging context
+   * @param logMessage - Human-readable message describing what was cached
+   * @param logContext - Additional context to include in the log
+   * @returns The cached data
+   */
+  private async handleTransactionSuccess<T>(
+    cache: any,
+    cacheType: 'raw' | 'aggregated',
+    key: string,
+    data: T,
+    ttl: number,
+    transaction: CacheTransaction,
+    repoUrl: string,
+    logMessage: string,
+    logContext?: Record<string, any>
+  ): Promise<T> {
+    await this.transactionalSet(cache, cacheType, key, data, ttl, transaction);
+    await this.commitTransaction(transaction);
+    logger.debug(logMessage, {
+      repoUrl,
+      ttl,
+      transactionId: transaction.id,
+      ...logContext,
+    });
+    updateServiceHealthScore('cache', { cacheHitRate: 1, errorRate: 0 });
+    return data;
   }
 
   /**
