@@ -1088,12 +1088,14 @@ export class RepositoryCacheManager {
       }
 
       // Cache miss: Fetch from Git repository and cache the result
-      this.recordCacheMiss('raw_commits', 'rawMisses', startTime, repoUrl);
-
-      logger.info('Raw commits cache miss, fetching from repository', {
+      this.handleCacheMiss(
+        'raw_commits',
+        'rawMisses',
+        startTime,
         repoUrl,
-        cacheKey: rawKey,
-      });
+        'Raw commits cache miss, fetching from repository',
+        { cacheKey: rawKey }
+      );
 
       const transaction = this.createTransaction(repoUrl);
 
@@ -1413,18 +1415,14 @@ export class RepositoryCacheManager {
       }
 
       // Cache miss: Generate contributor data
-      this.recordCacheMiss(
+      this.handleCacheMiss(
         'contributors',
         'aggregatedMisses',
         startTime,
-        repoUrl
-      );
-
-      logger.debug('Contributors cache miss, generating from commits', {
         repoUrl,
-        filters: filterOptions,
-        cacheKey: contributorsKey,
-      });
+        'Contributors cache miss, generating from commits',
+        { filters: filterOptions, cacheKey: contributorsKey }
+      );
 
       const transaction = this.createTransaction(repoUrl);
 
@@ -1620,18 +1618,14 @@ export class RepositoryCacheManager {
       }
 
       // Cache miss: Generate aggregated data from filtered commits
-      this.recordCacheMiss(
+      this.handleCacheMiss(
         'aggregated_data',
         'aggregatedMisses',
         startTime,
-        repoUrl
-      );
-
-      logger.debug('Aggregated data cache miss, generating from commits', {
         repoUrl,
-        filters: filterOptions,
-        cacheKey: aggregatedKey,
-      });
+        'Aggregated data cache miss, generating from commits',
+        { filters: filterOptions, cacheKey: aggregatedKey }
+      );
 
       const transaction = this.createTransaction(repoUrl);
 
@@ -1815,13 +1809,14 @@ export class RepositoryCacheManager {
       }
 
       // Cache miss: Generate churn data from repository
-      this.recordCacheMiss('churn', 'aggregatedMisses', startTime, repoUrl);
-
-      logger.debug('Churn data cache miss, analyzing repository', {
+      this.handleCacheMiss(
+        'churn',
+        'aggregatedMisses',
+        startTime,
         repoUrl,
-        filters: filterOptions,
-        cacheKey: churnKey,
-      });
+        'Churn data cache miss, analyzing repository',
+        { filters: filterOptions, cacheKey: churnKey }
+      );
 
       const transaction = this.createTransaction(repoUrl);
 
@@ -2733,6 +2728,33 @@ export class RepositoryCacheManager {
     });
 
     return data;
+  }
+
+  /**
+   * Consolidates cache miss recording and logging.
+   * Reduces duplication across all cache methods by standardizing
+   * the cache miss path.
+   *
+   * @param operation - Operation identifier for metrics (e.g., 'raw_commits', 'contributors')
+   * @param metricsField - Which metrics counter to increment
+   * @param startTime - Request start timestamp for latency tracking
+   * @param repoUrl - Repository URL for logging context
+   * @param logMessage - Human-readable message describing the cache miss
+   * @param logContext - Additional context to include in the log
+   */
+  private handleCacheMiss(
+    operation: string,
+    metricsField: 'rawMisses' | 'filteredMisses' | 'aggregatedMisses',
+    startTime: number,
+    repoUrl: string,
+    logMessage: string,
+    logContext?: Record<string, any>
+  ): void {
+    this.recordCacheMiss(operation, metricsField, startTime, repoUrl);
+    logger.debug(logMessage, {
+      repoUrl,
+      ...logContext,
+    });
   }
 
   /**
