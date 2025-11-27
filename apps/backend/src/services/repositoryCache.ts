@@ -1395,23 +1395,21 @@ export class RepositoryCacheManager {
 
       if (cachedData && isContributorArray(cachedData)) {
         // Cache hit: Return cached contributor data
-        this.recordCacheHit(
+        return this.handleCacheHit(
+          'Contributors',
           'contributors',
           'aggregatedHits',
           startTime,
           repoUrl,
+          cachedData,
+          {
+            contributorsCount: cachedData.length,
+            filters: filterOptions,
+            cacheKey: contributorsKey,
+          },
           undefined,
           'contributors'
         );
-
-        logger.debug('Contributors cache hit', {
-          repoUrl,
-          contributorsCount: cachedData.length,
-          filters: filterOptions,
-          cacheKey: contributorsKey,
-        });
-
-        return cachedData;
       }
 
       // Cache miss: Generate contributor data
@@ -1605,22 +1603,20 @@ export class RepositoryCacheManager {
 
       if (passesTypeGuard) {
         // Cache hit: Return pre-computed visualization data
-        this.recordCacheHit(
+        return this.handleCacheHit(
+          'Aggregated data',
           'aggregated_data',
           'aggregatedHits',
           startTime,
           repoUrl,
+          cachedData,
+          {
+            filters: filterOptions,
+            cacheKey: aggregatedKey,
+          },
           undefined,
           'aggregated_data'
         );
-
-        logger.debug('Aggregated data cache hit', {
-          repoUrl,
-          filters: filterOptions,
-          cacheKey: aggregatedKey,
-        });
-
-        return cachedData;
       }
 
       // Cache miss: Generate aggregated data from filtered commits
@@ -1801,23 +1797,21 @@ export class RepositoryCacheManager {
 
       if (cachedData && isCodeChurnAnalysis(cachedData)) {
         // Cache hit: Return pre-computed churn analysis
-        this.recordCacheHit(
+        return this.handleCacheHit(
+          'Churn data',
           'churn',
           'aggregatedHits',
           startTime,
           repoUrl,
+          cachedData,
+          {
+            filters: filterOptions,
+            cacheKey: churnKey,
+            fileCount: cachedData.files.length,
+          },
           undefined,
           'churn'
         );
-
-        logger.debug('Churn data cache hit', {
-          repoUrl,
-          filters: filterOptions,
-          cacheKey: churnKey,
-          fileCount: cachedData.files.length,
-        });
-
-        return cachedData;
       }
 
       // Cache miss: Generate churn data from repository
