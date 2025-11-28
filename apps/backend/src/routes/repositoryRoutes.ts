@@ -7,14 +7,14 @@ import {
   getCachedChurnData,
   getCachedSummary,
   type CommitCacheOptions,
-} from '../services/repositoryCache';
-import { createRequestLogger } from '../services/logger';
+} from '../services/repositoryCache.js';
+import { createRequestLogger } from '../services/logger.js';
 import {
   recordFeatureUsage,
   recordEnhancedCacheOperation,
   getUserType,
   getRepositorySizeCategory,
-} from '../services/metrics';
+} from '../services/metrics.js';
 import {
   CommitFilterOptions,
   ChurnFilterOptions,
@@ -22,7 +22,7 @@ import {
   HTTP_STATUS,
   ValidationError,
 } from '@gitray/shared-types';
-import { isSecureGitUrl } from '../middlewares/validation';
+import { isSecureGitUrl } from '../middlewares/validation.js';
 import {
   buildCommitFilters,
   buildChurnFilters,
@@ -31,7 +31,11 @@ import {
   setupRouteRequest,
   recordRouteSuccess,
   recordRouteError,
-} from '../utils/routeHelpers';
+} from '../utils/routeHelpers.js';
+import {
+  createCachedRouteHandler,
+  buildRepoValidationChain,
+} from '../utils/repositoryRouteFactory.js';
 
 // Remove unused imports: redis, gitService, withTempRepository, repositorySummaryService
 
@@ -179,13 +183,19 @@ const churnValidation = (): ValidationChain[] => [
 router.get(
   '/commits',
   setRequestPriority('normal'),
-  [...repoUrlValidation(), ...paginationValidation()],
+  ...buildRepoValidationChain(
+    { includePagination: true },
+    {
+      repoUrlValidation,
+      paginationValidation,
+    }
+  ),
   handleValidationErrors,
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { logger, repoUrl, userType } = setupRouteRequest(req);
-    const { page, limit, skip } = extractPaginationParams(req.query);
+  ...createCachedRouteHandler(
+    'repository_commits',
+    async ({ req, repoUrl, logger }) => {
+      const { page, limit, skip } = extractPaginationParams(req.query);
 
-    try {
       logger.info('Processing commits request with unified caching', {
         repoUrl,
         page,
@@ -200,27 +210,14 @@ router.get(
 
       const commits = await getCachedCommits(repoUrl, cacheOptions);
 
-      // Record successful operation with helper
-      recordRouteSuccess(
-        'repository_commits',
-        userType,
-        logger,
-        repoUrl,
-        { commits, page, limit },
-        res,
-        { commitCount: commits.length, page, limit }
-      );
-    } catch (error) {
-      recordRouteError(
-        'repository_commits',
-        userType,
-        logger,
-        repoUrl,
-        error,
-        next
-      );
-    }
-  }
+      return { commits, page, limit };
+    },
+    ({ commits, page, limit }) => ({
+      commitCount: commits.length,
+      page,
+      limit,
+    })
+  )
 );
 
 // ---------------------------------------------------------------------------
@@ -229,15 +226,22 @@ router.get(
 router.get(
   '/heatmap',
   setRequestPriority('low'),
-  [...repoUrlValidation(), ...dateValidation(), ...authorValidation()],
+  ...buildRepoValidationChain(
+    { includeDates: true, includeAuthors: true },
+    {
+      repoUrlValidation,
+      dateValidation,
+      authorValidation,
+    }
+  ),
   handleValidationErrors,
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { logger, repoUrl, userType } = setupRouteRequest(req);
-    const { author, authors, fromDate, toDate } = extractFilterParams(
-      req.query as Record<string, string>
-    );
+  ...createCachedRouteHandler(
+    'heatmap_view',
+    async ({ req, repoUrl, logger }) => {
+      const { author, authors, fromDate, toDate } = extractFilterParams(
+        req.query as Record<string, string>
+      );
 
-    try {
       logger.info('Processing heatmap request with unified caching', {
         repoUrl,
         hasFilters: !!(author || authors || fromDate || toDate),
@@ -249,20 +253,10 @@ router.get(
       // Use unified cache manager for aggregated data (Level 3 cache)
       const heatmapData = await getCachedAggregatedData(repoUrl, filters);
 
-      // Record successful operation with helper
-      recordRouteSuccess(
-        'heatmap_view',
-        userType,
-        logger,
-        repoUrl,
-        { heatmapData },
-        res,
-        { dataPoints: heatmapData.data.length }
-      );
-    } catch (error) {
-      recordRouteError('heatmap_view', userType, logger, repoUrl, error, next);
-    }
-  }
+      return { heatmapData };
+    },
+    ({ heatmapData }) => ({ dataPoints: heatmapData.data.length })
+  )
 );
 
 // ---------------------------------------------------------------------------
@@ -271,15 +265,22 @@ router.get(
 router.get(
   '/contributors',
   setRequestPriority('normal'),
-  [...repoUrlValidation(), ...dateValidation(), ...authorValidation()],
+  ...buildRepoValidationChain(
+    { includeDates: true, includeAuthors: true },
+    {
+      repoUrlValidation,
+      dateValidation,
+      authorValidation,
+    }
+  ),
   handleValidationErrors,
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { logger, repoUrl, userType } = setupRouteRequest(req);
-    const { author, authors, fromDate, toDate } = extractFilterParams(
-      req.query as Record<string, string>
-    );
+  ...createCachedRouteHandler(
+    'contributors_view',
+    async ({ req, repoUrl, logger }) => {
+      const { author, authors, fromDate, toDate } = extractFilterParams(
+        req.query as Record<string, string>
+      );
 
-    try {
       logger.info('Processing contributors request with unified caching', {
         repoUrl,
         hasFilters: !!(author || authors || fromDate || toDate),
@@ -291,27 +292,10 @@ router.get(
       // Use unified cache manager for contributors data
       const contributors = await getCachedContributors(repoUrl, filters);
 
-      // Record successful operation with helper
-      recordRouteSuccess(
-        'contributors_view',
-        userType,
-        logger,
-        repoUrl,
-        { contributors },
-        res,
-        { contributorCount: contributors.length }
-      );
-    } catch (error) {
-      recordRouteError(
-        'contributors_view',
-        userType,
-        logger,
-        repoUrl,
-        error,
-        next
-      );
-    }
-  }
+      return { contributors };
+    },
+    ({ contributors }) => ({ contributorCount: contributors.length })
+  )
 );
 
 // ---------------------------------------------------------------------------
@@ -320,16 +304,23 @@ router.get(
 router.get(
   '/churn',
   setRequestPriority('normal'),
-  [...repoUrlValidation(), ...dateValidation(), ...churnValidation()],
+  ...buildRepoValidationChain(
+    { includeDates: true, includeChurn: true },
+    {
+      repoUrlValidation,
+      dateValidation,
+      churnValidation,
+    }
+  ),
   handleValidationErrors,
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { logger, repoUrl, userType } = setupRouteRequest(req);
-    const { fromDate, toDate, minChanges, extensions } = req.query as Record<
-      string,
-      string
-    >;
+  ...createCachedRouteHandler(
+    'code_churn_view',
+    async ({ req, repoUrl, logger }) => {
+      const { fromDate, toDate, minChanges, extensions } = req.query as Record<
+        string,
+        string
+      >;
 
-    try {
       logger.info('Processing churn analysis request with unified caching', {
         repoUrl,
         hasFilters: !!(fromDate || toDate || minChanges || extensions),
@@ -346,27 +337,10 @@ router.get(
       // Use unified cache manager for churn data
       const churnData = await getCachedChurnData(repoUrl, filters);
 
-      // Record successful operation with helper
-      recordRouteSuccess(
-        'code_churn_view',
-        userType,
-        logger,
-        repoUrl,
-        { churnData },
-        res,
-        { fileCount: churnData.files.length }
-      );
-    } catch (error) {
-      recordRouteError(
-        'code_churn_view',
-        userType,
-        logger,
-        repoUrl,
-        error,
-        next
-      );
-    }
-  }
+      return { churnData };
+    },
+    ({ churnData }) => ({ fileCount: churnData.files.length })
+  )
 );
 
 // ---------------------------------------------------------------------------
@@ -375,12 +349,11 @@ router.get(
 router.get(
   '/summary',
   setRequestPriority('normal'),
-  [...repoUrlValidation()],
+  ...buildRepoValidationChain({}, { repoUrlValidation }),
   handleValidationErrors,
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { logger, repoUrl, userType } = setupRouteRequest(req);
-
-    try {
+  ...createCachedRouteHandler(
+    'repository_summary',
+    async ({ repoUrl, logger }) => {
       logger.info(
         'Processing repository summary request with unified caching',
         {
@@ -391,27 +364,10 @@ router.get(
       // Use unified cache manager for summary data
       const summary = await getCachedSummary(repoUrl);
 
-      // Record successful operation with helper
-      recordRouteSuccess(
-        'repository_summary',
-        userType,
-        logger,
-        repoUrl,
-        { summary },
-        res,
-        { repositoryName: summary.repository.name }
-      );
-    } catch (error) {
-      recordRouteError(
-        'repository_summary',
-        userType,
-        logger,
-        repoUrl,
-        error,
-        next
-      );
-    }
-  }
+      return { summary };
+    },
+    ({ summary }) => ({ repositoryName: summary.repository.name })
+  )
 );
 
 // ---------------------------------------------------------------------------
@@ -420,21 +376,28 @@ router.get(
 router.get(
   '/full-data',
   setRequestPriority('low'),
-  [
-    ...repoUrlValidation(),
-    ...paginationValidation(),
-    ...dateValidation(),
-    ...authorValidation(),
-  ],
+  ...buildRepoValidationChain(
+    {
+      includePagination: true,
+      includeDates: true,
+      includeAuthors: true,
+    },
+    {
+      repoUrlValidation,
+      paginationValidation,
+      dateValidation,
+      authorValidation,
+    }
+  ),
   handleValidationErrors,
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { logger, repoUrl, userType } = setupRouteRequest(req);
-    const { author, authors, fromDate, toDate } = extractFilterParams(
-      req.query as Record<string, string>
-    );
-    const { page, limit, skip } = extractPaginationParams(req.query);
+  ...createCachedRouteHandler(
+    'full_data_view',
+    async ({ req, repoUrl, logger }) => {
+      const { author, authors, fromDate, toDate } = extractFilterParams(
+        req.query as Record<string, string>
+      );
+      const { page, limit, skip } = extractPaginationParams(req.query);
 
-    try {
       logger.info('Processing full-data request with unified caching', {
         repoUrl,
         page,
@@ -476,33 +439,16 @@ router.get(
         );
       }
 
-      // Record successful operation with helper
-      recordRouteSuccess(
-        'full_data_view',
-        userType,
-        logger,
-        repoUrl,
-        { commits, heatmapData, page, limit },
-        res,
-        {
-          commitCount: commits?.length ?? 0,
-          dataPoints: isValidHeatmap ? heatmapData.data.length : 0,
-          page,
-          limit,
-          heatmapIsValid: isValidHeatmap,
-        }
-      );
-    } catch (error) {
-      recordRouteError(
-        'full_data_view',
-        userType,
-        logger,
-        repoUrl,
-        error,
-        next
-      );
-    }
-  }
+      return { commits, heatmapData, page, limit, isValidHeatmap };
+    },
+    ({ commits, heatmapData, page, limit, isValidHeatmap }) => ({
+      commitCount: commits?.length ?? 0,
+      dataPoints: isValidHeatmap ? heatmapData.data.length : 0,
+      page,
+      limit,
+      heatmapIsValid: isValidHeatmap,
+    })
+  )
 );
 
 export default router;
