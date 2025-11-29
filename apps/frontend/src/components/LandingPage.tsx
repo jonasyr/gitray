@@ -63,7 +63,7 @@ export function LandingPage({ onAnalyze, onInfoClick }: LandingPageProps) {
 
           <div className="space-y-2">
             <Label htmlFor="mode" className="text-sm md:text-base">
-              Analysis Mode
+              Select Branch
             </Label>
             <Select value={mode} onValueChange={setMode}>
               <SelectTrigger id="mode" className="h-10 md:h-12">
@@ -71,8 +71,8 @@ export function LandingPage({ onAnalyze, onInfoClick }: LandingPageProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="main">Main</SelectItem>
-                <SelectItem value="deep">Deep Analysis</SelectItem>
-                <SelectItem value="quick">Quick Scan</SelectItem>
+                <SelectItem value="...">...</SelectItem>
+                <SelectItem value="...">...</SelectItem>
               </SelectContent>
             </Select>
           </div>
