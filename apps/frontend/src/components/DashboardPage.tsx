@@ -66,6 +66,8 @@ interface DashboardPageProps {
   commits: Commit[];
   heatmapData: CommitHeatmapData | null;
   repoUrl: string;
+  /** Current branch being analyzed (from backend API) */
+  currentBranch?: string;
 }
 
 // Helper function to format repository age with proper pluralization
@@ -162,6 +164,7 @@ export function DashboardPage({
   commits: commitsFromProps,
   heatmapData,
   repoUrl,
+  currentBranch,
 }: DashboardPageProps) {
   const [fileDistribution, setFileDistribution] =
     useState<FileTypeDistribution | null>(null);
@@ -697,7 +700,10 @@ export function DashboardPage({
             </TabsContent>
 
             <TabsContent value="timeline">
-              <GraphViewTimeline commits={commits} />
+              <GraphViewTimeline
+                commits={commits}
+                currentBranch={currentBranch}
+              />
             </TabsContent>
 
             <TabsContent value="diff">

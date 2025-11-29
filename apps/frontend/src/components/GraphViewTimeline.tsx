@@ -24,6 +24,8 @@ import { Commit } from '@gitray/shared-types';
 
 interface GraphViewTimelineProps {
   commits?: Commit[];
+  /** Current branch being analyzed (from backend API) */
+  currentBranch?: string;
 }
 
 const branches = [
@@ -94,19 +96,25 @@ function formatRelativeTime(date: Date): string {
 }
 
 // Process real commits into timeline events
-function processCommits(commits: Commit[], limit: number = 5) {
+function processCommits(
+  commits: Commit[],
+  currentBranch: string = 'unknown',
+  limit: number = 5
+) {
   // Sort by date descending (newest first) and take top N
   return commits
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, limit)
     .map((commit) => {
       const isMerge = commit.message.toLowerCase().includes('merge');
-      const branchMatch = commit.message.match(/into (\S+)/);
-      const fromMatch = commit.message.match(/merge (\S+)/);
+      // Try to parse source branch from merge commit messages
+      const fromMatch = commit.message.match(/merge (\S+)/i);
 
       return {
         type: isMerge ? 'merge' : 'commit',
-        branch: branchMatch ? branchMatch[1] : 'main',
+        // Use the current branch from API instead of parsing
+        branch: currentBranch,
+        // For merge commits, try to parse the source branch
         from: isMerge && fromMatch ? fromMatch[1] : undefined,
         message: commit.message.split('\n')[0], // First line only
         author: commit.authorName,
@@ -116,7 +124,10 @@ function processCommits(commits: Commit[], limit: number = 5) {
     });
 }
 
-export function GraphViewTimeline({ commits = [] }: GraphViewTimelineProps) {
+export function GraphViewTimeline({
+  commits = [],
+  currentBranch = 'unknown',
+}: GraphViewTimelineProps) {
   const [playing, setPlaying] = useState(false);
   const [timelinePosition, setTimelinePosition] = useState([50]);
   const [showMore, setShowMore] = useState(false);
@@ -127,6 +138,8 @@ export function GraphViewTimeline({ commits = [] }: GraphViewTimelineProps) {
   console.log(
     '🔍 GraphViewTimeline received commits:',
     commits.length,
+    'Branch:',
+    currentBranch,
     'First commit:',
     commits[0]
   );
@@ -336,7 +349,7 @@ export function GraphViewTimeline({ commits = [] }: GraphViewTimelineProps) {
             </div>
             <div ref={scrollContainerRef} className="space-y-3">
               {(commits.length > 0
-                ? processCommits(commits, showMore ? 20 : 5)
+                ? processCommits(commits, currentBranch, showMore ? 20 : 5)
                 : timelineEvents
               ).map((event, index) => (
                 <HoverCard key={index}>
