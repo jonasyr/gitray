@@ -17,12 +17,12 @@
  * - Comprehensive metrics and health monitoring
  */
 
-import crypto from 'node:crypto';
 import { gitService } from './gitService';
 import { repositorySummaryService } from './repositorySummaryService';
 import { getLogger } from './logger';
 import { withSharedRepository } from './repositoryCoordinator';
 import type { RepositoryHandle } from './repositoryCoordinator';
+import { hashUrl, hashObject } from '../utils/hashUtils';
 import { config } from '../config';
 import HybridLRUCache from '../utils/hybridLruCache';
 import {
@@ -385,17 +385,13 @@ export class RepositoryCacheManager {
    *
    * IMPORTANT: Does NOT include 'repo-access' lock because:
    * - repo-access is managed exclusively by withSharedRepository()
-   * - Including it here causes nested lock acquisition (deadlock)
-   * - Cache operations only need cache-level locks
+   * - Including it here would require complex re-entrant locking
+   * - Operations that need repository access should NOT use ordered locks
    *
    * Lock order: cache-filtered < cache-operation (alphabetical)
    */
   private getCommitLocks(repoUrl: string): string[] {
-    return [
-      `cache-filtered:${repoUrl}`,
-      `cache-operation:${repoUrl}`,
-      // repo-access is acquired by withSharedRepository() - DO NOT add here
-    ];
+    return [`cache-filtered:${repoUrl}`, `cache-operation:${repoUrl}`];
   }
 
   /**
@@ -1337,123 +1333,119 @@ export class RepositoryCacheManager {
       contributionPercentage: number;
     }>
   > {
-    // FIX: Use withOrderedLocks to prevent deadlock with getOrParseCommits
-    return withOrderedLocks(this.getContributorLocks(repoUrl), async () => {
-      const startTime = Date.now();
+    // FIX: Don't use withOrderedLocks for contributors since it needs direct repository access
+    // The repository coordinator manages its own locking via withSharedRepository
+    const startTime = Date.now();
 
-      // Generate cache key for contributors
-      const contributorsKey = this.generateContributorsKey(
-        repoUrl,
-        filterOptions
-      );
-      const cachedData = await this.aggregatedDataCache.get(contributorsKey);
+    // Generate cache key for contributors
+    const contributorsKey = this.generateContributorsKey(
+      repoUrl,
+      filterOptions
+    );
+    const cachedData = await this.aggregatedDataCache.get(contributorsKey);
 
-      // Type guard to ensure we have contributor data
-      const isContributorArray = (
-        data: any
-      ): data is Array<{
-        login: string;
-        commitCount: number;
-        linesAdded: number;
-        linesDeleted: number;
-        contributionPercentage: number;
-      }> => {
-        return Array.isArray(data) && (data.length === 0 || 'login' in data[0]);
-      };
+    // Type guard to ensure we have contributor data
+    const isContributorArray = (
+      data: any
+    ): data is Array<{
+      login: string;
+      commitCount: number;
+      linesAdded: number;
+      linesDeleted: number;
+      contributionPercentage: number;
+    }> => {
+      return Array.isArray(data) && (data.length === 0 || 'login' in data[0]);
+    };
 
-      if (cachedData && isContributorArray(cachedData)) {
-        // Cache hit: Return cached contributor data
-        return this.handleCacheHit(
-          'Contributors',
-          'contributors',
-          'aggregatedHits',
-          startTime,
-          repoUrl,
-          cachedData,
-          {
-            contributorsCount: cachedData.length,
-            filters: filterOptions,
-            cacheKey: contributorsKey,
-          },
-          undefined,
-          'contributors'
-        );
-      }
-
-      // Cache miss: Generate contributor data
-      this.handleCacheMiss(
+    if (cachedData && isContributorArray(cachedData)) {
+      // Cache hit: Return cached contributor data
+      return this.handleCacheHit(
+        'Contributors',
         'contributors',
-        'aggregatedMisses',
+        'aggregatedHits',
         startTime,
         repoUrl,
-        'Contributors cache miss, generating from commits',
-        { filters: filterOptions, cacheKey: contributorsKey }
+        cachedData,
+        {
+          contributorsCount: cachedData.length,
+          filters: filterOptions,
+          cacheKey: contributorsKey,
+        },
+        undefined,
+        'contributors'
+      );
+    }
+
+    // Cache miss: Generate contributor data
+    this.handleCacheMiss(
+      'contributors',
+      'aggregatedMisses',
+      startTime,
+      repoUrl,
+      'Contributors cache miss, generating from commits',
+      { filters: filterOptions, cacheKey: contributorsKey }
+    );
+
+    const transaction = this.createTransaction(repoUrl);
+
+    try {
+      // FIX: Repository coordinator manages its own locking via withSharedRepository
+      let contributors = await withSharedRepository(
+        repoUrl,
+        async (handle: RepositoryHandle) => {
+          logger.info('Fetching contributors via shared repository', {
+            repoUrl,
+            commitCount: handle.commitCount,
+            sizeCategory: handle.sizeCategory,
+            isShared: handle.isShared,
+          });
+
+          // Track efficiency gains from repository sharing
+          if (handle.isShared && handle.refCount > 1) {
+            this.metrics.efficiency.duplicateClonesPrevented++;
+            logger.debug('Duplicate clone prevented for contributors', {
+              repoUrl,
+              refCount: handle.refCount,
+            });
+          }
+
+          return gitService.getTopContributors(handle.localPath, filterOptions);
+        }
       );
 
-      const transaction = this.createTransaction(repoUrl);
-
-      try {
-        // FIX: All locks already held by outer withOrderedLocks, no nested acquisition needed
-        let contributors = await withSharedRepository(
-          repoUrl,
-          async (handle: RepositoryHandle) => {
-            logger.info('Fetching contributors via shared repository', {
-              repoUrl,
-              commitCount: handle.commitCount,
-              sizeCategory: handle.sizeCategory,
-              isShared: handle.isShared,
-            });
-
-            // Track efficiency gains from repository sharing
-            if (handle.isShared && handle.refCount > 1) {
-              this.metrics.efficiency.duplicateClonesPrevented++;
-              logger.debug('Duplicate clone prevented for contributors', {
-                repoUrl,
-                refCount: handle.refCount,
-              });
-            }
-
-            return gitService.getTopContributors(
-              handle.localPath,
-              filterOptions
-            );
-          }
-        );
-
-        // Defensive programming: Handle null contributors gracefully
-        if (!contributors) {
-          contributors = [];
-          logger.warn(
-            'gitService.getTopContributors returned null, using empty array',
-            { repoUrl }
-          );
-        }
-
-        // Cache the contributors data
-        const ttl = config.cacheStrategy.cacheKeys.aggregatedDataTTL;
-        return this.handleTransactionSuccess(
-          this.aggregatedDataCache,
-          'aggregated',
-          contributorsKey,
-          contributors,
-          ttl,
-          transaction,
-          repoUrl,
-          'Contributors cached with transaction',
-          {
-            filters: filterOptions,
-            contributorsCount: contributors.length,
-          }
-        );
-      } catch (error) {
-        return this.handleTransactionError(
-          transaction,
-          error,
-          repoUrl,
-          'contributors'
+      // Defensive programming: Handle null contributors gracefully
+      if (!contributors) {
+        contributors = [];
+        logger.warn(
+          'gitService.getTopContributors returned null, using empty array',
+          { repoUrl }
         );
       }
-    });
+
+      // Cache the contributors data
+      const ttl = config.cacheStrategy.cacheKeys.aggregatedDataTTL;
+      return this.handleTransactionSuccess(
+        this.aggregatedDataCache,
+        'aggregated',
+        contributorsKey,
+        contributors,
+        ttl,
+        transaction,
+        repoUrl,
+        'Contributors cached with transaction',
+        {
+          filters: filterOptions,
+          contributorsCount: contributors.length,
+        }
+      );
+    } catch (error) {
+      return this.handleTransactionError(
+        transaction,
+        error,
+        repoUrl,
+        'contributors'
+      );
+    }
   }
 
   /**
@@ -1947,9 +1939,8 @@ export class RepositoryCacheManager {
         await distributedCache.invalidateGlobally('repository', {
           repoUrl,
           reason: 'repository_update',
-          keysCount: (
-            this.cacheKeyPatterns.get(this.hashUrl(repoUrl)) ?? new Set()
-          ).size,
+          keysCount: (this.cacheKeyPatterns.get(hashUrl(repoUrl)) ?? new Set())
+            .size,
         });
       } catch (err) {
         logger.warn('Failed to broadcast distributed cache invalidation', {
@@ -1971,7 +1962,7 @@ export class RepositoryCacheManager {
         repoUrl,
       });
 
-      const repoHash = this.hashUrl(repoUrl);
+      const repoHash = hashUrl(repoUrl);
       const keysToInvalidate = this.cacheKeyPatterns.get(repoHash) ?? new Set();
 
       const operations: Promise<void>[] = [];
@@ -2201,7 +2192,7 @@ export class RepositoryCacheManager {
    */
 
   private generateRawCommitsKey(repoUrl: string): string {
-    const key = `raw_commits:${this.hashUrl(repoUrl)}`;
+    const key = `raw_commits:${hashUrl(repoUrl)}`;
     this.trackCacheKey(key);
     return key;
   }
@@ -2210,8 +2201,8 @@ export class RepositoryCacheManager {
     repoUrl: string,
     options?: CommitCacheOptions
   ): string {
-    const filterHash = this.hashObject(options || {});
-    const key = `filtered_commits:${this.hashUrl(repoUrl)}:${filterHash}`;
+    const filterHash = hashObject(options || {});
+    const key = `filtered_commits:${hashUrl(repoUrl)}:${filterHash}`;
     this.trackCacheKey(key);
     return key;
   }
@@ -2220,8 +2211,8 @@ export class RepositoryCacheManager {
     repoUrl: string,
     filterOptions?: CommitFilterOptions
   ): string {
-    const filterHash = this.hashObject(filterOptions ?? {});
-    const key = `aggregated_data:${this.hashUrl(repoUrl)}:${filterHash}`;
+    const filterHash = hashObject(filterOptions ?? {});
+    const key = `aggregated_data:${hashUrl(repoUrl)}:${filterHash}`;
     this.trackCacheKey(key);
     return key;
   }
@@ -2231,8 +2222,8 @@ export class RepositoryCacheManager {
     repoUrl: string,
     filterOptions?: CommitFilterOptions
   ): string {
-    const filterHash = this.hashObject(filterOptions ?? {});
-    const key = `contributors:${this.hashUrl(repoUrl)}:${filterHash}`;
+    const filterHash = hashObject(filterOptions ?? {});
+    const key = `contributors:${hashUrl(repoUrl)}:${filterHash}`;
     this.trackCacheKey(key);
     return key;
   }
@@ -2242,35 +2233,17 @@ export class RepositoryCacheManager {
     repoUrl: string,
     filterOptions?: ChurnFilterOptions
   ): string {
-    const filterHash = this.hashObject(filterOptions ?? {});
-    const key = `churn_data:${this.hashUrl(repoUrl)}:${filterHash}`;
+    const filterHash = hashObject(filterOptions ?? {});
+    const key = `churn_data:${hashUrl(repoUrl)}:${filterHash}`;
     this.trackCacheKey(key);
     return key;
   }
 
   /** Generate cache key for repository summary */
   private generateSummaryKey(repoUrl: string): string {
-    const key = `repository_summary:${this.hashUrl(repoUrl)}`;
+    const key = `repository_summary:${hashUrl(repoUrl)}`;
     this.trackCacheKey(key);
     return key;
-  }
-
-  /** Generates stable 16-character hash for repository URLs */
-  private hashUrl(url: string): string {
-    // SAFE: MD5 used for cache key generation only (not security-sensitive)
-    // Performance is prioritized over cryptographic strength for cache keys
-    return crypto.createHash('md5').update(url).digest('hex').slice(0, 16);
-  }
-
-  /** Generates stable 8-character hash for filter option objects */
-  private hashObject(obj: any): string {
-    const str = JSON.stringify(
-      obj,
-      Object.keys(obj).sort((a, b) => a.localeCompare(b))
-    );
-    // SAFE: MD5 used for cache key generation only (not security-sensitive)
-    // Performance is prioritized over cryptographic strength for cache keys
-    return crypto.createHash('md5').update(str).digest('hex').slice(0, 8);
   }
 
   /** Determines if request has specific filters requiring filtered cache tier */
@@ -2783,7 +2756,8 @@ export class RepositoryCacheManager {
 
     try {
       // Use shared repository to prevent duplicate clones
-      // Note: This will use the repo-access lock that's already acquired through withOrderedLocks
+      // FIX: repo-access lock is now acquired through withOrderedLocks above.
+      // The lock manager is re-entrant and will skip re-acquiring this lock.
       commits = await withSharedRepository(
         repoUrl,
         async (handle: RepositoryHandle) => {

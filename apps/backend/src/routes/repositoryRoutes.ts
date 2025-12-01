@@ -1,5 +1,4 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { query, validationResult, ValidationChain } from 'express-validator';
 import {
   getCachedCommits,
   getCachedAggregatedData,
@@ -18,11 +17,16 @@ import {
 import {
   CommitFilterOptions,
   ChurnFilterOptions,
-  ERROR_MESSAGES,
   HTTP_STATUS,
-  ValidationError,
 } from '@gitray/shared-types';
-import { isSecureGitUrl } from '../middlewares/validation.js';
+import {
+  handleValidationErrorsWithResponse as handleValidationErrors,
+  repoUrlValidation,
+  paginationValidation,
+  dateValidation,
+  authorValidation,
+  churnValidation,
+} from '../middlewares/validation.js';
 import {
   buildCommitFilters,
   buildChurnFilters,
@@ -49,133 +53,6 @@ const setRequestPriority = (priority: 'low' | 'normal' | 'high') => {
 
 // Router handling repository related endpoints
 const router = express.Router();
-
-// ---------------------------------------------------------------------------
-// Custom validation error handler
-// ---------------------------------------------------------------------------
-const handleValidationErrors = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    const logger = createRequestLogger(req);
-    logger.warn('Validation failed', {
-      errors: errors.array(),
-      query: req.query,
-      path: req.path,
-    });
-
-    res.status(HTTP_STATUS.BAD_REQUEST).json({
-      error: 'Validation failed',
-      code: 'VALIDATION_ERROR',
-      errors: errors.array(),
-    });
-    return;
-  }
-  next();
-};
-
-// ---------------------------------------------------------------------------
-// Reusable validation chains
-// ---------------------------------------------------------------------------
-const repoUrlValidation = (): ValidationChain[] => [
-  query('repoUrl')
-    .notEmpty()
-    .withMessage('repoUrl query parameter is required')
-    .isURL({
-      protocols: ['http', 'https'],
-      require_protocol: true,
-      require_valid_protocol: true,
-    })
-    .withMessage(ERROR_MESSAGES.INVALID_REPO_URL)
-    .custom(isSecureGitUrl)
-    .withMessage('Invalid or potentially unsafe repository URL'),
-];
-
-const paginationValidation = (): ValidationChain[] => [
-  query('page')
-    .optional()
-    .isInt({ min: 1, max: 1000 })
-    .withMessage('Page must be between 1 and 1000')
-    .toInt(),
-  query('limit')
-    .optional()
-    .isInt({ min: 1, max: 100 })
-    .withMessage('Limit must be between 1 and 100')
-    .toInt(),
-];
-
-const dateValidation = (): ValidationChain[] => [
-  query('fromDate')
-    .optional()
-    .isISO8601({ strict: true })
-    .withMessage('fromDate must be a valid ISO 8601 date')
-    .custom((value) => {
-      if (value && new Date(value) > new Date()) {
-        return false;
-      }
-      return true;
-    })
-    .withMessage('fromDate cannot be in the future'),
-  query('toDate')
-    .optional()
-    .isISO8601({ strict: true })
-    .withMessage('toDate must be a valid ISO 8601 date')
-    .custom((value, { req }) => {
-      if (value && new Date(value) > new Date()) {
-        return false;
-      }
-      const fromDate = req.query?.fromDate as string;
-      if (value && fromDate && new Date(value) < new Date(fromDate)) {
-        return false;
-      }
-      return true;
-    })
-    .withMessage('toDate must be after fromDate and not in the future'),
-];
-
-const authorValidation = (): ValidationChain[] => [
-  query('author')
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ min: 1, max: 100 })
-    .withMessage('Author must be between 1 and 100 characters')
-    .escape(),
-  query('authors')
-    .optional()
-    .isString()
-    .custom((value) => {
-      const authors = value.split(',');
-      return (
-        authors.length <= 10 &&
-        authors.every((a: string) => a.trim().length > 0)
-      );
-    })
-    .withMessage(
-      'Authors must be comma-separated and maximum 10 authors allowed'
-    ),
-];
-
-const churnValidation = (): ValidationChain[] => [
-  query('minChanges')
-    .optional()
-    .isInt({ min: 1, max: 1000 })
-    .withMessage('minChanges must be between 1 and 1000')
-    .toInt(),
-  query('extensions')
-    .optional()
-    .isString()
-    .custom((value) => {
-      const exts = value.split(',');
-      return (
-        exts.length <= 20 && exts.every((e: string) => e.trim().length > 0)
-      );
-    })
-    .withMessage('Extensions must be comma-separated and maximum 20 allowed'),
-];
 
 // ---------------------------------------------------------------------------
 // GET endpoint to get repository commits with pagination (unified cache)
