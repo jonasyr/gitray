@@ -37,6 +37,93 @@ vi.mock('../../../src/services/logger', () => ({
 
 vi.mock('../../../src/middlewares/validation', () => ({
   isSecureGitUrl: vi.fn(() => Promise.resolve(true)),
+  handleValidationErrorsWithResponse: vi.fn((req: any, res: any, next: any) =>
+    next()
+  ),
+  repoUrlValidation: vi.fn(() => []),
+  paginationValidation: vi.fn(() => []),
+  dateValidation: vi.fn(() => []),
+  authorValidation: vi.fn(() => []),
+  churnValidation: vi.fn(() => []),
+}));
+
+// Mock utility modules
+vi.mock('../../../src/utils/routeHelpers', () => ({
+  buildCommitFilters: vi.fn((query) => {
+    const filters: any = {};
+    if (query.author) filters.author = query.author;
+    if (query.authors) filters.authors = query.authors;
+    if (query.fromDate) filters.fromDate = query.fromDate;
+    if (query.toDate) filters.toDate = query.toDate;
+    return filters;
+  }),
+  buildChurnFilters: vi.fn((query) => {
+    const filters: any = {};
+    if (query.minChanges !== undefined)
+      filters.minChanges = parseInt(query.minChanges);
+    if (query.extensions) filters.extensions = query.extensions;
+    if (query.since) filters.since = query.since;
+    if (query.until) filters.until = query.until;
+    return filters;
+  }),
+  extractPaginationParams: vi.fn((query) => ({
+    page: parseInt(query.page as string) || 1,
+    limit: parseInt(query.limit as string) || 100,
+    skip:
+      ((parseInt(query.page as string) || 1) - 1) *
+      (parseInt(query.limit as string) || 100),
+  })),
+  extractFilterParams: vi.fn((query) => ({
+    author: query.author,
+    authors: query.authors,
+    fromDate: query.fromDate,
+    toDate: query.toDate,
+  })),
+  setupRouteRequest: vi.fn((req) => ({
+    logger: mockLogger,
+    repoUrl: req.query.repoUrl as string,
+    userType: 'anonymous',
+  })),
+  recordRouteSuccess: vi.fn(),
+  recordRouteError: vi.fn(),
+}));
+
+vi.mock('../../../src/utils/repositoryRouteFactory', () => ({
+  createCachedRouteHandler: vi.fn((featureName, processor, buildMetrics) => [
+    async (req: any, res: any, next: any) => {
+      try {
+        const logger = mockLogger;
+        const repoUrl = req.query.repoUrl as string;
+        const userType = 'anonymous';
+
+        // Validate repoUrl is present (simple validation for testing)
+        if (!repoUrl) {
+          return res.status(400).json({
+            error: 'Validation failed',
+            code: 'VALIDATION_ERROR',
+            errors: [
+              { msg: 'repoUrl query parameter is required', param: 'repoUrl' },
+            ],
+          });
+        }
+
+        const result = await processor({ req, logger, repoUrl, userType });
+        const metrics = buildMetrics ? buildMetrics(result) : {};
+
+        mockMetrics.recordFeatureUsage(featureName, userType, true, 'api_call');
+        res.status(200).json(result);
+      } catch (error: any) {
+        mockMetrics.recordFeatureUsage(
+          featureName,
+          'anonymous',
+          false,
+          'api_call'
+        );
+        next(error);
+      }
+    },
+  ]),
+  buildRepoValidationChain: vi.fn(() => []),
 }));
 
 vi.mock('@gitray/shared-types', () => {

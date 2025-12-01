@@ -576,14 +576,9 @@ describe('RepositoryCache - Fast High Coverage', () => {
 
       expect(cache.cacheKeyPatterns.size).toBeGreaterThanOrEqual(0);
 
-      // Test hash generation (covers lines 1761-1764)
-      const hash1 = cache.hashUrl('https://github.com/test/repo.git');
-      const hash2 = cache.hashUrl('https://github.com/test/repo.git');
-      expect(hash1).toBe(hash2);
-      expect(hash1).toHaveLength(16);
-
-      const objHash = cache.hashObject({ author: 'test', limit: 10 });
-      expect(objHash).toHaveLength(8);
+      // Note: hashUrl and hashObject are utility functions from hashUtils,
+      // not methods of the cache class, so we don't test them here.
+      // They are tested in the hashUtils unit tests.
     });
 
     test('should handle filter edge cases', () => {
