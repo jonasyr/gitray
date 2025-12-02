@@ -38,6 +38,7 @@ gitignore: true
 globs:
   - '**/*.{md,markdown}'
 
-# 5) Ignore patterns - exclude prompts folder
+# 5) Ignore patterns - exclude prompts folder and Serena memories
 ignores:
   - 'prompts/**/*.{md,markdown}'
+  - '.serena/memories/**/*.{md,markdown}'

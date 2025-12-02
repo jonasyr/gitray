@@ -22,9 +22,9 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import * as crypto from 'node:crypto';
 import { getLogger } from './logger';
 import { config } from '../config';
+import { hashUrl, hashObject } from '../utils/hashUtils';
 import {
   recordStreamingStart,
   recordStreamingCompletion,
@@ -338,7 +338,7 @@ class FileAnalysisService {
     repoUrl: string,
     commitHash: string
   ): string {
-    const repoHash = this.hashUrl(repoUrl);
+    const repoHash = hashUrl(repoUrl);
     const commitHashShort = commitHash.substring(0, 12); // Use first 12 chars for efficiency
     return `file_tree:${repoHash}:${commitHashShort}`;
   }
@@ -638,7 +638,7 @@ class FileAnalysisService {
   }
 
   private async invalidateFullRepositoryCache(repoUrl: string): Promise<void> {
-    const repoHash = this.hashUrl(repoUrl);
+    const repoHash = hashUrl(repoUrl);
     const pattern = `file_tree:${repoHash}:*`;
 
     try {
@@ -728,7 +728,7 @@ class FileAnalysisService {
    * Check if circuit breaker should prevent analysis for a repository
    */
   private isCircuitBreakerOpen(repoUrl: string): boolean {
-    const repoHash = this.hashUrl(repoUrl);
+    const repoHash = hashUrl(repoUrl);
     const state = this.circuitBreakers.get(repoHash);
 
     if (!state) return false;
@@ -788,7 +788,7 @@ class FileAnalysisService {
    * Record circuit breaker failure
    */
   private recordCircuitBreakerFailure(repoUrl: string): void {
-    const repoHash = this.hashUrl(repoUrl);
+    const repoHash = hashUrl(repoUrl);
 
     // Manage memory before accessing/updating circuit breaker
     this.manageCircuitBreakerMemory(repoHash);
@@ -835,7 +835,7 @@ class FileAnalysisService {
    * Record circuit breaker success
    */
   private recordCircuitBreakerSuccess(repoUrl: string): void {
-    const repoHash = this.hashUrl(repoUrl);
+    const repoHash = hashUrl(repoUrl);
 
     // Manage memory before accessing circuit breaker
     this.manageCircuitBreakerMemory(repoHash);
@@ -861,7 +861,7 @@ class FileAnalysisService {
   }
 
   private registerHalfOpenAttempt(repoUrl: string): boolean {
-    const repoHash = this.hashUrl(repoUrl);
+    const repoHash = hashUrl(repoUrl);
     const state = this.circuitBreakers.get(repoHash);
 
     if (!state || state.isOpen) {
@@ -943,7 +943,7 @@ class FileAnalysisService {
     lastFailure?: Date;
     timeUntilRecovery?: number;
   } {
-    const repoHash = this.hashUrl(repoUrl);
+    const repoHash = hashUrl(repoUrl);
     const state = this.circuitBreakers.get(repoHash);
 
     if (!state) {
@@ -991,7 +991,7 @@ class FileAnalysisService {
   }
 
   resetCircuitBreaker(repoUrl: string): void {
-    const repoHash = this.hashUrl(repoUrl);
+    const repoHash = hashUrl(repoUrl);
 
     if (this.circuitBreakers.delete(repoHash)) {
       logger.info('Circuit breaker manually reset for repository', {
@@ -2839,29 +2839,9 @@ class FileAnalysisService {
     repoUrl: string,
     options?: FileAnalysisFilterOptions
   ): string {
-    const repoHash = this.hashUrl(repoUrl);
-    const filterHash = this.hashObject(options || {});
+    const repoHash = hashUrl(repoUrl);
+    const filterHash = hashObject(options || {});
     return `file_analysis:${repoHash}:${filterHash}`;
-  }
-
-  /**
-   * Generate stable 16-character hash for repository URLs
-   * Following GitRay's caching pattern
-   */
-  private hashUrl(url: string): string {
-    return crypto.createHash('md5').update(url).digest('hex').slice(0, 16);
-  }
-
-  /**
-   * Generate stable 8-character hash for filter option objects
-   * Following GitRay's caching pattern
-   */
-  private hashObject(obj: any): string {
-    const str = JSON.stringify(
-      obj,
-      Object.keys(obj).sort((a, b) => a.localeCompare(b))
-    );
-    return crypto.createHash('md5').update(str).digest('hex').slice(0, 8);
   }
 
   /**

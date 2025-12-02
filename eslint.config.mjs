@@ -21,6 +21,7 @@ export default tseslint.config(
       'apps/frontend/tailwind.config.cjs',
       'prettier.config.js',
       '**/dist/**',
+      '**/build/**',
       '**/node_modules/**',
       'apps/backend/src/**/*.js',
       'apps/backend/src/**/*.js.map',

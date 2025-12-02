@@ -17,11 +17,12 @@
  * - Comprehensive metrics and health monitoring
  */
 
-import crypto from 'node:crypto';
 import { gitService } from './gitService';
+import { repositorySummaryService } from './repositorySummaryService';
 import { getLogger } from './logger';
 import { withSharedRepository } from './repositoryCoordinator';
 import type { RepositoryHandle } from './repositoryCoordinator';
+import { hashUrl, hashObject } from '../utils/hashUtils';
 import { config } from '../config';
 import HybridLRUCache from '../utils/hybridLruCache';
 import {
@@ -47,6 +48,9 @@ import {
   CommitFilterOptions,
   CommitHeatmapData,
   TransactionRollbackError,
+  CodeChurnAnalysis,
+  ChurnFilterOptions,
+  RepositorySummary,
 } from '@gitray/shared-types';
 
 type ContributorAggregation = {
@@ -57,7 +61,11 @@ type ContributorAggregation = {
   contributionPercentage: number;
 };
 
-type AggregatedCacheValue = CommitHeatmapData | ContributorAggregation[];
+type AggregatedCacheValue =
+  | CommitHeatmapData
+  | ContributorAggregation[]
+  | CodeChurnAnalysis
+  | RepositorySummary;
 
 /**
  * UNIFIED REPOSITORY CACHE MANAGER - FIXED VERSION
@@ -68,6 +76,13 @@ type AggregatedCacheValue = CommitHeatmapData | ContributorAggregation[];
  * 3. ✅ Atomic multi-tier cache updates
  * 4. ✅ Enhanced error handling and recovery
  * 5. ✅ Pattern-based cache key management
+ * 6. ✅ DEADLOCK FIX: Removed repo-access from cache lock arrays to prevent nested acquisition
+ *
+ * LOCK ARCHITECTURE:
+ * - Cache operations acquire ONLY cache-level locks (cache-*, not repo-*)
+ * - Repository access managed exclusively by withSharedRepository()
+ * - Prevents nested acquisition of repo-access lock (which caused deadlocks)
+ * - Lock ordering maintained via withOrderedLocks() for cache-level locks
  */
 
 /**
@@ -367,19 +382,21 @@ export class RepositoryCacheManager {
   /**
    * Helper method to generate standard lock array for commit operations.
    * Ensures consistent lock ordering across all methods to prevent deadlocks.
-   * Lock order: cache-filtered < cache-operation < repo-access (alphabetical)
+   *
+   * IMPORTANT: Does NOT include 'repo-access' lock because:
+   * - repo-access is managed exclusively by withSharedRepository()
+   * - Including it here would require complex re-entrant locking
+   * - Operations that need repository access should NOT use ordered locks
+   *
+   * Lock order: cache-filtered < cache-operation (alphabetical)
    */
   private getCommitLocks(repoUrl: string): string[] {
-    return [
-      `cache-filtered:${repoUrl}`,
-      `cache-operation:${repoUrl}`,
-      `repo-access:${repoUrl}`,
-    ];
+    return [`cache-filtered:${repoUrl}`, `cache-operation:${repoUrl}`];
   }
 
   /**
    * Helper method to generate lock array for contributor operations.
-   * Lock order: cache-contributors < cache-filtered < cache-operation < repo-access
+   * Lock order: cache-contributors < cache-filtered < cache-operation
    */
   private getContributorLocks(repoUrl: string): string[] {
     return [`cache-contributors:${repoUrl}`, ...this.getCommitLocks(repoUrl)];
@@ -387,10 +404,27 @@ export class RepositoryCacheManager {
 
   /**
    * Helper method to generate lock array for aggregated data operations.
-   * Lock order: cache-aggregated < cache-filtered < cache-operation < repo-access
+   * Lock order: cache-aggregated < cache-filtered < cache-operation
    */
   private getAggregatedLocks(repoUrl: string): string[] {
     return [`cache-aggregated:${repoUrl}`, ...this.getCommitLocks(repoUrl)];
+  }
+
+  /**
+   * Helper method to generate lock array for churn data operations.
+   * Lock order: cache-churn < cache-filtered < cache-operation
+   */
+  private getChurnLocks(repoUrl: string): string[] {
+    return [`cache-churn:${repoUrl}`, ...this.getCommitLocks(repoUrl)];
+  }
+
+  /**
+   * Helper method to generate lock array for repository summary operations.
+   * Lock order: cache-summary < repo-access
+   * Note: Summary doesn't depend on commits cache, uses sparse clone directly
+   */
+  private getSummaryLocks(repoUrl: string): string[] {
+    return [`cache-summary:${repoUrl}`, `repo-access:${repoUrl}`];
   }
 
   /**
@@ -1033,40 +1067,31 @@ export class RepositoryCacheManager {
 
       if (commits) {
         // Cache hit: Update metrics and return cached data immediately
-        this.metrics.operations.rawHits++;
-        this.recordHitTime(startTime);
-        cacheHits.inc({ operation: 'raw_commits' });
-        recordEnhancedCacheOperation(
+        return this.handleCacheHit(
+          'Raw commits',
           'raw_commits',
-          true,
-          undefined,
+          'rawHits',
+          startTime,
           repoUrl,
-          commits.length
+          commits,
+          {
+            commitsCount: commits.length,
+            cacheKey: rawKey,
+          },
+          commits.length,
+          'commits'
         );
-
-        // Track data freshness for cache effectiveness analysis
-        const cacheAge = Date.now() - startTime;
-        recordDataFreshness('commits', cacheAge);
-
-        logger.debug('Raw commits cache hit', {
-          repoUrl,
-          commitsCount: commits.length,
-          cacheKey: rawKey,
-        });
-
-        return commits;
       }
 
       // Cache miss: Fetch from Git repository and cache the result
-      this.metrics.operations.rawMisses++;
-      this.recordMissTime(startTime);
-      cacheMisses.inc({ operation: 'raw_commits' });
-      recordEnhancedCacheOperation('raw_commits', false, undefined, repoUrl);
-
-      logger.info('Raw commits cache miss, fetching from repository', {
+      this.handleCacheMiss(
+        'raw_commits',
+        'rawMisses',
+        startTime,
         repoUrl,
-        cacheKey: rawKey,
-      });
+        'Raw commits cache miss, fetching from repository',
+        { cacheKey: rawKey }
+      );
 
       const transaction = this.createTransaction(repoUrl);
 
@@ -1114,61 +1139,27 @@ export class RepositoryCacheManager {
 
         // Store the fetched data in cache using transactional consistency
         const ttl = config.cacheStrategy.cacheKeys.rawCommitsTTL;
-        await this.transactionalSet(
+        return this.handleTransactionSuccess(
           this.rawCommitsCache,
           'raw',
           rawKey,
           commits,
           ttl,
-          transaction
-        );
-
-        // Finalize the transaction - all operations succeeded
-        await this.commitTransaction(transaction);
-
-        logger.info('Raw commits cached with transaction', {
+          transaction,
           repoUrl,
-          commitsCount: commits.length,
-          ttl,
-          sizeCategory: getRepositorySizeCategory(commits.length),
-          transactionId: transaction.id,
-        });
-
-        // Update system health metrics with successful operation
-        updateServiceHealthScore('cache', {
-          cacheHitRate: 1.0,
-          errorRate: 0.0,
-        });
-
-        return commits;
-      } catch (error) {
-        // Increment transaction failure counter for monitoring
-        this.metrics.transactions.failed++;
-
-        // Record comprehensive error details for debugging and alerting
-        recordDetailedError(
-          'cache',
-          error instanceof Error ? error : new Error(String(error)),
+          'Raw commits cached with transaction',
           {
-            userImpact: 'degraded',
-            recoveryAction: 'retry',
-            severity: 'warning',
+            commitsCount: commits.length,
+            sizeCategory: getRepositorySizeCategory(commits.length),
           }
         );
-
-        // Update system health metrics to reflect the failure
-        updateServiceHealthScore('cache', { errorRate: 1 });
-
-        // Rollback all cache changes to maintain consistency
-        await this.rollbackTransaction(transaction);
-
-        logger.error('Failed to cache raw commits, transaction rolled back', {
+      } catch (error) {
+        return this.handleTransactionError(
+          transaction,
+          error,
           repoUrl,
-          transactionId: transaction.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-
-        throw error;
+          'raw commits'
+        );
       }
     });
   }
@@ -1205,20 +1196,14 @@ export class RepositoryCacheManager {
 
       if (filteredCommits) {
         // Cache hit: Return filtered data immediately
-        this.metrics.operations.filteredHits++;
-        this.recordHitTime(startTime);
-        cacheHits.inc({ operation: 'filtered_commits' });
-        recordEnhancedCacheOperation(
+        this.recordCacheHit(
           'filtered_commits',
-          true,
-          undefined,
+          'filteredHits',
+          startTime,
           repoUrl,
-          filteredCommits.length
+          filteredCommits.length,
+          'commits'
         );
-
-        // Track data freshness for filtered cache effectiveness
-        const cacheAge = Date.now() - startTime;
-        recordDataFreshness('commits', cacheAge);
 
         logger.debug('Filtered commits cache hit', {
           repoUrl,
@@ -1231,13 +1216,10 @@ export class RepositoryCacheManager {
       }
 
       // Cache miss: Generate filtered data from raw commits
-      this.metrics.operations.filteredMisses++;
-      this.recordMissTime(startTime);
-      cacheMisses.inc({ operation: 'filtered_commits' });
-      recordEnhancedCacheOperation(
+      this.recordCacheMiss(
         'filtered_commits',
-        false,
-        undefined,
+        'filteredMisses',
+        startTime,
         repoUrl
       );
 
@@ -1351,161 +1333,119 @@ export class RepositoryCacheManager {
       contributionPercentage: number;
     }>
   > {
-    // FIX: Use withOrderedLocks to prevent deadlock with getOrParseCommits
-    return withOrderedLocks(this.getContributorLocks(repoUrl), async () => {
-      const startTime = Date.now();
+    // FIX: Don't use withOrderedLocks for contributors since it needs direct repository access
+    // The repository coordinator manages its own locking via withSharedRepository
+    const startTime = Date.now();
 
-      // Generate cache key for contributors
-      const contributorsKey = this.generateContributorsKey(
+    // Generate cache key for contributors
+    const contributorsKey = this.generateContributorsKey(
+      repoUrl,
+      filterOptions
+    );
+    const cachedData = await this.aggregatedDataCache.get(contributorsKey);
+
+    // Type guard to ensure we have contributor data
+    const isContributorArray = (
+      data: any
+    ): data is Array<{
+      login: string;
+      commitCount: number;
+      linesAdded: number;
+      linesDeleted: number;
+      contributionPercentage: number;
+    }> => {
+      return Array.isArray(data) && (data.length === 0 || 'login' in data[0]);
+    };
+
+    if (cachedData && isContributorArray(cachedData)) {
+      // Cache hit: Return cached contributor data
+      return this.handleCacheHit(
+        'Contributors',
+        'contributors',
+        'aggregatedHits',
+        startTime,
         repoUrl,
-        filterOptions
-      );
-      const cachedData = await this.aggregatedDataCache.get(contributorsKey);
-
-      // Type guard to ensure we have contributor data
-      const isContributorArray = (
-        data: any
-      ): data is Array<{
-        login: string;
-        commitCount: number;
-        linesAdded: number;
-        linesDeleted: number;
-        contributionPercentage: number;
-      }> => {
-        return Array.isArray(data) && (data.length === 0 || 'login' in data[0]);
-      };
-
-      if (cachedData && isContributorArray(cachedData)) {
-        // Cache hit: Return cached contributor data
-        this.metrics.operations.aggregatedHits++;
-        this.recordHitTime(startTime);
-        cacheHits.inc({ operation: 'contributors' });
-        recordEnhancedCacheOperation('contributors', true, undefined, repoUrl);
-
-        // Track data freshness
-        const cacheAge = Date.now() - startTime;
-        recordDataFreshness('contributors', cacheAge);
-
-        logger.debug('Contributors cache hit', {
-          repoUrl,
+        cachedData,
+        {
           contributorsCount: cachedData.length,
           filters: filterOptions,
           cacheKey: contributorsKey,
-        });
+        },
+        undefined,
+        'contributors'
+      );
+    }
 
-        return cachedData;
+    // Cache miss: Generate contributor data
+    this.handleCacheMiss(
+      'contributors',
+      'aggregatedMisses',
+      startTime,
+      repoUrl,
+      'Contributors cache miss, generating from commits',
+      { filters: filterOptions, cacheKey: contributorsKey }
+    );
+
+    const transaction = this.createTransaction(repoUrl);
+
+    try {
+      // FIX: Repository coordinator manages its own locking via withSharedRepository
+      let contributors = await withSharedRepository(
+        repoUrl,
+        async (handle: RepositoryHandle) => {
+          logger.info('Fetching contributors via shared repository', {
+            repoUrl,
+            commitCount: handle.commitCount,
+            sizeCategory: handle.sizeCategory,
+            isShared: handle.isShared,
+          });
+
+          // Track efficiency gains from repository sharing
+          if (handle.isShared && handle.refCount > 1) {
+            this.metrics.efficiency.duplicateClonesPrevented++;
+            logger.debug('Duplicate clone prevented for contributors', {
+              repoUrl,
+              refCount: handle.refCount,
+            });
+          }
+
+          return gitService.getTopContributors(handle.localPath, filterOptions);
+        }
+      );
+
+      // Defensive programming: Handle null contributors gracefully
+      if (!contributors) {
+        contributors = [];
+        logger.warn(
+          'gitService.getTopContributors returned null, using empty array',
+          { repoUrl }
+        );
       }
 
-      // Cache miss: Generate contributor data
-      this.metrics.operations.aggregatedMisses++;
-      this.recordMissTime(startTime);
-      cacheMisses.inc({ operation: 'contributors' });
-      recordEnhancedCacheOperation('contributors', false, undefined, repoUrl);
-
-      logger.debug('Contributors cache miss, generating from commits', {
+      // Cache the contributors data
+      const ttl = config.cacheStrategy.cacheKeys.aggregatedDataTTL;
+      return this.handleTransactionSuccess(
+        this.aggregatedDataCache,
+        'aggregated',
+        contributorsKey,
+        contributors,
+        ttl,
+        transaction,
         repoUrl,
-        filters: filterOptions,
-        cacheKey: contributorsKey,
-      });
-
-      const transaction = this.createTransaction(repoUrl);
-
-      try {
-        // FIX: All locks already held by outer withOrderedLocks, no nested acquisition needed
-        let contributors = await withSharedRepository(
-          repoUrl,
-          async (handle: RepositoryHandle) => {
-            logger.info('Fetching contributors via shared repository', {
-              repoUrl,
-              commitCount: handle.commitCount,
-              sizeCategory: handle.sizeCategory,
-              isShared: handle.isShared,
-            });
-
-            // Track efficiency gains from repository sharing
-            if (handle.isShared && handle.refCount > 1) {
-              this.metrics.efficiency.duplicateClonesPrevented++;
-              logger.debug('Duplicate clone prevented for contributors', {
-                repoUrl,
-                refCount: handle.refCount,
-              });
-            }
-
-            return gitService.getTopContributors(
-              handle.localPath,
-              filterOptions
-            );
-          }
-        );
-
-        // Defensive programming: Handle null contributors gracefully
-        if (!contributors) {
-          contributors = [];
-          logger.warn(
-            'gitService.getTopContributors returned null, using empty array',
-            { repoUrl }
-          );
-        }
-
-        // Cache the contributors data
-        const ttl = config.cacheStrategy.cacheKeys.aggregatedDataTTL;
-        await this.transactionalSet(
-          this.aggregatedDataCache,
-          'aggregated',
-          contributorsKey,
-          contributors,
-          ttl,
-          transaction
-        );
-
-        // Finalize the transaction
-        await this.commitTransaction(transaction);
-
-        logger.debug('Contributors cached with transaction', {
-          repoUrl,
+        'Contributors cached with transaction',
+        {
           filters: filterOptions,
           contributorsCount: contributors.length,
-          ttl,
-          transactionId: transaction.id,
-        });
-
-        // Update system health metrics
-        updateServiceHealthScore('cache', {
-          cacheHitRate: 1,
-          errorRate: 0,
-        });
-
-        return contributors;
-      } catch (error) {
-        // Track contributor generation failure
-        this.metrics.transactions.failed++;
-
-        // Record comprehensive error details
-        recordDetailedError(
-          'cache',
-          error instanceof Error ? error : new Error(String(error)),
-          {
-            userImpact: 'degraded',
-            recoveryAction: 'retry',
-            severity: 'warning',
-          }
-        );
-
-        // Update system health metrics
-        updateServiceHealthScore('cache', { errorRate: 1 });
-
-        // Rollback transaction to maintain cache consistency
-        await this.rollbackTransaction(transaction);
-
-        logger.error('Failed to cache contributors, transaction rolled back', {
-          repoUrl,
-          transactionId: transaction.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-
-        throw error;
-      }
-    });
+        }
+      );
+    } catch (error) {
+      return this.handleTransactionError(
+        transaction,
+        error,
+        repoUrl,
+        'contributors'
+      );
+    }
   }
 
   /**
@@ -1526,6 +1466,12 @@ export class RepositoryCacheManager {
     repoUrl: string,
     filterOptions?: CommitFilterOptions
   ): Promise<CommitHeatmapData> {
+    logger.info('getCachedAggregatedData called', {
+      repoUrl,
+      filterOptions,
+      hasFilters: !!filterOptions && Object.keys(filterOptions).length > 0,
+    });
+
     // FIX: Use withOrderedLocks to prevent deadlock with getOrParseCommits
     return withOrderedLocks(this.getAggregatedLocks(repoUrl), async () => {
       const startTime = Date.now();
@@ -1535,7 +1481,25 @@ export class RepositoryCacheManager {
         repoUrl,
         filterOptions
       );
+      logger.info('Generated aggregated cache key', {
+        repoUrl,
+        aggregatedKey,
+        filterOptions,
+      });
       const cachedData = await this.aggregatedDataCache.get(aggregatedKey);
+
+      logger.info('Aggregated cache lookup result', {
+        repoUrl,
+        hasCachedData: !!cachedData,
+        cachedDataType: cachedData ? typeof cachedData : 'null',
+        isArray: Array.isArray(cachedData),
+        cachedDataKeys:
+          cachedData &&
+          typeof cachedData === 'object' &&
+          !Array.isArray(cachedData)
+            ? Object.keys(cachedData)
+            : null,
+      });
 
       // Type guard to ensure we have CommitHeatmapData
       const isCommitHeatmapData = (data: any): data is CommitHeatmapData => {
@@ -1547,58 +1511,65 @@ export class RepositoryCacheManager {
         );
       };
 
-      if (cachedData && isCommitHeatmapData(cachedData)) {
+      const passesTypeGuard = cachedData && isCommitHeatmapData(cachedData);
+      logger.info('Type guard check', {
+        repoUrl,
+        passesTypeGuard,
+        hasTimePeriod:
+          cachedData &&
+          typeof cachedData === 'object' &&
+          'timePeriod' in cachedData,
+        hasData:
+          cachedData && typeof cachedData === 'object' && 'data' in cachedData,
+      });
+
+      if (passesTypeGuard) {
         // Cache hit: Return pre-computed visualization data
-        this.metrics.operations.aggregatedHits++;
-        this.recordHitTime(startTime);
-        cacheHits.inc({ operation: 'aggregated_data' });
-        recordEnhancedCacheOperation(
+        return this.handleCacheHit(
+          'Aggregated data',
           'aggregated_data',
-          true,
-          undefined,
-          repoUrl
-        );
-
-        // Track data freshness for aggregated cache monitoring
-        const cacheAge = Date.now() - startTime;
-        recordDataFreshness('aggregated_data', cacheAge);
-
-        logger.debug('Aggregated data cache hit', {
+          'aggregatedHits',
+          startTime,
           repoUrl,
-          filters: filterOptions,
-          cacheKey: aggregatedKey,
-        });
-
-        return cachedData;
+          cachedData,
+          {
+            filters: filterOptions,
+            cacheKey: aggregatedKey,
+          },
+          undefined,
+          'aggregated_data'
+        );
       }
 
       // Cache miss: Generate aggregated data from filtered commits
-      this.metrics.operations.aggregatedMisses++;
-      this.recordMissTime(startTime);
-      cacheMisses.inc({ operation: 'aggregated_data' });
-      recordEnhancedCacheOperation(
+      this.handleCacheMiss(
         'aggregated_data',
-        false,
-        undefined,
-        repoUrl
-      );
-
-      logger.debug('Aggregated data cache miss, generating from commits', {
+        'aggregatedMisses',
+        startTime,
         repoUrl,
-        filters: filterOptions,
-        cacheKey: aggregatedKey,
-      });
+        'Aggregated data cache miss, generating from commits',
+        { filters: filterOptions, cacheKey: aggregatedKey }
+      );
 
       const transaction = this.createTransaction(repoUrl);
 
       try {
         // Convert filter options to commit cache options for consistency
-        const commitOptions: CommitCacheOptions = {
-          author: filterOptions?.author,
-          authors: filterOptions?.authors,
-          fromDate: filterOptions?.fromDate,
-          toDate: filterOptions?.toDate,
-        };
+        // Build commitOptions without undefined properties to ensure consistent cache keys
+        // This prevents { author: undefined, ... } from hashing differently than {}
+        const commitOptions: CommitCacheOptions = {};
+        if (filterOptions?.author !== undefined) {
+          commitOptions.author = filterOptions.author;
+        }
+        if (filterOptions?.authors !== undefined) {
+          commitOptions.authors = filterOptions.authors;
+        }
+        if (filterOptions?.fromDate !== undefined) {
+          commitOptions.fromDate = filterOptions.fromDate;
+        }
+        if (filterOptions?.toDate !== undefined) {
+          commitOptions.toDate = filterOptions.toDate;
+        }
 
         /*
          * FIX: All locks already held by outer withOrderedLocks in correct order.
@@ -1612,32 +1583,281 @@ export class RepositoryCacheManager {
 
         let aggregatedData: CommitHeatmapData;
 
-        // Defensive programming: Handle null commits gracefully
-        if (commits) {
-          // Generate visualization data from filtered commits
-          aggregatedData = await gitService.aggregateCommitsByTime(
-            commits,
-            filterOptions
-          );
-        } else {
-          logger.warn(
-            'getOrParseFilteredCommits returned null, using empty array',
-            { repoUrl }
-          );
+        // Defensive programming: Handle null or empty commits gracefully
+        if (!commits || commits.length === 0) {
+          logger.warn('No commits available for aggregation', {
+            repoUrl,
+            filterOptions,
+            commitsIsNull: commits === null,
+            commitsLength: commits?.length || 0,
+            commitOptionsUsed: commitOptions,
+          });
           // Generate empty aggregated data structure
           aggregatedData = await gitService.aggregateCommitsByTime(
             [],
+            filterOptions
+          );
+        } else {
+          // Generate visualization data from filtered commits
+          logger.debug('Aggregating commits by time', {
+            repoUrl,
+            commitsCount: commits.length,
+            filterOptions,
+          });
+          aggregatedData = await gitService.aggregateCommitsByTime(
+            commits,
             filterOptions
           );
         }
 
         // Cache the computationally expensive aggregated results
         const ttl = config.cacheStrategy.cacheKeys.aggregatedDataTTL;
-        await this.transactionalSet(
+        return this.handleTransactionSuccess(
           this.aggregatedDataCache,
           'aggregated',
           aggregatedKey,
           aggregatedData,
+          ttl,
+          transaction,
+          repoUrl,
+          'Aggregated data cached with transaction',
+          {
+            filters: filterOptions,
+            dataPoints: aggregatedData.data.length,
+            totalCommits: aggregatedData.metadata?.totalCommits ?? 0,
+            aggregatedDataType: typeof aggregatedData,
+            hasTimePeriod: 'timePeriod' in aggregatedData,
+            hasData: 'data' in aggregatedData,
+          }
+        );
+      } catch (error) {
+        return this.handleTransactionError(
+          transaction,
+          error,
+          repoUrl,
+          'aggregated data'
+        );
+      }
+    });
+  }
+
+  /**
+   * Retrieves or generates code churn analysis data using the tertiary cache tier.
+   *
+   * This method handles file change frequency analysis by processing commit history
+   * to identify high-churn files that may indicate code quality issues or hotspots.
+   *
+   * Churn data is cached in the aggregated tier since it's computationally expensive
+   * and changes less frequently than individual commits.
+   *
+   * @param repoUrl - Git repository URL
+   * @param filterOptions - Optional filters for churn analysis scope
+   * @returns Promise resolving to code churn analysis results
+   */
+  async getOrGenerateChurnData(
+    repoUrl: string,
+    filterOptions?: ChurnFilterOptions
+  ): Promise<CodeChurnAnalysis> {
+    return withOrderedLocks(this.getChurnLocks(repoUrl), async () => {
+      const startTime = Date.now();
+
+      // Attempt retrieval from aggregated data cache (Tier 3)
+      const churnKey = this.generateChurnKey(repoUrl, filterOptions);
+      const cachedData = await this.aggregatedDataCache.get(churnKey);
+
+      // Type guard to ensure we have CodeChurnAnalysis
+      const isCodeChurnAnalysis = (data: any): data is CodeChurnAnalysis => {
+        return (
+          data !== null &&
+          typeof data === 'object' &&
+          'files' in data &&
+          'metadata' in data &&
+          Array.isArray(data.files)
+        );
+      };
+
+      if (cachedData && isCodeChurnAnalysis(cachedData)) {
+        // Cache hit: Return pre-computed churn analysis
+        return this.handleCacheHit(
+          'Churn data',
+          'churn',
+          'aggregatedHits',
+          startTime,
+          repoUrl,
+          cachedData,
+          {
+            filters: filterOptions,
+            cacheKey: churnKey,
+            fileCount: cachedData.files.length,
+          },
+          undefined,
+          'churn'
+        );
+      }
+
+      // Cache miss: Generate churn data from repository
+      this.handleCacheMiss(
+        'churn',
+        'aggregatedMisses',
+        startTime,
+        repoUrl,
+        'Churn data cache miss, analyzing repository',
+        { filters: filterOptions, cacheKey: churnKey }
+      );
+
+      const transaction = this.createTransaction(repoUrl);
+
+      try {
+        // Analyze code churn using shared repository
+        const churnData = await withSharedRepository(
+          repoUrl,
+          async (handle: RepositoryHandle) => {
+            logger.info('Analyzing code churn via shared repository', {
+              repoUrl,
+              commitCount: handle.commitCount,
+              sizeCategory: handle.sizeCategory,
+              isShared: handle.isShared,
+            });
+
+            // Track efficiency gains from repository sharing
+            if (handle.isShared && handle.refCount > 1) {
+              this.metrics.efficiency.duplicateClonesPrevented++;
+              logger.debug('Duplicate clone prevented for churn analysis', {
+                repoUrl,
+                refCount: handle.refCount,
+              });
+            }
+
+            return gitService.analyzeCodeChurn(handle.localPath, filterOptions);
+          }
+        );
+
+        // Defensive programming: Handle null churn data gracefully
+        if (!churnData) {
+          logger.error('gitService.analyzeCodeChurn returned null', {
+            repoUrl,
+          });
+          throw new Error('Failed to analyze code churn: null result');
+        }
+
+        // Cache the churn analysis results
+        const ttl = config.cacheStrategy.cacheKeys.aggregatedDataTTL;
+        return this.handleTransactionSuccess(
+          this.aggregatedDataCache,
+          'aggregated',
+          churnKey,
+          churnData,
+          ttl,
+          transaction,
+          repoUrl,
+          'Churn data cached with transaction',
+          {
+            filters: filterOptions,
+            fileCount: churnData.files.length,
+          }
+        );
+      } catch (error) {
+        return this.handleTransactionError(
+          transaction,
+          error,
+          repoUrl,
+          'churn data'
+        );
+      }
+    });
+  }
+
+  /**
+   * Retrieves or generates repository summary statistics using the aggregated cache tier.
+   *
+   * This method handles repository metadata extraction using sparse clones for efficiency.
+   * Summary data includes repository age, commit count, contributors, and activity status.
+   *
+   * Unlike other cache methods, this uses the repositorySummaryService which performs
+   * a sparse clone to minimize bandwidth and storage requirements.
+   *
+   * @param repoUrl - Git repository URL
+   * @returns Promise resolving to repository summary
+   */
+  async getOrGenerateSummary(repoUrl: string): Promise<RepositorySummary> {
+    return withOrderedLocks(this.getSummaryLocks(repoUrl), async () => {
+      const startTime = Date.now();
+
+      // Attempt retrieval from aggregated data cache (Tier 3)
+      const summaryKey = this.generateSummaryKey(repoUrl);
+      const cachedData = await this.aggregatedDataCache.get(summaryKey);
+
+      // Type guard to ensure we have RepositorySummary
+      const isRepositorySummary = (data: any): data is RepositorySummary => {
+        return (
+          data !== null &&
+          typeof data === 'object' &&
+          'repository' in data &&
+          'created' in data &&
+          'stats' in data
+        );
+      };
+
+      if (cachedData && isRepositorySummary(cachedData)) {
+        // Cache hit: Return cached summary
+        this.recordCacheHit(
+          'summary',
+          'aggregatedHits',
+          startTime,
+          repoUrl,
+          undefined,
+          'summary'
+        );
+
+        logger.debug('Summary cache hit', {
+          repoUrl,
+          cacheKey: summaryKey,
+        });
+
+        // Update metadata to reflect cached status
+        return {
+          ...cachedData,
+          metadata: {
+            ...cachedData.metadata,
+            cached: true,
+            dataSource: 'cache',
+          },
+        };
+      }
+
+      // Cache miss: Generate summary from repository
+      this.recordCacheMiss('summary', 'aggregatedMisses', startTime, repoUrl);
+
+      logger.debug('Summary cache miss, generating from repository', {
+        repoUrl,
+        cacheKey: summaryKey,
+      });
+
+      const transaction = this.createTransaction(repoUrl);
+
+      try {
+        // Use repositorySummaryService which handles sparse clones internally
+        // Note: This service already uses coordinatedOperation, so no need for withSharedRepository
+        const summary =
+          await repositorySummaryService.getRepositorySummary(repoUrl);
+
+        // Defensive programming: Validate summary structure
+        if (!summary || !summary.repository) {
+          logger.error('repositorySummaryService returned invalid summary', {
+            repoUrl,
+          });
+          throw new Error(
+            'Failed to generate repository summary: invalid result'
+          );
+        }
+
+        // Cache the summary data - use repositoryInfoTTL (2 hours, longer than aggregated data)
+        const ttl = config.cacheStrategy.cacheKeys.repositoryInfoTTL;
+        await this.transactionalSet(
+          this.aggregatedDataCache,
+          'aggregated',
+          summaryKey,
+          summary,
           ttl,
           transaction
         );
@@ -1645,11 +1865,9 @@ export class RepositoryCacheManager {
         // Finalize the transaction
         await this.commitTransaction(transaction);
 
-        logger.debug('Aggregated data cached with transaction', {
+        logger.debug('Summary cached with transaction', {
           repoUrl,
-          filters: filterOptions,
-          dataPoints: aggregatedData.data.length,
-          totalCommits: aggregatedData.metadata?.totalCommits ?? 0,
+          repositoryName: summary.repository.name,
           ttl,
           transactionId: transaction.id,
         });
@@ -1660,12 +1878,12 @@ export class RepositoryCacheManager {
           errorRate: 0,
         });
 
-        return aggregatedData;
+        return summary;
       } catch (error) {
-        // Track aggregation failure for system monitoring
+        // Track summary generation failure
         this.metrics.transactions.failed++;
 
-        // Record comprehensive error details for debugging complex aggregations
+        // Record comprehensive error details
         recordDetailedError(
           'cache',
           error instanceof Error ? error : new Error(String(error)),
@@ -1682,14 +1900,11 @@ export class RepositoryCacheManager {
         // Rollback transaction to maintain cache consistency
         await this.rollbackTransaction(transaction);
 
-        logger.error(
-          'Failed to cache aggregated data, transaction rolled back',
-          {
-            repoUrl,
-            transactionId: transaction.id,
-            error: error instanceof Error ? error.message : String(error),
-          }
-        );
+        logger.error('Failed to cache summary, transaction rolled back', {
+          repoUrl,
+          transactionId: transaction.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
 
         throw error;
       }
@@ -1724,9 +1939,8 @@ export class RepositoryCacheManager {
         await distributedCache.invalidateGlobally('repository', {
           repoUrl,
           reason: 'repository_update',
-          keysCount: (
-            this.cacheKeyPatterns.get(this.hashUrl(repoUrl)) ?? new Set()
-          ).size,
+          keysCount: (this.cacheKeyPatterns.get(hashUrl(repoUrl)) ?? new Set())
+            .size,
         });
       } catch (err) {
         logger.warn('Failed to broadcast distributed cache invalidation', {
@@ -1748,7 +1962,7 @@ export class RepositoryCacheManager {
         repoUrl,
       });
 
-      const repoHash = this.hashUrl(repoUrl);
+      const repoHash = hashUrl(repoUrl);
       const keysToInvalidate = this.cacheKeyPatterns.get(repoHash) ?? new Set();
 
       const operations: Promise<void>[] = [];
@@ -1978,7 +2192,7 @@ export class RepositoryCacheManager {
    */
 
   private generateRawCommitsKey(repoUrl: string): string {
-    const key = `raw_commits:${this.hashUrl(repoUrl)}`;
+    const key = `raw_commits:${hashUrl(repoUrl)}`;
     this.trackCacheKey(key);
     return key;
   }
@@ -1987,8 +2201,8 @@ export class RepositoryCacheManager {
     repoUrl: string,
     options?: CommitCacheOptions
   ): string {
-    const filterHash = this.hashObject(options || {});
-    const key = `filtered_commits:${this.hashUrl(repoUrl)}:${filterHash}`;
+    const filterHash = hashObject(options || {});
+    const key = `filtered_commits:${hashUrl(repoUrl)}:${filterHash}`;
     this.trackCacheKey(key);
     return key;
   }
@@ -1997,8 +2211,8 @@ export class RepositoryCacheManager {
     repoUrl: string,
     filterOptions?: CommitFilterOptions
   ): string {
-    const filterHash = this.hashObject(filterOptions ?? {});
-    const key = `aggregated_data:${this.hashUrl(repoUrl)}:${filterHash}`;
+    const filterHash = hashObject(filterOptions ?? {});
+    const key = `aggregated_data:${hashUrl(repoUrl)}:${filterHash}`;
     this.trackCacheKey(key);
     return key;
   }
@@ -2008,28 +2222,28 @@ export class RepositoryCacheManager {
     repoUrl: string,
     filterOptions?: CommitFilterOptions
   ): string {
-    const filterHash = this.hashObject(filterOptions ?? {});
-    const key = `contributors:${this.hashUrl(repoUrl)}:${filterHash}`;
+    const filterHash = hashObject(filterOptions ?? {});
+    const key = `contributors:${hashUrl(repoUrl)}:${filterHash}`;
     this.trackCacheKey(key);
     return key;
   }
 
-  /** Generates stable 16-character hash for repository URLs */
-  private hashUrl(url: string): string {
-    // SAFE: MD5 used for cache key generation only (not security-sensitive)
-    // Performance is prioritized over cryptographic strength for cache keys
-    return crypto.createHash('md5').update(url).digest('hex').slice(0, 16);
+  /** Generate cache key for churn data */
+  private generateChurnKey(
+    repoUrl: string,
+    filterOptions?: ChurnFilterOptions
+  ): string {
+    const filterHash = hashObject(filterOptions ?? {});
+    const key = `churn_data:${hashUrl(repoUrl)}:${filterHash}`;
+    this.trackCacheKey(key);
+    return key;
   }
 
-  /** Generates stable 8-character hash for filter option objects */
-  private hashObject(obj: any): string {
-    const str = JSON.stringify(
-      obj,
-      Object.keys(obj).sort((a, b) => a.localeCompare(b))
-    );
-    // SAFE: MD5 used for cache key generation only (not security-sensitive)
-    // Performance is prioritized over cryptographic strength for cache keys
-    return crypto.createHash('md5').update(str).digest('hex').slice(0, 8);
+  /** Generate cache key for repository summary */
+  private generateSummaryKey(repoUrl: string): string {
+    const key = `repository_summary:${hashUrl(repoUrl)}`;
+    this.trackCacheKey(key);
+    return key;
   }
 
   /** Determines if request has specific filters requiring filtered cache tier */
@@ -2220,6 +2434,258 @@ export class RepositoryCacheManager {
   }
 
   /**
+   * Records comprehensive cache hit metrics and tracking.
+   * Centralizes the common pattern of recording:
+   * - Internal metrics counters
+   * - Prometheus cache hit metrics
+   * - Enhanced cache operation tracking
+   * - Data freshness monitoring (optional, for aggregated data)
+   *
+   * This helper eliminates duplication across 8 cache hit locations.
+   *
+   * @param operation - Operation name for Prometheus metrics (e.g., 'raw_commits', 'contributors')
+   * @param metricsField - Internal metrics field to increment ('rawHits', 'filteredHits', 'aggregatedHits')
+   * @param startTime - Operation start timestamp for timing calculations
+   * @param repoUrl - Repository URL for enhanced cache operation tracking
+   * @param dataCount - Optional data count for enhanced metrics (used for raw/filtered commits)
+   * @param dataType - Optional data type for freshness tracking (used for aggregated data types)
+   */
+  private recordCacheHit(
+    operation: string,
+    metricsField: 'rawHits' | 'filteredHits' | 'aggregatedHits',
+    startTime: number,
+    repoUrl: string,
+    dataCount?: number,
+    dataType?: string
+  ): void {
+    this.metrics.operations[metricsField]++;
+    this.recordHitTime(startTime);
+    cacheHits.inc({ operation });
+    recordEnhancedCacheOperation(
+      operation,
+      true,
+      undefined,
+      repoUrl,
+      dataCount
+    );
+
+    // Track data freshness if dataType provided (for aggregated data types)
+    if (dataType) {
+      const cacheAge = Date.now() - startTime;
+      recordDataFreshness(dataType, cacheAge);
+    }
+  }
+
+  /**
+   * Records comprehensive cache miss metrics and tracking.
+   * Centralizes the common pattern of recording:
+   * - Internal metrics counters
+   * - Prometheus cache miss metrics
+   * - Enhanced cache operation tracking
+   *
+   * This helper eliminates duplication across 8 cache miss locations.
+   *
+   * @param operation - Operation name for Prometheus metrics (e.g., 'raw_commits', 'contributors')
+   * @param metricsField - Internal metrics field to increment ('rawMisses', 'filteredMisses', 'aggregatedMisses')
+   * @param startTime - Operation start timestamp for timing calculations
+   * @param repoUrl - Repository URL for enhanced cache operation tracking
+   */
+  private recordCacheMiss(
+    operation: string,
+    metricsField: 'rawMisses' | 'filteredMisses' | 'aggregatedMisses',
+    startTime: number,
+    repoUrl: string
+  ): void {
+    this.metrics.operations[metricsField]++;
+    this.recordMissTime(startTime);
+    cacheMisses.inc({ operation });
+    recordEnhancedCacheOperation(operation, false, undefined, repoUrl);
+  }
+
+  /**
+   * Handles cache hit path with logging and metrics.
+   * Consolidates the duplicate pattern of recording cache hits and returning cached data.
+   *
+   * Eliminates ~60 lines of duplication across 4 cache methods.
+   *
+   * @param cacheType - Human-readable cache type for logging (e.g., 'Raw commits', 'Aggregated data')
+   * @param operation - Operation name for Prometheus metrics (e.g., 'raw_commits', 'contributors')
+   * @param metricsField - Internal metrics field to increment
+   * @param startTime - Operation start timestamp
+   * @param repoUrl - Repository URL
+   * @param data - The cached data to return
+   * @param logContext - Additional context for debug logging
+   * @returns The cached data
+   */
+  /**
+   * Handles cache hit path with logging and metrics.
+   * Consolidates the duplicate pattern of recording cache hits and returning cached data.
+   *
+   * Eliminates ~60 lines of duplication across 4 cache methods.
+   *
+   * @param cacheType - Human-readable cache type for logging (e.g., 'Raw commits', 'Aggregated data')
+   * @param operation - Operation name for Prometheus metrics (e.g., 'raw_commits', 'contributors')
+   * @param metricsField - Internal metrics field to increment
+   * @param startTime - Operation start timestamp
+   * @param repoUrl - Repository URL
+   * @param data - The cached data to return
+   * @param logContext - Additional context for debug logging
+   * @param dataCount - Optional data count for enhanced metrics (used for raw/filtered commits)
+   * @param dataType - Optional data type for freshness tracking (used for aggregated data types)
+   * @returns The cached data
+   */
+  private handleCacheHit<T>(
+    cacheType: string,
+    operation: string,
+    metricsField: 'rawHits' | 'filteredHits' | 'aggregatedHits',
+    startTime: number,
+    repoUrl: string,
+    data: T,
+    logContext?: Record<string, any>,
+    dataCount?: number,
+    dataType?: string
+  ): T {
+    // Record metrics with optional data count and type
+    this.recordCacheHit(
+      operation,
+      metricsField,
+      startTime,
+      repoUrl,
+      dataCount,
+      dataType
+    );
+
+    // Log cache hit with context
+    logger.debug(`${cacheType} cache hit`, {
+      repoUrl,
+      ...logContext,
+    });
+
+    return data;
+  }
+
+  /**
+   * Consolidates cache miss recording and logging.
+   * Reduces duplication across all cache methods by standardizing
+   * the cache miss path.
+   *
+   * @param operation - Operation identifier for metrics (e.g., 'raw_commits', 'contributors')
+   * @param metricsField - Which metrics counter to increment
+   * @param startTime - Request start timestamp for latency tracking
+   * @param repoUrl - Repository URL for logging context
+   * @param logMessage - Human-readable message describing the cache miss
+   * @param logContext - Additional context to include in the log
+   */
+  private handleCacheMiss(
+    operation: string,
+    metricsField: 'rawMisses' | 'filteredMisses' | 'aggregatedMisses',
+    startTime: number,
+    repoUrl: string,
+    logMessage: string,
+    logContext?: Record<string, any>
+  ): void {
+    this.recordCacheMiss(operation, metricsField, startTime, repoUrl);
+    logger.debug(logMessage, {
+      repoUrl,
+      ...logContext,
+    });
+  }
+
+  /**
+   * Consolidates successful transaction caching operations.
+   * Reduces duplication across all cache methods by standardizing
+   * the success path for caching operations.
+   *
+   * @param cache - Cache instance to store data in
+   * @param cacheType - Cache tier identifier ('raw', 'aggregated')
+   * @param key - Cache key for storing the data
+   * @param data - Data to cache
+   * @param ttl - Time-to-live in seconds
+   * @param transaction - Transaction object for atomicity
+   * @param repoUrl - Repository URL for logging context
+   * @param logMessage - Human-readable message describing what was cached
+   * @param logContext - Additional context to include in the log
+   * @returns The cached data
+   */
+  private async handleTransactionSuccess<T>(
+    cache: any,
+    cacheType: 'raw' | 'aggregated',
+    key: string,
+    data: T,
+    ttl: number,
+    transaction: CacheTransaction,
+    repoUrl: string,
+    logMessage: string,
+    logContext?: Record<string, any>
+  ): Promise<T> {
+    await this.transactionalSet(cache, cacheType, key, data, ttl, transaction);
+    await this.commitTransaction(transaction);
+    logger.debug(logMessage, {
+      repoUrl,
+      ttl,
+      transactionId: transaction.id,
+      ...logContext,
+    });
+    updateServiceHealthScore('cache', { cacheHitRate: 1, errorRate: 0 });
+    return data;
+  }
+
+  /**
+   * Handles transaction errors with consistent cleanup and logging.
+   * Consolidates error handling logic across all cache methods.
+   *
+   * This helper ensures all cache failures follow the same pattern:
+   * - Record failure metrics
+   * - Update health scores
+   * - Rollback transactions
+   * - Log errors with context
+   * - Re-throw for upstream handling
+   *
+   * @param transaction - Transaction to rollback
+   * @param error - Error that occurred
+   * @param repoUrl - Repository URL for logging context
+   * @param operationName - Operation name for error message
+   * @param logContext - Optional additional context for logs
+   * @throws The original error after cleanup
+   */
+  private async handleTransactionError(
+    transaction: CacheTransaction,
+    error: unknown,
+    repoUrl: string,
+    operationName: string,
+    logContext?: Record<string, any>
+  ): Promise<never> {
+    // Increment transaction failure counter for monitoring
+    this.metrics.transactions.failed++;
+
+    // Record comprehensive error details for debugging and alerting
+    recordDetailedError(
+      'cache',
+      error instanceof Error ? error : new Error(String(error)),
+      {
+        userImpact: 'degraded',
+        recoveryAction: 'retry',
+        severity: 'warning',
+      }
+    );
+
+    // Update system health metrics to reflect the failure
+    updateServiceHealthScore('cache', { errorRate: 1 });
+
+    // Rollback all cache changes to maintain consistency
+    await this.rollbackTransaction(transaction);
+
+    logger.error(`Failed to cache ${operationName}, transaction rolled back`, {
+      repoUrl,
+      transactionId: transaction.id,
+      error: error instanceof Error ? error.message : String(error),
+      ...logContext,
+    });
+
+    throw error;
+  }
+
+  /**
    * Internal raw commits retrieval without external locking.
    *
    * This method is used within ordered lock contexts to prevent deadlocks.
@@ -2260,20 +2726,14 @@ export class RepositoryCacheManager {
     }
 
     if (commits) {
-      this.metrics.operations.rawHits++;
-      this.recordHitTime(startTime);
-      cacheHits.inc({ operation: 'raw_commits' });
-      recordEnhancedCacheOperation(
+      this.recordCacheHit(
         'raw_commits',
-        true,
-        undefined,
+        'rawHits',
+        startTime,
         repoUrl,
-        commits.length
+        commits.length,
+        'commits'
       );
-
-      // Record data freshness
-      const cacheAge = Date.now() - startTime;
-      recordDataFreshness('commits', cacheAge);
 
       logger.debug('Raw commits cache hit', {
         repoUrl,
@@ -2285,10 +2745,7 @@ export class RepositoryCacheManager {
     }
 
     // Cache miss - need to fetch from repository with transaction
-    this.metrics.operations.rawMisses++;
-    this.recordMissTime(startTime);
-    cacheMisses.inc({ operation: 'raw_commits' });
-    recordEnhancedCacheOperation('raw_commits', false, undefined, repoUrl);
+    this.recordCacheMiss('raw_commits', 'rawMisses', startTime, repoUrl);
 
     logger.info('Raw commits cache miss, fetching from repository', {
       repoUrl,
@@ -2299,7 +2756,8 @@ export class RepositoryCacheManager {
 
     try {
       // Use shared repository to prevent duplicate clones
-      // Note: This will use the repo-access lock that's already acquired through withOrderedLocks
+      // FIX: repo-access lock is now acquired through withOrderedLocks above.
+      // The lock manager is re-entrant and will skip re-acquiring this lock.
       commits = await withSharedRepository(
         repoUrl,
         async (handle: RepositoryHandle) => {
@@ -2329,6 +2787,17 @@ export class RepositoryCacheManager {
         commits = [];
         logger.warn('gitService.getCommits returned null, using empty array', {
           repoUrl,
+        });
+      } else if (commits.length === 0) {
+        logger.warn('Git service returned zero commits', {
+          repoUrl,
+          message:
+            'Repository might be empty or git operations may have failed',
+        });
+      } else {
+        logger.debug('Raw commits fetched successfully', {
+          repoUrl,
+          commitCount: commits.length,
         });
       }
 
@@ -2415,20 +2884,14 @@ export class RepositoryCacheManager {
     let filteredCommits = await this.filteredCommitsCache.get(filteredKey);
 
     if (filteredCommits) {
-      this.metrics.operations.filteredHits++;
-      this.recordHitTime(startTime);
-      cacheHits.inc({ operation: 'filtered_commits' });
-      recordEnhancedCacheOperation(
+      this.recordCacheHit(
         'filtered_commits',
-        true,
-        undefined,
+        'filteredHits',
+        startTime,
         repoUrl,
-        filteredCommits.length
+        filteredCommits.length,
+        'commits'
       );
-
-      // Record data freshness
-      const cacheAge = Date.now() - startTime;
-      recordDataFreshness('commits', cacheAge);
 
       logger.debug('Filtered commits cache hit', {
         repoUrl,
@@ -2441,10 +2904,12 @@ export class RepositoryCacheManager {
     }
 
     // Cache miss - get raw commits and apply filters with transaction
-    this.metrics.operations.filteredMisses++;
-    this.recordMissTime(startTime);
-    cacheMisses.inc({ operation: 'filtered_commits' });
-    recordEnhancedCacheOperation('filtered_commits', false, undefined, repoUrl);
+    this.recordCacheMiss(
+      'filtered_commits',
+      'filteredMisses',
+      startTime,
+      repoUrl
+    );
 
     logger.debug(
       'Filtered commits cache miss, applying filters to raw commits',
@@ -2631,4 +3096,36 @@ export async function getCachedContributors(
   }>
 > {
   return repositoryCache.getOrGenerateContributors(repoUrl, filterOptions);
+}
+
+/**
+ * Retrieves code churn analysis for a repository.
+ *
+ * Returns cached data when available, or generates fresh analysis by
+ * examining file change frequency patterns across commit history.
+ *
+ * @param repoUrl - Repository URL to analyze
+ * @param filterOptions - Optional filters for churn analysis scope
+ * @returns Promise resolving to code churn analysis results
+ */
+export async function getCachedChurnData(
+  repoUrl: string,
+  filterOptions?: ChurnFilterOptions
+): Promise<CodeChurnAnalysis> {
+  return repositoryCache.getOrGenerateChurnData(repoUrl, filterOptions);
+}
+
+/**
+ * Retrieves repository summary statistics.
+ *
+ * Returns cached summary when available, or generates fresh statistics by
+ * performing a sparse clone to extract repository metadata.
+ *
+ * @param repoUrl - Repository URL to analyze
+ * @returns Promise resolving to repository summary
+ */
+export async function getCachedSummary(
+  repoUrl: string
+): Promise<RepositorySummary> {
+  return repositoryCache.getOrGenerateSummary(repoUrl);
 }
