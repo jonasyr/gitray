@@ -1399,7 +1399,8 @@ def456|2023-01-02T12:00:00Z|Bob|bob@example.com|chore: merge commit
 
       // Assert
       expect(result).toHaveLength(2); // "Alice" and "alice" (case-sensitive)
-      expect(result).toEqual([{ login: 'Alice' }, { login: 'alice' }]);
+      // localeCompare sorts lowercase before uppercase, so "alice" comes before "Alice"
+      expect(result).toEqual([{ login: 'alice' }, { login: 'Alice' }]);
     });
 
     test('should handle empty or whitespace-only author names', async () => {
