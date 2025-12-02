@@ -992,7 +992,7 @@ class GitService {
 
       // Convert to Contributor array and sort alphabetically for consistency
       const contributors: Contributor[] = Array.from(uniqueAuthors)
-        .sort()
+        .sort((a, b) => a.localeCompare(b))
         .map((login) => ({ login }));
 
       logger.info(
