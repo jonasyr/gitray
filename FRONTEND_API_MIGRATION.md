@@ -224,7 +224,7 @@ const { heatmapData } = await response.json();
 
 ### 3. GET /api/repositories/contributors
 
-**Purpose**: Retrieve top contributors with statistics and optional filters.
+**Purpose**: Retrieve all unique contributors without statistics or ranking (GDPR-compliant).
 
 **Query Parameters**:
 
@@ -249,12 +249,7 @@ GET /api/repositories/contributors?repoUrl=https://github.com/user/repo.git&from
 ```typescript
 {
   contributors: Array<{
-    name: string;
-    email: string;
-    commits: number;
-    additions: number;
-    deletions: number;
-    percentage: number;  // Contribution percentage
+    login: string;  // Author name (GDPR-compliant pseudonymized identifier)
   }>
 }
 ```
@@ -264,22 +259,9 @@ GET /api/repositories/contributors?repoUrl=https://github.com/user/repo.git&from
 ```json
 {
   "contributors": [
-    {
-      "name": "Jonas",
-      "email": "jonas@example.com",
-      "commits": 280,
-      "additions": 15420,
-      "deletions": 3210,
-      "percentage": 58.3
-    },
-    {
-      "name": "Contributor2",
-      "email": "contrib@example.com",
-      "commits": 200,
-      "additions": 8500,
-      "deletions": 1200,
-      "percentage": 41.7
-    }
+    { "login": "Alice" },
+    { "login": "Bob" },
+    { "login": "Charlie" }
   ]
 }
 ```
@@ -300,7 +282,15 @@ if (toDate) params.append('toDate', toDate);
 
 const response = await fetch(`/api/repositories/contributors?${params}`);
 const { contributors } = await response.json();
+// Note: Contributors now contain only { login: string }, no statistics
 ```
+
+**IMPORTANT CHANGES (Issue #121)**:
+
+- Returns **all unique contributors**, not just top 5
+- No commit counts, line statistics, or contribution percentages
+- Alphabetically sorted for consistency
+- Fully GDPR-compliant (only author names, no tracking metrics)
 
 ---
 

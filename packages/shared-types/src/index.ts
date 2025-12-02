@@ -371,22 +371,15 @@ export interface PerformanceMetrics {
 // ============================================================================
 
 /**
- * Represents statistics for a repository contributor
+ * Represents a repository contributor
+ * GDPR-compliant: contains only the author name, no statistics or ranking
  */
-export interface ContributorStat {
+export interface Contributor {
   /**
    * Git author name (pseudonymized identifier for GDPR compliance).
    * Uses the author's configured git name, not email address.
    */
   login: string;
-  /** Total number of commits by this contributor */
-  commitCount: number;
-  /** Total lines added by this contributor */
-  linesAdded: number;
-  /** Total lines deleted by this contributor */
-  linesDeleted: number;
-  /** Contribution percentage relative to total commits (0.0 to 1.0) */
-  contributionPercentage: number;
 }
 
 // ============================================================================

@@ -31,7 +31,7 @@ vi.mock('../../../src/services/metrics', () => ({
 }));
 
 describe('GitService Optimized Unit Tests', () => {
-  const mockGit = { clone: vi.fn(), raw: vi.fn() };
+  const mockGit = { clone: vi.fn(), raw: vi.fn(), log: vi.fn() };
   const mockMemoryStats = {
     system: {
       free: 1024 * 1024 * 1024,
@@ -50,6 +50,7 @@ describe('GitService Optimized Unit Tests', () => {
   const createMockContext = () => {
     vi.clearAllMocks();
     mockGit.raw.mockReset();
+    mockGit.log.mockReset();
     (simpleGit as any).mockImplementation(() => mockGit);
     (mkdtemp as any).mockResolvedValue('/tmp/test-repo');
     (rm as any).mockResolvedValue(undefined);
@@ -1307,54 +1308,23 @@ def456|2023-01-02T12:00:00Z|Bob|bob@example.com|chore: merge commit
     });
   });
 
-  describe('getTopContributors', () => {
-    test('should aggregate and return top 5 contributors sorted by commit count', async () => {
+  describe('getContributors', () => {
+    test('should return all unique contributors sorted alphabetically', async () => {
       // Arrange
-      const commitsWithStats = `abc123|2023-01-01T12:00:00Z|Alice|alice@example.com|commit 1
-10\t5\tfile1.ts
-
-def456|2023-01-02T12:00:00Z|Bob|bob@example.com|commit 2
-15\t3\tfile2.ts
-
-ghi789|2023-01-03T12:00:00Z|Alice|alice@example.com|commit 3
-20\t10\tfile3.ts
-
-jkl012|2023-01-04T12:00:00Z|Charlie|charlie@example.com|commit 4
-5\t2\tfile4.ts
-
-mno345|2023-01-05T12:00:00Z|Alice|alice@example.com|commit 5
-8\t4\tfile5.ts
-
-pqr678|2023-01-06T12:00:00Z|Bob|bob@example.com|commit 6
-12\t6\tfile6.ts`;
-      mockGit.raw.mockResolvedValue(commitsWithStats);
+      const rawOutput = 'Alice\nBob\nAlice\nCharlie\nBob';
+      mockGit.raw.mockResolvedValue(rawOutput);
 
       // Act
-      const result = await gitService.getTopContributors('/test/repo');
+      const result = await gitService.getContributors('/test/repo');
 
       // Assert
-      expect(result).toHaveLength(3); // Alice, Bob, Charlie
-      expect(result[0]).toEqual({
-        login: 'Alice',
-        commitCount: 3,
-        linesAdded: 38,
-        linesDeleted: 19,
-        contributionPercentage: 0.5, // 3 out of 6 commits
-      });
-      expect(result[1]).toEqual({
-        login: 'Bob',
-        commitCount: 2,
-        linesAdded: 27,
-        linesDeleted: 9,
-        contributionPercentage: 2 / 6,
-      });
-      expect(result[2]).toEqual({
-        login: 'Charlie',
-        commitCount: 1,
-        linesAdded: 5,
-        linesDeleted: 2,
-        contributionPercentage: 1 / 6,
-      });
+      expect(result).toHaveLength(3);
+      expect(result).toEqual([
+        { login: 'Alice' },
+        { login: 'Bob' },
+        { login: 'Charlie' },
+      ]);
+      expect(mockGit.raw).toHaveBeenCalledWith(['log', '--format=%aN']);
     });
 
     test('should return empty array when no commits exist', async () => {
@@ -1362,60 +1332,87 @@ pqr678|2023-01-06T12:00:00Z|Bob|bob@example.com|commit 6
       mockGit.raw.mockResolvedValue('');
 
       // Act
-      const result = await gitService.getTopContributors('/test/repo');
+      const result = await gitService.getContributors('/test/repo');
 
       // Assert
       expect(result).toEqual([]);
     });
 
-    test('should limit results to top 5 contributors', async () => {
+    test('should apply date filter options', async () => {
       // Arrange
-      const manyCommits = Array.from(
-        { length: 10 },
-        (_, i) =>
-          `commit${i}|2023-01-0${i + 1}T12:00:00Z|User${i}|user${i}@example.com|commit ${i}\n10\t5\tfile${i}.ts`
-      ).join('\n\n');
-      mockGit.raw.mockResolvedValue(manyCommits);
+      mockGit.raw.mockResolvedValue('Alice');
 
       // Act
-      const result = await gitService.getTopContributors('/test/repo');
-
-      // Assert
-      expect(result.length).toBeLessThanOrEqual(5);
-    });
-
-    test('should apply filter options to underlying commits', async () => {
-      // Arrange
-      const commitData = `abc123|2023-01-01T12:00:00Z|Alice|alice@example.com|commit 1
-10\t5\tfile1.ts`;
-      mockGit.raw.mockResolvedValue(commitData);
-
-      // Act
-      await gitService.getTopContributors('/test/repo', {
+      await gitService.getContributors('/test/repo', {
         fromDate: '2023-01-01',
         toDate: '2023-12-31',
       });
 
       // Assert
       expect(mockGit.raw).toHaveBeenCalledWith(
-        expect.arrayContaining(['--since=2023-01-01', '--until=2023-12-31'])
+        expect.arrayContaining([
+          'log',
+          '--format=%aN',
+          '--since=2023-01-01',
+          '--until=2023-12-31',
+        ])
       );
     });
 
-    test('should calculate contribution percentage correctly', async () => {
+    test('should apply single author filter', async () => {
       // Arrange
-      const twoCommits = `abc123|2023-01-01T12:00:00Z|Alice|alice@example.com|commit 1
-10\t5\tfile1.ts
-
-def456|2023-01-02T12:00:00Z|Alice|alice@example.com|commit 2
-20\t10\tfile2.ts`;
-      mockGit.raw.mockResolvedValue(twoCommits);
+      mockGit.raw.mockResolvedValue('Alice');
 
       // Act
-      const result = await gitService.getTopContributors('/test/repo');
+      await gitService.getContributors('/test/repo', {
+        author: 'Alice',
+      });
 
       // Assert
-      expect(result[0].contributionPercentage).toBe(1.0); // 100% when only one contributor
+      expect(mockGit.raw).toHaveBeenCalledWith(
+        expect.arrayContaining(['log', '--format=%aN', '--author=Alice'])
+      );
+    });
+
+    test('should apply multiple authors filter using regex pattern', async () => {
+      // Arrange
+      mockGit.raw.mockResolvedValue('Alice\nBob');
+
+      // Act
+      await gitService.getContributors('/test/repo', {
+        authors: ['Alice', 'Bob'],
+      });
+
+      // Assert
+      expect(mockGit.raw).toHaveBeenCalledWith(
+        expect.arrayContaining(['log', '--format=%aN', '--author=Alice|Bob'])
+      );
+    });
+
+    test('should deduplicate contributor names correctly', async () => {
+      // Arrange
+      const rawOutput = 'Alice\nalice\nAlice\nAlice ';
+      mockGit.raw.mockResolvedValue(rawOutput);
+
+      // Act
+      const result = await gitService.getContributors('/test/repo');
+
+      // Assert
+      expect(result).toHaveLength(2); // "Alice" and "alice" (case-sensitive)
+      expect(result).toEqual([{ login: 'Alice' }, { login: 'alice' }]);
+    });
+
+    test('should handle empty or whitespace-only author names', async () => {
+      // Arrange
+      const rawOutput = 'Alice\n\n   \nBob';
+      mockGit.raw.mockResolvedValue(rawOutput);
+
+      // Act
+      const result = await gitService.getContributors('/test/repo');
+
+      // Assert
+      expect(result).toHaveLength(2);
+      expect(result).toEqual([{ login: 'Alice' }, { login: 'Bob' }]);
     });
 
     test('should handle git errors gracefully', async () => {
@@ -1423,9 +1420,26 @@ def456|2023-01-02T12:00:00Z|Alice|alice@example.com|commit 2
       mockGit.raw.mockRejectedValue(new Error('Git error'));
 
       // Act & Assert
-      await expect(gitService.getTopContributors('/test/repo')).rejects.toThrow(
-        'Failed to get top contributors'
+      await expect(gitService.getContributors('/test/repo')).rejects.toThrow(
+        'Failed to get contributors'
       );
+    });
+
+    test('should return all contributors without limiting to top 5', async () => {
+      // Arrange
+      const rawOutput = Array.from({ length: 10 }, (_, i) => `User${i}`).join(
+        '\n'
+      );
+      mockGit.raw.mockResolvedValue(rawOutput);
+
+      // Act
+      const result = await gitService.getContributors('/test/repo');
+
+      // Assert
+      expect(result).toHaveLength(10); // All 10 contributors returned
+      expect(
+        result.every((c) => 'login' in c && Object.keys(c).length === 1)
+      ).toBe(true);
     });
   });
 

@@ -36,6 +36,7 @@ import {
   ChurnFilterOptions,
   ChurnRiskLevel,
   ChurnRiskThresholds,
+  Contributor,
 } from '@gitray/shared-types';
 import { shallowClone } from '../utils/gitUtils';
 import redis from '../services/cache';
@@ -941,88 +942,71 @@ class GitService {
   }
 
   /**
-   * NEW: Get top contributors with aggregated statistics
-   * Returns up to 5 top contributors sorted by commit count
+   * Get all unique contributors (author names) from the repository
+   * Returns deduplicated list of author names without statistics or ranking
+   * GDPR-compliant: returns only author names, no commit counts or percentages
    */
-  async getTopContributors(
+  async getContributors(
     localRepoPath: string,
     options?: CommitFilterOptions
-  ): Promise<
-    Array<{
-      login: string;
-      commitCount: number;
-      linesAdded: number;
-      linesDeleted: number;
-      contributionPercentage: number;
-    }>
-  > {
-    logger.info(`Getting top contributors from: ${localRepoPath}`, { options });
+  ): Promise<Contributor[]> {
+    logger.info(`Getting contributors from: ${localRepoPath}`, { options });
 
     try {
-      // Fetch commits with line statistics
-      const commitsWithStats = await this.getCommitsWithStats(
-        localRepoPath,
-        options
-      );
+      const git = simpleGit(localRepoPath);
 
-      // Aggregate stats by author
-      const contributorMap = new Map<
-        string,
-        {
-          login: string;
-          commitCount: number;
-          linesAdded: number;
-          linesDeleted: number;
-        }
-      >();
+      // Build git log arguments for filtering
+      const args: string[] = ['log', '--format=%aN']; // Only author name
 
-      for (const commit of commitsWithStats) {
-        // Use author name as the unique identifier for GDPR compliance (pseudonymized)
-        const login = commit.authorName;
-
-        if (!contributorMap.has(login)) {
-          contributorMap.set(login, {
-            login,
-            commitCount: 0,
-            linesAdded: 0,
-            linesDeleted: 0,
-          });
-        }
-
-        const contributor = contributorMap.get(login)!;
-        contributor.commitCount += 1;
-        contributor.linesAdded += commit.linesAdded;
-        contributor.linesDeleted += commit.linesDeleted;
+      // Apply date filters
+      if (options?.fromDate) {
+        args.push(`--since=${options.fromDate}`);
+      }
+      if (options?.toDate) {
+        args.push(`--until=${options.toDate}`);
       }
 
-      // Convert to array and sort by commit count
-      const contributors = Array.from(contributorMap.values());
-      contributors.sort((a, b) => b.commitCount - a.commitCount);
+      // Apply author filters
+      if (options?.author) {
+        args.push(`--author=${options.author}`);
+      } else if (options?.authors && options.authors.length > 0) {
+        // Multiple authors: create OR condition using regex
+        const authorPattern = options.authors.join('|');
+        args.push(`--author=${authorPattern}`);
+      }
 
-      // Calculate contribution percentages and take top 5
-      const totalCommits = commitsWithStats.length;
-      const topContributors = contributors.slice(0, 5).map((contributor) => ({
-        ...contributor,
-        contributionPercentage:
-          totalCommits > 0 ? contributor.commitCount / totalCommits : 0,
-      }));
+      // Execute git log - using raw() for custom format
+      const output = await git.raw(args);
+
+      // Extract unique author names from raw output
+      const uniqueAuthors = new Set<string>();
+      if (output && output.trim()) {
+        const lines = output.trim().split('\n');
+        for (const line of lines) {
+          const authorName = line.trim();
+          if (authorName) {
+            uniqueAuthors.add(authorName);
+          }
+        }
+      }
+
+      // Convert to Contributor array and sort alphabetically for consistency
+      const contributors: Contributor[] = Array.from(uniqueAuthors)
+        .sort()
+        .map((login) => ({ login }));
 
       logger.info(
-        `Successfully aggregated ${topContributors.length} top contributors from ${localRepoPath}`,
-        {
-          totalContributors: contributors.length,
-          totalCommits,
-        }
+        `Successfully retrieved ${contributors.length} unique contributors from ${localRepoPath}`
       );
 
-      return topContributors;
+      return contributors;
     } catch (error) {
-      logger.error(`Error getting top contributors from ${localRepoPath}`, {
+      logger.error(`Error getting contributors from ${localRepoPath}`, {
         error,
         localRepoPath,
       });
       throw new RepositoryError(
-        `Failed to get top contributors: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to get contributors: ${error instanceof Error ? error.message : String(error)}`,
         localRepoPath
       );
     }

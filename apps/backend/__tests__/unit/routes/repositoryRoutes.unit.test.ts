@@ -326,17 +326,13 @@ describe('RepositoryRoutes Unit Tests (Refactored with Unified Cache)', () => {
     });
   });
 
-  describe('GET /contributors - Top Contributors with Unified Cache', () => {
-    test('should return contributors using unified cache service', async () => {
+  describe('GET /contributors - All Unique Contributors with Unified Cache', () => {
+    test('should return all unique contributors using unified cache service', async () => {
       // ARRANGE
       const mockContributors = [
-        {
-          login: 'user1',
-          commitCount: 50,
-          linesAdded: 1000,
-          linesDeleted: 200,
-          contributionPercentage: 60,
-        },
+        { login: 'Alice' },
+        { login: 'Bob' },
+        { login: 'Charlie' },
       ];
 
       mockRepositoryCache.getCachedContributors.mockResolvedValue(
@@ -352,6 +348,16 @@ describe('RepositoryRoutes Unit Tests (Refactored with Unified Cache)', () => {
       expect(response.status).toBe(200);
       expect(response.body).toHaveProperty('contributors');
       expect(response.body.contributors).toEqual(mockContributors);
+      expect(response.body.contributors).toHaveLength(3);
+
+      // Verify no statistics in response
+      response.body.contributors.forEach((contributor: any) => {
+        expect(contributor).toHaveProperty('login');
+        expect(contributor).not.toHaveProperty('commitCount');
+        expect(contributor).not.toHaveProperty('linesAdded');
+        expect(contributor).not.toHaveProperty('linesDeleted');
+        expect(contributor).not.toHaveProperty('contributionPercentage');
+      });
 
       expect(mockRepositoryCache.getCachedContributors).toHaveBeenCalledWith(
         'https://github.com/test/repo',

@@ -51,19 +51,12 @@ import {
   CodeChurnAnalysis,
   ChurnFilterOptions,
   RepositorySummary,
+  Contributor,
 } from '@gitray/shared-types';
-
-type ContributorAggregation = {
-  login: string;
-  commitCount: number;
-  linesAdded: number;
-  linesDeleted: number;
-  contributionPercentage: number;
-};
 
 type AggregatedCacheValue =
   | CommitHeatmapData
-  | ContributorAggregation[]
+  | Contributor[]
   | CodeChurnAnalysis
   | RepositorySummary;
 
@@ -316,7 +309,7 @@ export class RepositoryCacheManager {
      * Initialize aggregated data cache with smallest allocation.
      * Aggregations are computationally expensive but have the lowest reuse rate
      * since they're often specific to particular visualization requests.
-     * Now supports both CommitHeatmapData and ContributorStat[] types.
+     * Now supports CommitHeatmapData, Contributor[], CodeChurnAnalysis, and RepositorySummary types.
      */
     this.aggregatedDataCache = new HybridLRUCache<AggregatedCacheValue>({
       maxEntries: Math.floor(baseConfig.maxEntries * 0.2), // 20% of total entries
@@ -1311,28 +1304,20 @@ export class RepositoryCacheManager {
   }
 
   /**
-   * NEW: Retrieves or generates top contributor statistics using the aggregated cache tier.
+   * NEW: Retrieves or generates list of all unique contributors using the aggregated cache tier.
    *
-   * This method processes commit data to generate contributor-level statistics including
-   * commit counts, lines added/deleted, and contribution percentages. Results are cached
-   * to avoid expensive recomputation for subsequent requests.
+   * This method processes commit data to generate a deduplicated list of contributor names
+   * without statistics or ranking, fully GDPR-compliant. Results are cached to avoid
+   * expensive recomputation for subsequent requests.
    *
    * @param repoUrl - Git repository URL
    * @param filterOptions - Optional filters for contributor data scope
-   * @returns Promise resolving to array of top contributor statistics
+   * @returns Promise resolving to array of unique contributors
    */
   async getOrGenerateContributors(
     repoUrl: string,
     filterOptions?: CommitFilterOptions
-  ): Promise<
-    Array<{
-      login: string;
-      commitCount: number;
-      linesAdded: number;
-      linesDeleted: number;
-      contributionPercentage: number;
-    }>
-  > {
+  ): Promise<Contributor[]> {
     // FIX: Don't use withOrderedLocks for contributors since it needs direct repository access
     // The repository coordinator manages its own locking via withSharedRepository
     const startTime = Date.now();
@@ -1345,15 +1330,7 @@ export class RepositoryCacheManager {
     const cachedData = await this.aggregatedDataCache.get(contributorsKey);
 
     // Type guard to ensure we have contributor data
-    const isContributorArray = (
-      data: any
-    ): data is Array<{
-      login: string;
-      commitCount: number;
-      linesAdded: number;
-      linesDeleted: number;
-      contributionPercentage: number;
-    }> => {
+    const isContributorArray = (data: any): data is Contributor[] => {
       return Array.isArray(data) && (data.length === 0 || 'login' in data[0]);
     };
 
@@ -1409,7 +1386,7 @@ export class RepositoryCacheManager {
             });
           }
 
-          return gitService.getTopContributors(handle.localPath, filterOptions);
+          return gitService.getContributors(handle.localPath, filterOptions);
         }
       );
 
@@ -1417,7 +1394,7 @@ export class RepositoryCacheManager {
       if (!contributors) {
         contributors = [];
         logger.warn(
-          'gitService.getTopContributors returned null, using empty array',
+          'gitService.getContributors returned null, using empty array',
           { repoUrl }
         );
       }
@@ -3086,15 +3063,7 @@ export function getRepositoryCacheStats(): CacheStats {
 export async function getCachedContributors(
   repoUrl: string,
   filterOptions?: CommitFilterOptions
-): Promise<
-  Array<{
-    login: string;
-    commitCount: number;
-    linesAdded: number;
-    linesDeleted: number;
-    contributionPercentage: number;
-  }>
-> {
+): Promise<Contributor[]> {
   return repositoryCache.getOrGenerateContributors(repoUrl, filterOptions);
 }
 
