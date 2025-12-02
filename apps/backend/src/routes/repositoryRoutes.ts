@@ -288,6 +288,7 @@ router.get(
       const cacheOptions: CommitCacheOptions = {
         skip,
         limit,
+        ...filters,
       };
 
       // FIX: Fetch sequentially instead of parallel to avoid lock contention
