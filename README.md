@@ -3,7 +3,7 @@
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
-[![React](https://img.shields.io/badge/React-19-blue.svg)](https://reactjs.org/)
+[![React](https://img.shields.io/badge/React-18.3-blue.svg)](https://reactjs.org/)
 [![Test Coverage](https://img.shields.io/badge/Coverage-86.4%25-brightgreen.svg)](coverage/index.html)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-jonasyr%2Fgitray-blue.svg?logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACwAAAAyCAYAAAAnWDnqAAAAAXNSR0IArs4c6QAAA05JREFUaEPtmUtyEzEQhtWTQyQLHNak2AB7ZnyXZMEjXMGeK/AIi+QuHrMnbChYY7MIh8g01fJoopFb0uhhEqqcbWTp06/uv1saEDv4O3n3dV60RfP947Mm9/SQc0ICFQgzfc4CYZoTPAswgSJCCUJUnAAoRHOAUOcATwbmVLWdGoH//PB8mnKqScAhsD0kYP3j/Yt5LPQe2KvcXmGvRHcDnpxfL2zOYJ1mFwrryWTz0advv1Ut4CJgf5uhDuDj5eUcAUoahrdY/56ebRWeraTjMt/00Sh3UDtjgHtQNHwcRGOC98BJEAEymycmYcWwOprTgcB6VZ5JK5TAJ+fXGLBm3FDAmn6oPPjR4rKCAoJCal2eAiQp2x0vxTPB3ALO2CRkwmDy5WohzBDwSEFKRwPbknEggCPB/imwrycgxX2NzoMCHhPkDwqYMr9tRcP5qNrMZHkVnOjRMWwLCcr8ohBVb1OMjxLwGCvjTikrsBOiA6fNyCrm8V1rP93iVPpwaE+gO0SsWmPiXB+jikdf6SizrT5qKasx5j8ABbHpFTx+vFXp9EnYQmLx02h1QTTrl6eDqxLnGjporxl3NL3agEvXdT0WmEost648sQOYAeJS9Q7bfUVoMGnjo4AZdUMQku50McDcMWcBPvr0SzbTAFDfvJqwLzgxwATnCgnp4wDl6Aa+Ax283gghmj+vj7feE2KBBRMW3FzOpLOADl0Isb5587h/U4gGvkt5v60Z1VLG8BhYjbzRwyQZemwAd6cCR5/XFWLYZRIMpX39AR0tjaGGiGzLVyhse5C9RKC6ai42ppWPKiBagOvaYk8lO7DajerabOZP46Lby5wKjw1HCRx7p9sVMOWGzb/vA1hwiWc6jm3MvQDTogQkiqIhJV0nBQBTU+3okKCFDy9WwferkHjtxib7t3xIUQtHxnIwtx4mpg26/HfwVNVDb4oI9RHmx5WGelRVlrtiw43zboCLaxv46AZeB3IlTkwouebTr1y2NjSpHz68WNFjHvupy3q8TFn3Hos2IAk4Ju5dCo8B3wP7VPr/FGaKiG+T+v+TQqIrOqMTL1VdWV1DdmcbO8KXBz6esmYWYKPwDL5b5FA1a0hwapHiom0r/cKaoqr+27/XcrS5UwSMbQAAAABJRU5ErkJggg==)](https://deepwiki.com/jonasyr/gitray)
 
@@ -100,11 +100,19 @@ gitray/
 
 **Frontend:**
 
-- React 19 with TypeScript
-- Vite for fast development and building
-- Tailwind CSS for styling
+- React 18.3 with TypeScript
+- Vite 6.3.5 for fast development and building
+- Tailwind CSS 4.1.7 for styling
+- shadcn/ui component library (built on Radix UI primitives)
+- Radix UI components for accessible UI primitives
+- Recharts for data visualizations and charts
+- Lucide React for icons
 - Rive for interactive animations
-- React Calendar Heatmap for visualizations
+- React Hook Form for form management
+- Sonner for toast notifications
+- next-themes for theme management
+- Embla Carousel for carousels
+- cmdk for command menu
 
 **Development:**
 
@@ -825,7 +833,10 @@ The backend API is documented through:
 
 ## Acknowledgements
 
-- [React Calendar Heatmap](https://github.com/kevinsqi/react-calendar-heatmap) for visualization components
+- [shadcn/ui](https://ui.shadcn.com/) for beautiful, accessible component library
+- [Radix UI](https://www.radix-ui.com/) for robust UI primitives
+- [Recharts](https://recharts.org/) for visualization components
+- [Lucide React](https://lucide.dev/) for icons
 - [Rive](https://rive.app/) for interactive animations
 - [simple-git](https://github.com/steveukx/git-js) for Git operations
 - The open-source community for inspiration and tools

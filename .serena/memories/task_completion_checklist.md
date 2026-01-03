@@ -71,6 +71,11 @@ pnpm build:apps          # If app code changed
 - [ ] Proper key props for lists
 - [ ] No inline functions in render (performance)
 - [ ] Tailwind CSS for styling (avoid inline styles)
+- [ ] Use shadcn/ui components from `components/ui/` when available
+- [ ] Use `cn()` utility for conditional className merging
+- [ ] Theme colors via CSS variables (not hardcoded colors)
+- [ ] Dark mode classes where appropriate (`dark:` prefix)
+- [ ] Accessibility maintained (keyboard navigation, ARIA labels)
 
 ### Backend Routes & Services
 - [ ] Proper error handling with try/catch
@@ -216,6 +221,19 @@ When implementing features, consider:
 8. **Create/update components** to consume the endpoint
 9. **Test end-to-end**
 10. **Update documentation** (README, API docs)
+
+### Adding a New Frontend Component
+
+1. **Check shadcn/ui catalog** for existing components to reuse
+2. **Create component** in `apps/frontend/src/components/<Name>.tsx`
+3. **Import shadcn/ui primitives** from `@/components/ui/`
+4. **Use Tailwind utilities** for styling
+5. **Apply theme colors** via CSS variables
+6. **Add dark mode support** with `dark:` classes
+7. **Ensure accessibility** (keyboard nav, ARIA, focus management)
+8. **Add proper TypeScript types** for props
+9. **Test component** in isolation
+10. **Integrate into parent component/page**
 
 ### Fixing a Bug
 

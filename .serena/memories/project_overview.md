@@ -25,13 +25,17 @@ GitRay is a professional Git visualization tool that transforms repository commi
 - **Security**: Helmet, CORS, express-rate-limit
 
 ### Frontend  
-- **Framework**: React 19 with TypeScript 5.7
+- **Framework**: React 18.3 with TypeScript 5.7
 - **Build Tool**: Vite 6
 - **Styling**: Tailwind CSS 4
-- **Visualizations**: react-calendar-heatmap, ApexCharts
-- **Animations**: Rive (@rive-app/react-canvas)
+- **UI Components**: shadcn/ui (Radix UI primitives + CVA)
+- **Visualizations**: Recharts for charts, custom heatmap components
+- **Animations**: Rive (@rive-app/react-canvas), motion (Framer Motion)
 - **HTTP Client**: Axios
-- **Date Handling**: date-fns
+- **Forms**: React Hook Form
+- **Toast Notifications**: Sonner
+- **Themes**: next-themes for dark/light mode
+- **Icons**: lucide-react
 
 ### Shared Infrastructure
 - **Package Manager**: pnpm 10.16.1 (workspaces)
@@ -60,7 +64,8 @@ GitRay is a professional Git visualization tool that transforms repository commi
 
 ## Current Development Branch
 Main development branch: `dev`
-Current working branch: `120-enhancementscopebackend-refactor-old-routes-to-use-unified-cache-service-retain-redis-remove-manual-caching`
+Current working branch: `87-featfrontend-ui-redesign-migration-to-shadcnui`
+Recent major changes: Complete frontend UI redesign with shadcn/ui component library
 
 ## License
 ISC License

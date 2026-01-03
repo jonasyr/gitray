@@ -293,16 +293,46 @@ Emergency (> 95%) → Reject new requests, aggressive eviction
 
 ## Frontend Architecture
 
-### Component Structure
+### Component Structure (Redesigned with shadcn/ui)
 ```
 App.tsx (Root)
     ↓
-MainPage.tsx (Main layout)
-    ├─ RepoInput.tsx (URL input)
-    ├─ ActivityHeatmap.tsx (Visualization)
-    ├─ CommitList.tsx (Commit display)
-    └─ RiveLoader.tsx (Loading animation)
+├─ Header.tsx (Top navigation with theme toggle)
+├─ Footer.tsx (Bottom footer)
+├─ LandingPage.tsx (Entry page with repo input)
+├─ DashboardPage.tsx (Main analytics dashboard)
+│   ├─ CommitHeatmap.tsx (GitHub-style heatmap)
+│   ├─ ActivityChart.tsx (Time-series activity)
+│   ├─ CodeChurnChart.tsx (Code change visualization)
+│   ├─ FileDistributionChart.tsx (File type distribution)
+│   ├─ FileTypeList.tsx (Detailed file breakdown)
+│   ├─ GraphViewTimeline.tsx (Git graph timeline)
+│   ├─ GitDiffViewer.tsx (Commit diff display)
+│   ├─ AIInsights.tsx (AI-powered repository insights)
+│   └─ PremiumFeatures.tsx (Premium feature showcase)
+├─ SettingsDrawer.tsx (Settings panel)
+├─ NewsDrawer.tsx (News/changelog panel)
+├─ InfoModal.tsx (Information modals)
+└─ RiveLoader.tsx (Loading animation)
 ```
+
+### UI Component Library (shadcn/ui)
+Located in `components/ui/`, includes:
+- **Primitives**: button, input, textarea, label, select, checkbox, radio-group, switch, slider
+- **Layout**: card, tabs, accordion, collapsible, separator, sheet, drawer, sidebar
+- **Overlays**: dialog, alert-dialog, popover, hover-card, tooltip, dropdown-menu, context-menu
+- **Data Display**: table, badge, avatar, progress, skeleton, alert
+- **Navigation**: navigation-menu, menubar, breadcrumb, pagination
+- **Charts**: chart component (recharts wrapper)
+- **Forms**: form components with React Hook Form integration
+- **Advanced**: carousel, command, scroll-area, resizable, sonner (toast)
+- **Utilities**: utils.ts (cn function for className merging), use-mobile.ts hook
+
+All components built on:
+- **Radix UI primitives** for accessibility and headless UI
+- **class-variance-authority (CVA)** for variant-based styling
+- **tailwind-merge** for className conflict resolution
+- **clsx** for conditional classNames
 
 ### API Communication
 - **Centralized API client**: `services/api.ts`
@@ -313,6 +343,15 @@ MainPage.tsx (Main layout)
 - React hooks for local state
 - No global state management (Redux/Context) currently
 - Direct API calls from components
+- Theme state managed via next-themes
+
+### UI/UX Features
+- **Dark/Light Mode**: System-aware theme switching with next-themes
+- **Toast Notifications**: Sonner for user feedback
+- **Loading States**: Rive animations for engaging loading experiences
+- **Responsive Design**: Mobile-first with Tailwind responsive utilities
+- **Animations**: Framer Motion for smooth transitions
+- **Accessibility**: Full keyboard navigation and screen reader support via Radix UI
 
 ## Shared Types Package
 

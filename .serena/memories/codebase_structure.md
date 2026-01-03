@@ -46,28 +46,56 @@ gitray/
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   │
-│   └── frontend/              # React UI
+│   └── frontend/              # React UI (redesigned with shadcn/ui)
 │       ├── src/
 │       │   ├── components/    # React components
-│       │   │   ├── ActivityHeatmap.tsx
-│       │   │   ├── CommitList.tsx
-│       │   │   ├── RepoInput.tsx
+│       │   │   ├── ui/        # shadcn/ui component library
+│       │   │   │   ├── button.tsx
+│       │   │   │   ├── card.tsx
+│       │   │   │   ├── tabs.tsx
+│       │   │   │   ├── dialog.tsx
+│       │   │   │   ├── drawer.tsx
+│       │   │   │   ├── alert.tsx
+│       │   │   │   ├── badge.tsx
+│       │   │   │   ├── avatar.tsx
+│       │   │   │   ├── chart.tsx
+│       │   │   │   ├── sonner.tsx (toast)
+│       │   │   │   ├── form.tsx
+│       │   │   │   ├── table.tsx
+│       │   │   │   ├── select.tsx
+│       │   │   │   ├── input.tsx
+│       │   │   │   ├── textarea.tsx
+│       │   │   │   ├── utils.ts
+│       │   │   │   └── [47+ more shadcn components]
+│       │   │   ├── figma/     # Figma design references
+│       │   │   ├── Header.tsx
+│       │   │   ├── Footer.tsx
+│       │   │   ├── LandingPage.tsx
+│       │   │   ├── DashboardPage.tsx (main analytics view)
+│       │   │   ├── CommitHeatmap.tsx
+│       │   │   ├── ActivityChart.tsx
+│       │   │   ├── CodeChurnChart.tsx
+│       │   │   ├── FileDistributionChart.tsx
+│       │   │   ├── FileTypeList.tsx
+│       │   │   ├── GraphViewTimeline.tsx
+│       │   │   ├── GitDiffViewer.tsx
+│       │   │   ├── AIInsights.tsx
+│       │   │   ├── PremiumFeatures.tsx
+│       │   │   ├── SettingsDrawer.tsx
+│       │   │   ├── NewsDrawer.tsx
+│       │   │   ├── InfoModal.tsx
+│       │   │   ├── LoadingSpinner.tsx
 │       │   │   ├── RiveLogo.tsx
 │       │   │   └── RiveLoader.tsx
-│       │   ├── pages/         # Page components
-│       │   │   └── MainPage.tsx
 │       │   ├── services/      # API clients
 │       │   │   └── api.ts
-│       │   ├── utils/         # Utility functions
-│       │   │   └── dateUtils.ts
-│       │   ├── styles/        # CSS files
-│       │   │   └── heatmap.css
-│       │   ├── types/         # TypeScript type definitions
-│       │   │   └── react-calendar-heatmap.d.ts
-│       │   ├── assets/        # Static assets
+│       │   ├── styles/        # CSS files (minimal, mostly Tailwind)
 │       │   ├── App.tsx        # Root component
 │       │   ├── main.tsx       # Application entry
-│       │   └── test-setup.ts  # Vitest setup
+│       │   ├── index.css      # Global styles + Tailwind imports
+│       │   ├── test-setup.ts  # Vitest setup
+│       │   └── vite-env.d.ts  # Vite type declarations
+│       ├── public/            # Static assets (Rive animations, etc.)
 │       ├── package.json
 │       ├── tsconfig.json
 │       └── vite.config.ts
@@ -153,5 +181,41 @@ gitray/
 - **memoryPressureManager**: Memory threshold monitoring
 - **urlSecurity**: Repository URL validation
 
-### Frontend Services
+### Frontend Components & Services
+
+#### Core Components
+- **App.tsx**: Root component managing routing, theme, and global state
+- **LandingPage.tsx**: Repository input and onboarding
+- **DashboardPage.tsx**: Main analytics dashboard with multiple visualization tabs
+- **Header.tsx**: Navigation bar with theme toggle, settings, news
+- **Footer.tsx**: Footer with links and information
+
+#### Visualization Components
+- **CommitHeatmap.tsx**: GitHub-style contribution calendar heatmap
+- **ActivityChart.tsx**: Time-series activity visualization
+- **CodeChurnChart.tsx**: Code change and stability metrics
+- **FileDistributionChart.tsx**: Pie/donut chart for file type distribution
+- **FileTypeList.tsx**: Detailed file type breakdown with icons
+- **GraphViewTimeline.tsx**: Git graph visualization with branches
+- **GitDiffViewer.tsx**: Commit diff viewer with syntax highlighting
+
+#### Feature Components
+- **AIInsights.tsx**: AI-powered repository analysis and recommendations
+- **PremiumFeatures.tsx**: Premium feature showcase and upsell
+- **SettingsDrawer.tsx**: User settings and preferences
+- **NewsDrawer.tsx**: Product updates and changelog
+- **InfoModal.tsx**: Contextual help and information modals
+- **LoadingSpinner.tsx**: Loading state indicator
+- **RiveLoader.tsx**: Rive-powered animated loader
+- **RiveLogo.tsx**: Animated Rive-based logo
+
+#### shadcn/ui Component Library (`components/ui/`)
+Complete set of 47+ accessible, customizable UI primitives built on Radix UI:
+- **Form Controls**: button, input, textarea, select, checkbox, radio-group, switch, slider
+- **Containers**: card, sheet, drawer, dialog, alert-dialog, popover, hover-card
+- **Navigation**: tabs, accordion, navigation-menu, menubar, breadcrumb, pagination
+- **Display**: table, badge, avatar, alert, skeleton, progress, chart
+- **Advanced**: carousel, command, sonner (toast), scroll-area, resizable panels
+
+#### Services
 - **api.ts**: Axios-based API client for backend communication
