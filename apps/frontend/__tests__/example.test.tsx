@@ -2,7 +2,8 @@
 // You can use this as a template for creating your component tests
 
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+// Uncomment these when you need them for your tests:
+// import { render, screen } from '@testing-library/react';
 // import YourComponent from '../components/YourComponent';
 
 describe('Example Component Test', () => {

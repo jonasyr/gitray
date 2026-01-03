@@ -131,9 +131,53 @@ export default tseslint.config(
     },
   },
 
+  // Frontend test files configuration (without strict type checking) - MUST come before React config
+  {
+    files: [
+      'apps/frontend/**/*.test.ts',
+      'apps/frontend/**/*.test.tsx',
+      'apps/frontend/**/*.spec.ts',
+      'apps/frontend/**/*.spec.tsx',
+      'apps/frontend/**/__tests__/**/*.ts',
+      'apps/frontend/**/__tests__/**/*.tsx',
+      'apps/frontend/src/test-setup.ts',
+    ],
+    plugins: {
+      '@typescript-eslint': tseslint.plugin,
+      react,
+      'react-hooks': reactHooks,
+    },
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        ecmaVersion: 2020,
+        sourceType: 'module',
+        ecmaFeatures: {
+          jsx: true,
+        },
+      },
+      globals: {
+        ...globals.browser,
+        ...globals.vitest,
+        React: 'readonly',
+      },
+    },
+    rules: {
+      ...tseslint.configs.recommended.rules,
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unused-vars': 'warn',
+      'no-undef': 'off',
+    },
+  },
+
   // React specific configuration
   {
     files: ['apps/frontend/**/*.tsx', 'apps/frontend/**/*.jsx'],
+    ignores: [
+      'apps/frontend/**/*.test.tsx',
+      'apps/frontend/**/*.spec.tsx',
+      'apps/frontend/**/__tests__/**/*.tsx',
+    ],
     plugins: {
       '@typescript-eslint': tseslint.plugin,
       'sonarjs': sonarjs,

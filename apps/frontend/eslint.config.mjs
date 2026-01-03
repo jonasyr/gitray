@@ -33,6 +33,21 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'off',
     },
   },
+  // Configuration for shadcn/ui components - allow helper exports and any types
+  {
+    files: ['**/components/ui/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
+  // Configuration for chart components using third-party libraries (Recharts)
+  {
+    files: ['**/components/*Chart*.{ts,tsx}', '**/components/*Heatmap*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
   // Configuration for CommonJS files (config files, etc.)
   {
     files: ['**/*.cjs', '**/vitest.config.ts', '**/vite.config.ts'],
