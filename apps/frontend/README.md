@@ -1,10 +1,12 @@
 # GitRay Frontend
 
-The modern, redesigned frontend for GitRay - a Git repository analysis and visualization platform built with React, TypeScript, and shadcn/ui.
+The modern, redesigned frontend for GitRay - a Git repository analysis and
+visualization platform built with React, TypeScript, and shadcn/ui.
 
 ## 🎨 Design
 
-This frontend is based on the **GitRay Web App Design** and implements a complete UI redesign with shadcn/ui components.
+This frontend is based on the **GitRay Web App Design** and implements a
+complete UI redesign with shadcn/ui components.
 
 ## 🚀 Tech Stack
 
@@ -73,7 +75,7 @@ pnpm test:coverage
 
 Tests are organized in the `__tests__/` directory:
 
-```
+```text
 __tests__/
 ├── components/       # Component unit tests
 ├── services/         # API service tests
@@ -101,6 +103,7 @@ describe('YourComponent', () => {
 ### Test Utilities
 
 The `src/test-setup.ts` file provides:
+
 - **Jest-DOM matchers** for better assertions
 - **Automatic cleanup** after each test
 - **window.matchMedia mock** for components using media queries
@@ -108,7 +111,7 @@ The `src/test-setup.ts` file provides:
 
 ## 📁 Project Structure
 
-```
+```text
 apps/frontend/
 ├── src/
 │   ├── components/          # React components
@@ -134,12 +137,15 @@ apps/frontend/
 ## 🌐 API Integration
 
 The frontend communicates with the backend API through:
+
 - **Development**: Vite proxy forwards `/api` requests to `http://localhost:3001`
 - **Production**: Configure `VITE_API_URL` environment variable
 
 ## 🎨 UI Components
 
-This project uses [shadcn/ui](https://ui.shadcn.com/), a collection of re-usable components built with Radix UI and Tailwind CSS. Components are located in `src/components/ui/`.
+This project uses [shadcn/ui](https://ui.shadcn.com/), a collection of
+re-usable components built with Radix UI and Tailwind CSS. Components are
+located in `src/components/ui/`.
 
 ## 🔌 Vite Plugins
 
@@ -148,6 +154,7 @@ This project uses [shadcn/ui](https://ui.shadcn.com/), a collection of re-usable
 ## 📝 ESLint Configuration
 
 The project uses TypeScript ESLint with:
+
 - Recommended TypeScript rules
 - React Hooks rules
 - React Refresh rules
