@@ -266,6 +266,10 @@ out
 .nuxt
 dist
 
+# Vite cache directories
+.vite
+**/.vite
+
 # Gatsby files
 .cache/
 # Comment in the public line in if your project uses Gatsby and not Next.js
@@ -279,6 +283,10 @@ dist
 .temp
 .cache
 
+# Temporary build files
+.tmp
+**/.tmp
+
 # vitepress build output
 **/.vitepress/dist
 
@@ -287,6 +295,14 @@ dist
 
 # Docusaurus cache and generated files
 .docusaurus
+
+# Turbo cache
+.turbo
+**/.turbo
+
+# Vite SSR dist
+dist-ssr
+**/dist-ssr
 
 # Serverless directories
 .serverless/

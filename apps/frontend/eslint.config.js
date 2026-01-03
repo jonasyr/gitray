@@ -5,8 +5,8 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist'] },
-  // Haupt-TypeScript-Konfiguration (unverändert)
+  { ignores: ['dist', 'build', 'node_modules', 'coverage'] },
+  // Main TypeScript configuration
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
@@ -28,14 +28,14 @@ export default tseslint.config(
   },
   // Configuration for test setup files
   {
-    files: ['**/test-setup*.ts'],
+    files: ['**/test-setup*.ts', '**/__tests__/**/*.{ts,tsx}', '**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],
     rules: {
-      '@typescript-eslint/no-explicit-any': 'off', // Disable any rule for test setup files
+      '@typescript-eslint/no-explicit-any': 'off',
     },
   },
   // Configuration for CommonJS files (config files, etc.)
   {
-    files: ['**/*.cjs', '**/vitest.config.ts'],
+    files: ['**/*.cjs', '**/vitest.config.ts', '**/vite.config.ts'],
     languageOptions: {
       globals: {
         ...globals.node,
