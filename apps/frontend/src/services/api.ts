@@ -1,7 +1,6 @@
 import axios from 'axios';
 import {
   Commit,
-  TimePeriod,
   CommitFilterOptions,
   CommitHeatmapData,
   FileTypeDistribution,
@@ -10,8 +9,9 @@ import {
 } from '@gitray/shared-types';
 
 // Define the base URL for the API
-// In a production app, this would typically come from an environment variable
-const API_BASE_URL = 'http://localhost:3001';
+// In development, Vite proxy will forward /api requests to http://localhost:3001
+// In production, this would come from an environment variable
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 // Create an axios instance with default config
 const apiClient = axios.create({
@@ -23,30 +23,98 @@ const apiClient = axios.create({
 });
 
 /**
- * Fetches both commits and heatmap data in a single request
+ * Fetches commit heatmap data (aggregated from ALL commits)
  * @param repoUrl The URL of the git repository
- * @param timePeriod The time period to aggregate by
  * @param filterOptions Optional filters to apply
- * @returns Promise containing both commit and heatmap data
+ * @returns Promise containing heatmap data
  */
-export const getRepositoryFullData = async (
+export const getRepositoryHeatmap = async (
   repoUrl: string,
-  timePeriod: TimePeriod = 'month',
   filterOptions?: CommitFilterOptions
-): Promise<{ commits: Commit[]; heatmapData: CommitHeatmapData }> => {
+): Promise<CommitHeatmapData> => {
   try {
     // Ensure URL ends with .git for proper Git URL format
     const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
 
-    const response = await apiClient.post('/api/repositories/full-data', {
+    // Build query parameters
+    const params = new URLSearchParams({ repoUrl: normalizedUrl });
+
+    // Add filter options as flat query parameters
+    if (filterOptions?.author) {
+      params.append('author', filterOptions.author);
+    }
+    if (filterOptions?.authors && filterOptions.authors.length > 0) {
+      params.append('authors', filterOptions.authors.join(','));
+    }
+    if (filterOptions?.fromDate) {
+      params.append('fromDate', filterOptions.fromDate);
+    }
+    if (filterOptions?.toDate) {
+      params.append('toDate', filterOptions.toDate);
+    }
+
+    const response = await apiClient.get('/api/repositories/heatmap', {
+      params,
+    });
+
+    return response.data.heatmapData;
+  } catch (error: unknown) {
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        // Log full error details for debugging heatmap
+        console.error('[Heatmap API Error]:', {
+          status: error.response.status,
+          data: error.response.data,
+          url: error.config?.url,
+        });
+        throw new Error(
+          `Heatmap error (${error.response.status}): ${JSON.stringify(error.response.data)}`
+        );
+      } else if (error.request) {
+        console.error('[Heatmap] No response from server');
+        throw new Error(
+          'No response from server. Please check your network connection.'
+        );
+      } else {
+        throw new Error(`Error: ${error.message}`);
+      }
+    }
+    console.error('[Heatmap] Unexpected error:', error);
+    throw new Error('An unexpected error occurred');
+  }
+};
+
+/**
+ * Fetches paginated commits from a repository
+ * @param repoUrl The URL of the git repository
+ * @param page Page number (default: 1)
+ * @param limit Items per page (default: 100)
+ * @returns Promise containing paginated commits
+ */
+export const getRepositoryCommits = async (
+  repoUrl: string,
+  page: number = 1,
+  limit: number = 100
+): Promise<{ commits: Commit[]; page: number; limit: number }> => {
+  try {
+    // Ensure URL ends with .git for proper Git URL format
+    const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
+
+    // Build query parameters
+    const params = new URLSearchParams({
       repoUrl: normalizedUrl,
-      timePeriod,
-      filterOptions,
+      page: page.toString(),
+      limit: limit.toString(),
+    });
+
+    const response = await apiClient.get('/api/repositories/commits', {
+      params,
     });
 
     return {
       commits: response.data.commits,
-      heatmapData: response.data.heatmapData,
+      page: response.data.page,
+      limit: response.data.limit,
     };
   } catch (error: unknown) {
     if (axios.isAxiosError(error)) {
@@ -79,6 +147,7 @@ export const getFileAnalysis = async (
     const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
 
     const params = new URLSearchParams({ repoUrl: normalizedUrl });
+    // Correct endpoint path: /api/commits/file-analysis
     const response = await apiClient.get('/api/commits/file-analysis', {
       params,
     });
@@ -113,11 +182,13 @@ export const getCodeChurn = async (
     // Ensure URL ends with .git for proper Git URL format
     const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
 
-    const response = await apiClient.post('/api/repositories/churn', {
-      repoUrl: normalizedUrl,
-      filterOptions: {
-        limit: 50, // Request only top 50 files for performance
-      },
+    // Build query parameters (GET request instead of POST)
+    const params = new URLSearchParams({ repoUrl: normalizedUrl });
+    // Note: Backend churn endpoint accepts minChanges and extensions filters
+    // but we're not using them here for simplicity (could be added as function parameters)
+
+    const response = await apiClient.get('/api/repositories/churn', {
+      params,
     });
     return response.data.churnData;
   } catch (error: unknown) {
@@ -173,9 +244,156 @@ export const getRepositorySummary = async (
   }
 };
 
+/**
+ * Fetches both commits and heatmap data in a single request
+ * @param repoUrl The URL of the git repository
+ * @param _timePeriod The time period for aggregation (unused by backend, kept for compatibility)
+ * @param page Page number (default: 1)
+ * @param limit Items per page (default: 100)
+ * @param filterOptions Optional filters to apply
+ * @returns Promise containing commits, heatmap data, and pagination info
+ */
+export const getRepositoryFullData = async (
+  repoUrl: string,
+  _timePeriod?: 'day' | 'week' | 'month',
+  page: number = 1,
+  limit: number = 100,
+  filterOptions?: CommitFilterOptions
+): Promise<{
+  commits: Commit[];
+  heatmapData: CommitHeatmapData;
+  page: number;
+  limit: number;
+  isValidHeatmap: boolean;
+}> => {
+  try {
+    // Ensure URL ends with .git for proper Git URL format
+    const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
+
+    // Build query parameters
+    const params = new URLSearchParams({
+      repoUrl: normalizedUrl,
+      page: page.toString(),
+      limit: limit.toString(),
+    });
+
+    // Add filter options as flat query parameters
+    if (filterOptions?.author) {
+      params.append('author', filterOptions.author);
+    }
+    if (filterOptions?.authors && filterOptions.authors.length > 0) {
+      params.append('authors', filterOptions.authors.join(','));
+    }
+    if (filterOptions?.fromDate) {
+      params.append('fromDate', filterOptions.fromDate);
+    }
+    if (filterOptions?.toDate) {
+      params.append('toDate', filterOptions.toDate);
+    }
+
+    const response = await apiClient.get('/api/repositories/full-data', {
+      params,
+    });
+
+    return {
+      commits: response.data.commits,
+      heatmapData: response.data.heatmapData,
+      page: response.data.page,
+      limit: response.data.limit,
+      isValidHeatmap: response.data.isValidHeatmap,
+    };
+  } catch (error: unknown) {
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        console.error('[Full-Data API Error]:', {
+          status: error.response.status,
+          data: error.response.data,
+          url: error.config?.url,
+        });
+        throw new Error(
+          `Full-data error (${error.response.status}): ${JSON.stringify(error.response.data)}`
+        );
+      } else if (error.request) {
+        console.error('[Full-Data] No response from server');
+        throw new Error(
+          'No response from server. Please check your network connection.'
+        );
+      } else {
+        throw new Error(`Error: ${error.message}`);
+      }
+    }
+    console.error('[Full-Data] Unexpected error:', error);
+    throw new Error('An unexpected error occurred');
+  }
+};
+
+/**
+ * Fetches all unique contributors from a repository (GDPR-compliant)
+ * @param repoUrl The URL of the git repository
+ * @param filterOptions Optional filters to apply
+ * @returns Promise containing list of contributors with only login names
+ */
+export const getRepositoryContributors = async (
+  repoUrl: string,
+  filterOptions?: CommitFilterOptions
+): Promise<Array<{ login: string }>> => {
+  try {
+    // Ensure URL ends with .git for proper Git URL format
+    const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
+
+    // Build query parameters
+    const params = new URLSearchParams({ repoUrl: normalizedUrl });
+
+    // Add filter options as flat query parameters
+    if (filterOptions?.author) {
+      params.append('author', filterOptions.author);
+    }
+    if (filterOptions?.authors && filterOptions.authors.length > 0) {
+      params.append('authors', filterOptions.authors.join(','));
+    }
+    if (filterOptions?.fromDate) {
+      params.append('fromDate', filterOptions.fromDate);
+    }
+    if (filterOptions?.toDate) {
+      params.append('toDate', filterOptions.toDate);
+    }
+
+    const response = await apiClient.get('/api/repositories/contributors', {
+      params,
+    });
+
+    return response.data.contributors;
+  } catch (error: unknown) {
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        console.error('[Contributors API Error]:', {
+          status: error.response.status,
+          data: error.response.data,
+          url: error.config?.url,
+        });
+        throw new Error(
+          `Contributors error (${error.response.status}): ${JSON.stringify(error.response.data)}`
+        );
+      } else if (error.request) {
+        console.error('[Contributors] No response from server');
+        throw new Error(
+          'No response from server. Please check your network connection.'
+        );
+      } else {
+        throw new Error(`Error: ${error.message}`);
+      }
+    }
+    console.error('[Contributors] Unexpected error:', error);
+    throw new Error('An unexpected error occurred');
+  }
+};
+
 export default {
-  getRepositoryFullData,
+  getRepositoryHeatmap,
+  getRepositoryCommits,
   getFileAnalysis,
   getCodeChurn,
   getRepositorySummary,
+  getRepositoryFullData,
+  getRepositoryContributors,
 };

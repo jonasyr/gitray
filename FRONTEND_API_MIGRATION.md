@@ -19,6 +19,36 @@ patterns, not specific to the current frontend implementation (which is being re
 
 ---
 
+## Migration Status
+
+### FRONTEND API SERVICE MIGRATION: COMPLETE
+
+The frontend API service (`apps/frontend/src/services/api.ts`) has been fully
+migrated to use the new backend endpoints:
+
+- ✅ `getRepositoryCommits` - Migrated to GET /api/repositories/commits with pagination
+- ✅ `getRepositoryHeatmap` - Migrated to GET /api/repositories/heatmap with filters
+- ✅ `getRepositoryContributors` - Implemented GET /api/repositories/contributors (GDPR-compliant)
+- ✅ `getCodeChurn` - Migrated to GET /api/repositories/churn
+- ✅ `getRepositorySummary` - Migrated to GET /api/repositories/summary
+- ✅ `getRepositoryFullData` - Implemented GET /api/repositories/full-data with
+  pagination and filters
+- ✅ `getFileAnalysis` - Uses GET /api/commits/file-analysis (separate endpoint)
+
+**All functions**:
+
+- Use URLSearchParams for query parameter construction
+- Handle filter options (author, authors, fromDate, toDate) correctly
+- Include proper error handling with detailed logging
+- Normalize repository URLs (append .git if missing)
+- Return correctly typed responses matching backend structure
+
+**Next Steps**: The API service is ready. Any remaining migration work involves
+updating UI components to use these functions correctly, particularly handling the
+nested response structures (e.g., `response.summary.stats.totalCommits`).
+
+---
+
 ## Table of Contents
 
 - [API Endpoint Changes](#api-endpoint-changes)
