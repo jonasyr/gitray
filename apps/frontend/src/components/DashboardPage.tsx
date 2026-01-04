@@ -604,8 +604,9 @@ export function DashboardPage({
             </CardHeader>
             <CardContent className="space-y-6">
               <CommitHeatmap
-                commits={filteredCommits}
+                commits={commits}
                 heatmapData={heatmapData || undefined}
+                monthsToShow={heatmapMonths}
               />
 
               <div className="pt-6 border-t">

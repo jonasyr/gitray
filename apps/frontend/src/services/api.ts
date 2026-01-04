@@ -36,26 +36,27 @@ export const getRepositoryHeatmap = async (
     // Ensure URL ends with .git for proper Git URL format
     const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
 
-    // Build query parameters
-    const params = new URLSearchParams({ repoUrl: normalizedUrl });
+    // Build query parameters (omit undefined values for stable cache keys)
+    const params = new URLSearchParams();
+    params.set('repoUrl', normalizedUrl);
 
     // Add filter options as flat query parameters
     if (filterOptions?.author) {
-      params.append('author', filterOptions.author);
+      params.set('author', filterOptions.author);
     }
     if (filterOptions?.authors && filterOptions.authors.length > 0) {
-      params.append('authors', filterOptions.authors.join(','));
+      params.set('authors', filterOptions.authors.join(','));
     }
     if (filterOptions?.fromDate) {
-      params.append('fromDate', filterOptions.fromDate);
+      params.set('fromDate', filterOptions.fromDate);
     }
     if (filterOptions?.toDate) {
-      params.append('toDate', filterOptions.toDate);
+      params.set('toDate', filterOptions.toDate);
     }
 
-    const response = await apiClient.get('/api/repositories/heatmap', {
-      params,
-    });
+    const response = await apiClient.get(
+      `/api/repositories/heatmap?${params.toString()}`
+    );
 
     return response.data.heatmapData;
   } catch (error: unknown) {
@@ -100,16 +101,15 @@ export const getRepositoryCommits = async (
     // Ensure URL ends with .git for proper Git URL format
     const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
 
-    // Build query parameters
-    const params = new URLSearchParams({
-      repoUrl: normalizedUrl,
-      page: page.toString(),
-      limit: limit.toString(),
-    });
+    // Build query parameters (send numbers as strings)
+    const params = new URLSearchParams();
+    params.set('repoUrl', normalizedUrl);
+    params.set('page', String(page));
+    params.set('limit', String(limit));
 
-    const response = await apiClient.get('/api/repositories/commits', {
-      params,
-    });
+    const response = await apiClient.get(
+      `/api/repositories/commits?${params.toString()}`
+    );
 
     return {
       commits: response.data.commits,
@@ -146,11 +146,13 @@ export const getFileAnalysis = async (
     // Ensure URL ends with .git for proper Git URL format
     const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
 
-    const params = new URLSearchParams({ repoUrl: normalizedUrl });
+    const params = new URLSearchParams();
+    params.set('repoUrl', normalizedUrl);
+
     // Correct endpoint path: /api/commits/file-analysis
-    const response = await apiClient.get('/api/commits/file-analysis', {
-      params,
-    });
+    const response = await apiClient.get(
+      `/api/commits/file-analysis?${params.toString()}`
+    );
     return response.data;
   } catch (error: unknown) {
     if (axios.isAxiosError(error)) {
@@ -173,23 +175,43 @@ export const getFileAnalysis = async (
 /**
  * Fetches code churn analysis for a repository
  * @param repoUrl The URL of the git repository
+ * @param fromDate Optional start date filter (ISO 8601 format)
+ * @param toDate Optional end date filter (ISO 8601 format)
+ * @param minChanges Optional minimum number of changes filter
+ * @param extensions Optional array of file extensions to filter by
  * @returns Promise containing code churn data
  */
 export const getCodeChurn = async (
-  repoUrl: string
+  repoUrl: string,
+  fromDate?: string,
+  toDate?: string,
+  minChanges?: number,
+  extensions?: string[]
 ): Promise<CodeChurnAnalysis> => {
   try {
     // Ensure URL ends with .git for proper Git URL format
     const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
 
-    // Build query parameters (GET request instead of POST)
-    const params = new URLSearchParams({ repoUrl: normalizedUrl });
-    // Note: Backend churn endpoint accepts minChanges and extensions filters
-    // but we're not using them here for simplicity (could be added as function parameters)
+    // Build query parameters (omit undefined values for stable cache keys)
+    const params = new URLSearchParams();
+    params.set('repoUrl', normalizedUrl);
 
-    const response = await apiClient.get('/api/repositories/churn', {
-      params,
-    });
+    if (fromDate) {
+      params.set('fromDate', fromDate);
+    }
+    if (toDate) {
+      params.set('toDate', toDate);
+    }
+    if (minChanges !== undefined) {
+      params.set('minChanges', String(minChanges));
+    }
+    if (extensions && extensions.length > 0) {
+      params.set('extensions', extensions.join(','));
+    }
+
+    const response = await apiClient.get(
+      `/api/repositories/churn?${params.toString()}`
+    );
     return response.data.churnData;
   } catch (error: unknown) {
     if (axios.isAxiosError(error)) {
@@ -221,10 +243,12 @@ export const getRepositorySummary = async (
     // Ensure URL ends with .git for proper Git URL format
     const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
 
-    const params = new URLSearchParams({ repoUrl: normalizedUrl });
-    const response = await apiClient.get('/api/repositories/summary', {
-      params,
-    });
+    const params = new URLSearchParams();
+    params.set('repoUrl', normalizedUrl);
+
+    const response = await apiClient.get(
+      `/api/repositories/summary?${params.toString()}`
+    );
     return response.data.summary;
   } catch (error: unknown) {
     if (axios.isAxiosError(error)) {
@@ -270,30 +294,29 @@ export const getRepositoryFullData = async (
     // Ensure URL ends with .git for proper Git URL format
     const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
 
-    // Build query parameters
-    const params = new URLSearchParams({
-      repoUrl: normalizedUrl,
-      page: page.toString(),
-      limit: limit.toString(),
-    });
+    // Build query parameters (send numbers as strings, omit undefined values)
+    const params = new URLSearchParams();
+    params.set('repoUrl', normalizedUrl);
+    params.set('page', String(page));
+    params.set('limit', String(limit));
 
     // Add filter options as flat query parameters
     if (filterOptions?.author) {
-      params.append('author', filterOptions.author);
+      params.set('author', filterOptions.author);
     }
     if (filterOptions?.authors && filterOptions.authors.length > 0) {
-      params.append('authors', filterOptions.authors.join(','));
+      params.set('authors', filterOptions.authors.join(','));
     }
     if (filterOptions?.fromDate) {
-      params.append('fromDate', filterOptions.fromDate);
+      params.set('fromDate', filterOptions.fromDate);
     }
     if (filterOptions?.toDate) {
-      params.append('toDate', filterOptions.toDate);
+      params.set('toDate', filterOptions.toDate);
     }
 
-    const response = await apiClient.get('/api/repositories/full-data', {
-      params,
-    });
+    const response = await apiClient.get(
+      `/api/repositories/full-data?${params.toString()}`
+    );
 
     return {
       commits: response.data.commits,
@@ -341,26 +364,27 @@ export const getRepositoryContributors = async (
     // Ensure URL ends with .git for proper Git URL format
     const normalizedUrl = repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`;
 
-    // Build query parameters
-    const params = new URLSearchParams({ repoUrl: normalizedUrl });
+    // Build query parameters (omit undefined values for stable cache keys)
+    const params = new URLSearchParams();
+    params.set('repoUrl', normalizedUrl);
 
     // Add filter options as flat query parameters
     if (filterOptions?.author) {
-      params.append('author', filterOptions.author);
+      params.set('author', filterOptions.author);
     }
     if (filterOptions?.authors && filterOptions.authors.length > 0) {
-      params.append('authors', filterOptions.authors.join(','));
+      params.set('authors', filterOptions.authors.join(','));
     }
     if (filterOptions?.fromDate) {
-      params.append('fromDate', filterOptions.fromDate);
+      params.set('fromDate', filterOptions.fromDate);
     }
     if (filterOptions?.toDate) {
-      params.append('toDate', filterOptions.toDate);
+      params.set('toDate', filterOptions.toDate);
     }
 
-    const response = await apiClient.get('/api/repositories/contributors', {
-      params,
-    });
+    const response = await apiClient.get(
+      `/api/repositories/contributors?${params.toString()}`
+    );
 
     return response.data.contributors;
   } catch (error: unknown) {

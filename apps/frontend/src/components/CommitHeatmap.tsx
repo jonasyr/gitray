@@ -11,6 +11,8 @@ import { Commit, CommitHeatmapData } from '@gitray/shared-types';
 interface CommitHeatmapProps {
   commits?: Commit[];
   heatmapData?: CommitHeatmapData;
+  /** Number of months to display (3, 6, or 12) */
+  monthsToShow?: 3 | 6 | 12;
 }
 
 // Convert commits to heatmap data format
@@ -43,14 +45,55 @@ function convertCommitsToHeatmapData(
   return data;
 }
 
-export function CommitHeatmap({ commits }: CommitHeatmapProps) {
-  // Use real data if available
+export function CommitHeatmap({
+  commits,
+  heatmapData,
+  monthsToShow = 12,
+}: CommitHeatmapProps) {
+  // Prefer heatmapData from API (contains ALL commits), fallback to computing from commits
   const data = useMemo(() => {
-    if (commits && commits.length > 0) {
-      return convertCommitsToHeatmapData(commits);
+    // Create a map of commit data from the API
+    const commitDataMap = new Map<string, number>();
+
+    // First try to use the aggregated heatmap data from the API (preferred - has all data)
+    if (heatmapData && heatmapData.data && heatmapData.data.length > 0) {
+      heatmapData.data.forEach((bucket) => {
+        const dateStr = bucket.periodStart.split('T')[0];
+        commitDataMap.set(dateStr, bucket.commitCount);
+      });
     }
-    return [];
-  }, [commits]);
+    // Fallback: compute from commits if heatmapData is not available
+    else if (commits && commits.length > 0) {
+      commits.forEach((commit) => {
+        const dateStr = commit.date.split('T')[0];
+        commitDataMap.set(dateStr, (commitDataMap.get(dateStr) || 0) + 1);
+      });
+    }
+
+    // Always generate a full 365-day grid, but only show commits within the selected time range
+    const result = [];
+    const today = new Date();
+    const startDate = new Date();
+    startDate.setMonth(today.getMonth() - monthsToShow);
+
+    // Generate data for the last 365 days (full year for consistent layout)
+    for (let i = 364; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+
+      // Only show commit count if the date is within the selected time range
+      const isInRange = date >= startDate && date <= today;
+      const count = isInRange ? commitDataMap.get(dateStr) || 0 : 0;
+
+      result.push({
+        date: dateStr,
+        count: count,
+      });
+    }
+
+    return result;
+  }, [commits, heatmapData, monthsToShow]);
 
   // Get intensity color based on count
   const getColor = (count: number) => {
