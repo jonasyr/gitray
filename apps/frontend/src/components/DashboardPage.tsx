@@ -18,6 +18,8 @@ import {
   Crown,
   Medal,
   Award,
+  ExternalLink,
+  GitFork,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
@@ -360,10 +362,23 @@ export default function DashboardPage({
           <div className="h-10 w-10 md:h-12 md:w-12 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center flex-shrink-0">
             <GitBranch className="h-5 w-5 md:h-6 md:w-6 text-primary-foreground" />
           </div>
-          <div className="min-w-0">
-            <h1 className="truncate text-xl md:text-2xl">
-              {repoData.owner}/{repoData.name}
-            </h1>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="truncate text-xl md:text-2xl">
+                {repoData.owner}/{repoData.name}
+              </h1>
+              <a
+                href={repoUrl.replace('.git', '')}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground hover:text-primary rounded-full border border-muted-foreground/30 hover:border-primary/50 transition-colors"
+                title="View source repository"
+              >
+                <GitFork className="h-3 w-3" />
+                <span>View Source</span>
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
             <p className="text-muted-foreground text-sm md:text-base">
               Repository Analytics
             </p>
