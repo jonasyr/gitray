@@ -11,45 +11,23 @@ import { Commit, CommitHeatmapData } from '@gitray/shared-types';
 interface CommitHeatmapProps {
   commits?: Commit[];
   heatmapData?: CommitHeatmapData;
+  /** Whether the heatmap data is valid and complete */
+  isValidHeatmap?: boolean;
   /** Number of months to display (3, 6, or 12) */
   monthsToShow?: 3 | 6 | 12;
-}
-
-// Convert commits to heatmap data format
-function convertCommitsToHeatmapData(
-  commits: Commit[]
-): Array<{ date: string; count: number }> {
-  const commitsByDate = new Map<string, number>();
-
-  // Count commits per day
-  commits.forEach((commit) => {
-    const dateStr = commit.date.split('T')[0]; // Get YYYY-MM-DD format
-    commitsByDate.set(dateStr, (commitsByDate.get(dateStr) || 0) + 1);
-  });
-
-  // Generate data for last 365 days (52 weeks), filling gaps with 0
-  const data = [];
-  const today = new Date();
-
-  for (let i = 364; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i);
-    const dateStr = date.toISOString().split('T')[0];
-
-    data.push({
-      date: dateStr,
-      count: commitsByDate.get(dateStr) || 0,
-    });
-  }
-
-  return data;
 }
 
 export function CommitHeatmap({
   commits,
   heatmapData,
+  isValidHeatmap = true,
   monthsToShow = 12,
 }: CommitHeatmapProps) {
+  // Log warning if heatmap data is marked as invalid
+  if (heatmapData && !isValidHeatmap) {
+    console.warn('[CommitHeatmap] Heatmap data may be incomplete or invalid');
+  }
+
   // Prefer heatmapData from API (contains ALL commits), fallback to computing from commits
   const data = useMemo(() => {
     // Create a map of commit data from the API

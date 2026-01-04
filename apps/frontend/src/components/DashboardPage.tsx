@@ -65,6 +65,7 @@ const contributors = [
 interface DashboardPageProps {
   commits: Commit[];
   heatmapData: CommitHeatmapData | null;
+  isValidHeatmap: boolean;
   repoUrl: string;
   /** Current branch being analyzed (from backend API) */
   currentBranch?: string;
@@ -160,9 +161,10 @@ const getStreakMotivation = (streak: number) => {
   }
 };
 
-export function DashboardPage({
+export default function DashboardPage({
   commits: commitsFromProps,
   heatmapData,
+  isValidHeatmap,
   repoUrl,
   currentBranch,
 }: DashboardPageProps) {
@@ -322,17 +324,6 @@ export function DashboardPage({
       currentStreak: currentStreak,
     };
   }, [commits]);
-
-  // Filter commits based on selected time period
-  const filteredCommits = useMemo(() => {
-    if (!commits || commits.length === 0) return [];
-
-    const now = new Date();
-    const cutoffDate = new Date();
-    cutoffDate.setMonth(now.getMonth() - heatmapMonths);
-
-    return commits.filter((commit) => new Date(commit.date) >= cutoffDate);
-  }, [commits, heatmapMonths]);
 
   // Use summary data from API, parse from URL if not available
   const urlParts = repoUrl ? repoUrl.split('/').filter(Boolean) : [];
@@ -606,6 +597,7 @@ export function DashboardPage({
               <CommitHeatmap
                 commits={commits}
                 heatmapData={heatmapData || undefined}
+                isValidHeatmap={isValidHeatmap}
                 monthsToShow={heatmapMonths}
               />
 

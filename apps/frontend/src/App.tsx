@@ -5,7 +5,7 @@ import { SettingsDrawer } from './components/SettingsDrawer';
 import { NewsDrawer } from './components/NewsDrawer';
 import { InfoModal } from './components/InfoModal';
 import { LandingPage } from './components/LandingPage';
-import { DashboardPage } from './components/DashboardPage';
+import DashboardPage from './components/DashboardPage';
 import { RiveLoader } from './components/RiveLoader';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
@@ -30,6 +30,7 @@ export default function App() {
   const [heatmapData, setHeatmapData] = useState<CommitHeatmapData | null>(
     null
   );
+  const [isValidHeatmap, setIsValidHeatmap] = useState<boolean>(true);
   const [repoUrl, setRepoUrl] = useState<string>('');
 
   // Apply theme
@@ -63,12 +64,20 @@ export default function App() {
       // Store the fetched data in state
       setCommits(data.commits);
       setHeatmapData(data.heatmapData);
+      setIsValidHeatmap(data.isValidHeatmap);
       setRepoUrl(url);
 
       // Navigate to dashboard
       setCurrentPage('dashboard');
       setIsSignedIn(true);
       setIsLoading(false);
+
+      // Show warning if heatmap data is incomplete
+      if (!data.isValidHeatmap) {
+        toast.warning('Heatmap data may be incomplete', {
+          description: 'Some heatmap visualizations may not display correctly.',
+        });
+      }
 
       toast.success('Analysis complete!', {
         description: `Successfully analyzed ${data.commits.length} commits.`,
@@ -139,6 +148,7 @@ export default function App() {
               <DashboardPage
                 commits={commits}
                 heatmapData={heatmapData}
+                isValidHeatmap={isValidHeatmap}
                 repoUrl={repoUrl}
               />
             )}
