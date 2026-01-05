@@ -446,7 +446,7 @@ pnpm test
 # Frontend tests only
 pnpm test:frontend
 
-# Backend tests only  
+# Backend tests only
 pnpm test:backend
 
 # Watch mode for development
@@ -459,7 +459,7 @@ pnpm test:coverage
 ### Test Structure
 
 - **Unit Tests**: Component and service-level testing
-- **Integration Tests**: API endpoint and workflow testing  
+- **Integration Tests**: API endpoint and workflow testing
 - **Performance Tests**: Cache and memory management testing
 - **E2E Tests**: Full user workflow testing
 
@@ -688,7 +688,7 @@ We welcome contributions! Please read our contributing guidelines.
 ```bash
 # Example commit messages
 feat: add repository coordination system
-fix: resolve memory leak in cache manager  
+fix: resolve memory leak in cache manager
 docs: update API documentation
 test: add integration tests for heatmap
 ```

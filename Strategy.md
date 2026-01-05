@@ -85,7 +85,6 @@ Einfaches Aufgabenmanagement mit GitHub Issues & Kanban-Board:
 - Regel: **Keine Commits direkt auf `main` oder `dev`**
 
 - PRs sollten:
-
   - Review durch den anderen bekommen
 
   - mit einer kleinen Beschreibung versehen sein
@@ -111,7 +110,6 @@ Kurze Beschreibung der Änderung.
 ## ⚙️ **CI/CD**
 
 - Nutzt GitHub Actions:
-
   - `npm run test`
 
   - `eslint .`
@@ -155,7 +153,6 @@ Klarheit über Zusammenarbeit:
 - Verwendet `.env.example` für Umgebungsvariablen
 
 - Macht Commits sprechend, z. B.:
-
   - `feat: add interactive commit graph`
 
   - `fix: resolve layout bug on zoom`

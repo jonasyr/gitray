@@ -28,7 +28,12 @@ export default tseslint.config(
   },
   // Configuration for test setup files
   {
-    files: ['**/test-setup*.ts', '**/__tests__/**/*.{ts,tsx}', '**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],
+    files: [
+      '**/test-setup*.ts',
+      '**/__tests__/**/*.{ts,tsx}',
+      '**/*.test.{ts,tsx}',
+      '**/*.spec.{ts,tsx}',
+    ],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
     },
@@ -43,7 +48,10 @@ export default tseslint.config(
   },
   // Configuration for chart components using third-party libraries (Recharts)
   {
-    files: ['**/components/*Chart*.{ts,tsx}', '**/components/*Heatmap*.{ts,tsx}'],
+    files: [
+      '**/components/*Chart*.{ts,tsx}',
+      '**/components/*Heatmap*.{ts,tsx}',
+    ],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
     },

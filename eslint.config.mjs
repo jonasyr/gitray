@@ -41,7 +41,7 @@ export default tseslint.config(
     ],
     plugins: {
       '@typescript-eslint': tseslint.plugin,
-      'sonarjs': sonarjs,
+      sonarjs: sonarjs,
     },
     languageOptions: {
       parser: tseslint.parser,
@@ -57,12 +57,15 @@ export default tseslint.config(
     rules: {
       ...tseslint.configs.recommended.rules,
       'no-unused-vars': 'off',
-      '@typescript-eslint/no-unused-vars': ['warn', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-      }],
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+        },
+      ],
       '@typescript-eslint/no-explicit-any': 'off',
-      'complexity': ['warn', { max: 15 }],
+      complexity: ['warn', { max: 15 }],
       'sonarjs/cognitive-complexity': ['warn', 15],
     },
   },
@@ -70,13 +73,10 @@ export default tseslint.config(
   // Frontend TypeScript files (exclude config files)
   {
     files: ['apps/frontend/**/*.ts'], // Only .ts files, .tsx handled by React config
-    ignores: [
-      'apps/frontend/vite.config.ts',
-      'apps/frontend/vitest.config.ts',
-    ],
+    ignores: ['apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts'],
     plugins: {
       '@typescript-eslint': tseslint.plugin,
-      'sonarjs': sonarjs,
+      sonarjs: sonarjs,
     },
     languageOptions: {
       parser: tseslint.parser,
@@ -92,12 +92,15 @@ export default tseslint.config(
     rules: {
       ...tseslint.configs.recommended.rules,
       'no-unused-vars': 'off',
-      '@typescript-eslint/no-unused-vars': ['warn', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-      }],
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+        },
+      ],
       '@typescript-eslint/no-explicit-any': 'off',
-      'complexity': ['warn', { max: 15 }],
+      complexity: ['warn', { max: 15 }],
       'sonarjs/cognitive-complexity': ['warn', 15],
     },
   },
@@ -107,7 +110,7 @@ export default tseslint.config(
     files: ['packages/shared-types/**/*.ts'],
     plugins: {
       '@typescript-eslint': tseslint.plugin,
-      'sonarjs': sonarjs,
+      sonarjs: sonarjs,
     },
     languageOptions: {
       parser: tseslint.parser,
@@ -119,14 +122,17 @@ export default tseslint.config(
     rules: {
       ...tseslint.configs.recommended.rules,
       'no-unused-vars': 'off',
-      '@typescript-eslint/no-unused-vars': ['warn', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-        // Allow unused constructor parameters (they're used as public/readonly class properties)
-        args: 'after-used',
-      }],
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          // Allow unused constructor parameters (they're used as public/readonly class properties)
+          args: 'after-used',
+        },
+      ],
       '@typescript-eslint/no-explicit-any': 'off',
-      'complexity': ['warn', { max: 15 }],
+      complexity: ['warn', { max: 15 }],
       'sonarjs/cognitive-complexity': ['warn', 15],
     },
   },
@@ -180,7 +186,7 @@ export default tseslint.config(
     ],
     plugins: {
       '@typescript-eslint': tseslint.plugin,
-      'sonarjs': sonarjs,
+      sonarjs: sonarjs,
       react,
       'react-hooks': reactHooks,
       'jsx-a11y': jsxA11y,
@@ -200,12 +206,15 @@ export default tseslint.config(
     rules: {
       ...tseslint.configs.recommended.rules,
       'no-unused-vars': 'off',
-      '@typescript-eslint/no-unused-vars': ['warn', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-      }],
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+        },
+      ],
       '@typescript-eslint/no-explicit-any': 'off',
-      'complexity': ['warn', { max: 15 }],
+      complexity: ['warn', { max: 15 }],
       'sonarjs/cognitive-complexity': ['warn', 15],
       'react/react-in-jsx-scope': 'off',
       'react-hooks/rules-of-hooks': 'error',
@@ -277,5 +286,5 @@ export default tseslint.config(
     rules: {
       'no-undef': 'off', // k6 has special globals
     },
-  },
+  }
 );

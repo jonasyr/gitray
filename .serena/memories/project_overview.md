@@ -1,11 +1,13 @@
 # GitRay - Project Overview
 
 ## Purpose
+
 GitRay is a professional Git visualization tool that transforms repository commit history into beautiful, interactive heatmaps and activity calendars. It provides deep insights into development patterns and team collaboration.
 
 ## Key Features
+
 - **Activity Heatmaps**: GitHub-style contribution calendars with customizable time periods
-- **Commit Analysis**: Detailed commit statistics and author breakdowns  
+- **Commit Analysis**: Detailed commit statistics and author breakdowns
 - **Code Churn Analysis**: Track code changes and stability patterns with risk level indicators
 - **Interactive Filtering**: Filter by authors, date ranges, and commit patterns
 - **Multi-tier Caching**: Intelligent caching system with Redis, disk, and memory tiers
@@ -15,6 +17,7 @@ GitRay is a professional Git visualization tool that transforms repository commi
 ## Technology Stack
 
 ### Backend
+
 - **Runtime**: Node.js 18+ with TypeScript 5.7
 - **Framework**: Express 5
 - **Git Operations**: simple-git
@@ -24,7 +27,8 @@ GitRay is a professional Git visualization tool that transforms repository commi
 - **Validation**: Express-validator, Zod
 - **Security**: Helmet, CORS, express-rate-limit
 
-### Frontend  
+### Frontend
+
 - **Framework**: React 18.3 with TypeScript 5.7
 - **Build Tool**: Vite 6
 - **Styling**: Tailwind CSS 4
@@ -38,6 +42,7 @@ GitRay is a professional Git visualization tool that transforms repository commi
 - **Icons**: lucide-react
 
 ### Shared Infrastructure
+
 - **Package Manager**: pnpm 10.16.1 (workspaces)
 - **Testing**: Vitest 3.2.3 (86.4% coverage)
 - **Performance Testing**: k6 for backend load testing
@@ -47,12 +52,14 @@ GitRay is a professional Git visualization tool that transforms repository commi
 - **CI/CD**: GitHub Actions (assumed from .github directory)
 
 ## Monorepo Structure
+
 - **apps/backend**: Express API server
-- **apps/frontend**: React UI application  
+- **apps/frontend**: React UI application
 - **packages/shared-types**: Shared TypeScript types and error classes
 - **scripts/**: Development and maintenance scripts
 
 ## Architecture Principles
+
 - **Strict TypeScript**: No `any` types, strict type checking enabled
 - **Monorepo with Project References**: TypeScript project references for incremental builds
 - **Shared Type Safety**: All types exported from @gitray/shared-types
@@ -63,9 +70,11 @@ GitRay is a professional Git visualization tool that transforms repository commi
 - **Performance Optimized**: Multi-tier caching, streaming, memory pressure management
 
 ## Current Development Branch
+
 Main development branch: `dev`
 Current working branch: `87-featfrontend-ui-redesign-migration-to-shadcnui`
 Recent major changes: Complete frontend UI redesign with shadcn/ui component library
 
 ## License
+
 ISC License

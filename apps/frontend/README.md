@@ -169,4 +169,3 @@ The project uses TypeScript ESLint with:
 ## 📄 License
 
 Part of the GitRay project.
-  

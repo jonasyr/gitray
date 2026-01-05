@@ -3,6 +3,7 @@
 ## Before Committing Code
 
 ### 1. Code Quality Checks
+
 ```bash
 # Run linting
 pnpm lint
@@ -15,6 +16,7 @@ pnpm lint:md
 ```
 
 ### 2. Run Tests
+
 ```bash
 # Run all tests
 pnpm test
@@ -28,6 +30,7 @@ pnpm test:coverage
 ```
 
 ### 3. Build Validation
+
 ```bash
 # Ensure clean build
 pnpm build
@@ -38,6 +41,7 @@ pnpm build:apps          # If app code changed
 ```
 
 ### 4. Manual Testing
+
 - [ ] Test the feature/fix in the running application
 - [ ] Verify frontend behavior (`pnpm dev:frontend`)
 - [ ] Verify backend endpoints (`pnpm dev:backend`)
@@ -45,6 +49,7 @@ pnpm build:apps          # If app code changed
 - [ ] Check backend logs for errors
 
 ### 5. Type Safety
+
 - [ ] No TypeScript errors (`pnpm build`)
 - [ ] No use of `any` without justification
 - [ ] Proper types imported from `@gitray/shared-types`
@@ -53,6 +58,7 @@ pnpm build:apps          # If app code changed
 ## Code Review Self-Checklist
 
 ### General
+
 - [ ] Code follows project conventions (see `coding_standards.md`)
 - [ ] No debug code (`console.log`, commented code, etc.)
 - [ ] Descriptive variable and function names
@@ -60,12 +66,14 @@ pnpm build:apps          # If app code changed
 - [ ] No duplicate code (DRY principle)
 
 ### TypeScript
+
 - [ ] Strict type checking passes
 - [ ] No `any` types without justification
 - [ ] Proper error handling with typed error classes
 - [ ] Async functions use `async/await`, not promise chains
 
 ### React Components (Frontend)
+
 - [ ] Functional components with proper typing
 - [ ] Hooks follow Rules of Hooks
 - [ ] Proper key props for lists
@@ -78,6 +86,7 @@ pnpm build:apps          # If app code changed
 - [ ] Accessibility maintained (keyboard navigation, ARIA labels)
 
 ### Backend Routes & Services
+
 - [ ] Proper error handling with try/catch
 - [ ] Use Winston logger, not `console.log`
 - [ ] Input validation with express-validator or Zod
@@ -85,6 +94,7 @@ pnpm build:apps          # If app code changed
 - [ ] Route helpers used for consistency (`setupRouteRequest`, etc.)
 
 ### Testing
+
 - [ ] New features have tests
 - [ ] Bug fixes have regression tests
 - [ ] Test coverage maintained (≥80%)
@@ -92,6 +102,7 @@ pnpm build:apps          # If app code changed
 - [ ] Mocks are used for external dependencies
 
 ### Documentation
+
 - [ ] README updated if user-facing changes
 - [ ] CLAUDE.md updated if guidelines change
 - [ ] JSDoc comments for public APIs
@@ -102,11 +113,13 @@ pnpm build:apps          # If app code changed
 If you modified `packages/shared-types/src/index.ts`:
 
 1. **Rebuild shared types**
+
    ```bash
    pnpm build:shared-types
    ```
 
 2. **Update imports** in backend and frontend
+
    ```typescript
    import { YourNewType } from '@gitray/shared-types';
    ```
@@ -123,11 +136,13 @@ If you modified `packages/shared-types/src/index.ts`:
 ## When Adding Dependencies
 
 ### Root dependencies
+
 ```bash
 pnpm add -D <package>  # Dev dependency at root
 ```
 
 ### Workspace dependencies
+
 ```bash
 pnpm --filter backend add <package>
 pnpm --filter frontend add <package>
@@ -135,6 +150,7 @@ pnpm --filter @gitray/shared-types add <package>
 ```
 
 ### After adding dependencies
+
 - [ ] Verify `pnpm-lock.yaml` is updated
 - [ ] Test that build still works
 - [ ] Update README if dependency is significant
@@ -142,6 +158,7 @@ pnpm --filter @gitray/shared-types add <package>
 ## When Creating a Pull Request
 
 ### 1. Ensure Clean Branch
+
 ```bash
 # Sync with main development branch
 git checkout dev
@@ -153,7 +170,9 @@ git rebase dev
 ```
 
 ### 2. Commit Message
+
 Follow Conventional Commits format:
+
 ```
 feat: add code churn risk indicators
 fix: resolve cache eviction race condition
@@ -164,11 +183,14 @@ perf: optimize commit aggregation algorithm
 ```
 
 ### 3. PR Description Template
+
 ```markdown
 ## Description
+
 Brief description of changes
 
 ## Type of Change
+
 - [ ] Bug fix (non-breaking change which fixes an issue)
 - [ ] New feature (non-breaking change which adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
@@ -176,11 +198,13 @@ Brief description of changes
 - [ ] Documentation update
 
 ## Testing
+
 - [ ] Tests pass locally
 - [ ] Added tests for new features
 - [ ] Coverage maintained ≥80%
 
 ## Checklist
+
 - [ ] Code follows project conventions
 - [ ] Self-reviewed the code
 - [ ] Commented complex logic
@@ -256,12 +280,14 @@ When implementing features, consider:
 ## Environment-Specific Checks
 
 ### Development
+
 - [ ] Redis running (`docker ps | grep redis`)
 - [ ] Ports available (3001, 5173, 6379)
 - [ ] Environment variables set (`.env` file)
 - [ ] Logs accessible (`logs/` directory)
 
 ### Before Production Deploy (Future)
+
 - [ ] All tests pass in CI
 - [ ] Coverage ≥80%
 - [ ] No TypeScript errors
@@ -294,6 +320,7 @@ git push origin your-branch-name
 ## Automated Checks (Pre-commit Hook)
 
 The project uses Husky with lint-staged for automatic checks:
+
 - **TypeScript/JavaScript**: ESLint auto-fix + Prettier
 - **Markdown**: Markdownlint
 - **JSON/YAML**: Prettier formatting
@@ -303,21 +330,25 @@ These run automatically on `git commit`. If they fail, fix issues before committ
 ## Quick Reference
 
 ### Validation Pipeline
+
 ```
 Code → Lint → Format → Test → Build → Manual Test → Commit
 ```
 
 ### Must-Run Before Commit
+
 ```bash
 pnpm lint && pnpm test && pnpm build
 ```
 
 ### If Shared Types Changed
+
 ```bash
 pnpm build:shared-types && pnpm test
 ```
 
 ### If Unsure, Run Everything
+
 ```bash
 pnpm rebuild && pnpm lint && pnpm test
 ```

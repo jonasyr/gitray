@@ -136,6 +136,7 @@ gitray/
 ## Important File Locations
 
 ### Configuration Files
+
 - **Root TypeScript**: `tsconfig.json` (composite project references)
 - **Backend Config**: `apps/backend/src/config.ts`
 - **Environment**: `.env` (not checked in)
@@ -144,16 +145,19 @@ gitray/
 - **Vitest**: `vitest.config.ts` (workspace-aware)
 
 ### Entry Points
+
 - **Backend Server**: `apps/backend/src/index.ts`
 - **Frontend App**: `apps/frontend/src/main.tsx`
 - **Shared Types**: `packages/shared-types/src/index.ts`
 
 ### Testing
+
 - **Backend Tests**: Co-located with source files as `*.test.ts`
 - **Frontend Tests**: Co-located with components as `*.test.tsx`
 - **Performance Tests**: `apps/backend/perf/`
 
 ## Build Artifacts (Gitignored)
+
 - `dist/` - Compiled TypeScript output
 - `*.tsbuildinfo` - TypeScript incremental build cache
 - `coverage/` - Test coverage reports
@@ -166,6 +170,7 @@ gitray/
 ## Key Architectural Components
 
 ### Backend Services
+
 - **gitService**: Git operations (clone, log, analysis)
 - **cache**: Multi-tier caching (Redis + Memory + Disk)
 - **repositoryCoordinator**: Shared repository management
@@ -176,6 +181,7 @@ gitray/
 - **logger**: Winston logging with daily rotation
 
 ### Backend Utilities
+
 - **hybridLruCache**: LRU cache with hierarchical tiers
 - **lockManager**: Distributed locking for coordination
 - **memoryPressureManager**: Memory threshold monitoring
@@ -184,6 +190,7 @@ gitray/
 ### Frontend Components & Services
 
 #### Core Components
+
 - **App.tsx**: Root component managing routing, theme, and global state
 - **LandingPage.tsx**: Repository input and onboarding
 - **DashboardPage.tsx**: Main analytics dashboard with multiple visualization tabs
@@ -191,6 +198,7 @@ gitray/
 - **Footer.tsx**: Footer with links and information
 
 #### Visualization Components
+
 - **CommitHeatmap.tsx**: GitHub-style contribution calendar heatmap
 - **ActivityChart.tsx**: Time-series activity visualization
 - **CodeChurnChart.tsx**: Code change and stability metrics
@@ -200,6 +208,7 @@ gitray/
 - **GitDiffViewer.tsx**: Commit diff viewer with syntax highlighting
 
 #### Feature Components
+
 - **AIInsights.tsx**: AI-powered repository analysis and recommendations
 - **PremiumFeatures.tsx**: Premium feature showcase and upsell
 - **SettingsDrawer.tsx**: User settings and preferences
@@ -210,7 +219,9 @@ gitray/
 - **RiveLogo.tsx**: Animated Rive-based logo
 
 #### shadcn/ui Component Library (`components/ui/`)
+
 Complete set of 47+ accessible, customizable UI primitives built on Radix UI:
+
 - **Form Controls**: button, input, textarea, select, checkbox, radio-group, switch, slider
 - **Containers**: card, sheet, drawer, dialog, alert-dialog, popover, hover-card
 - **Navigation**: tabs, accordion, navigation-menu, menubar, breadcrumb, pagination
@@ -218,4 +229,5 @@ Complete set of 47+ accessible, customizable UI primitives built on Radix UI:
 - **Advanced**: carousel, command, sonner (toast), scroll-area, resizable panels
 
 #### Services
+
 - **api.ts**: Axios-based API client for backend communication

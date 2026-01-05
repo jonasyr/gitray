@@ -5,26 +5,31 @@
 The GitRay frontend has been completely redesigned and migrated to use **shadcn/ui**, a modern component library built on Radix UI primitives. This represents a major architectural shift from the previous implementation.
 
 ## Current Branch
+
 **Branch**: `87-featfrontend-ui-redesign-migration-to-shadcnui`
 **Status**: Active development - UI redesign in progress
 
 ## Technology Stack
 
 ### Core Technologies
+
 - **React**: 18.3.1 (not 19 as initially documented)
 - **TypeScript**: 5.7+ (strict mode)
 - **Vite**: 6.3+ (build tool with HMR)
 - **Tailwind CSS**: 4.1+ (utility-first styling)
 
 ### UI Component Library - shadcn/ui
+
 shadcn/ui is NOT a traditional component library but a collection of re-usable components that you copy into your codebase:
+
 - Built on **Radix UI** primitives (headless, accessible components)
 - Styled with **Tailwind CSS**
 - Uses **class-variance-authority (CVA)** for variant management
 - Customizable and owns the code (no npm package dependency for components)
 
 ### Supporting Libraries
-- **@radix-ui/react-***: 30+ Radix UI primitive packages for accessibility
+
+- **@radix-ui/react-\***: 30+ Radix UI primitive packages for accessibility
 - **class-variance-authority**: Type-safe variant-based styling
 - **clsx** & **tailwind-merge**: Conditional and conflict-free className merging
 - **next-themes**: Dark/light mode management with system detection
@@ -43,6 +48,7 @@ shadcn/ui is NOT a traditional component library but a collection of re-usable c
 ## Component Architecture
 
 ### Directory Structure
+
 ```
 apps/frontend/src/
 ├── components/
@@ -71,6 +77,7 @@ apps/frontend/src/
 ### shadcn/ui Component Catalog (components/ui/)
 
 #### Form Controls
+
 - **button**: Primary interaction element with variants (default, destructive, outline, secondary, ghost, link)
 - **input**: Text input with error states
 - **textarea**: Multi-line text input
@@ -83,6 +90,7 @@ apps/frontend/src/
 - **form**: React Hook Form integration
 
 #### Layout & Containers
+
 - **card**: Content card with header, content, footer sections
 - **sheet**: Side panel overlays
 - **drawer**: Mobile-friendly bottom drawer (vaul)
@@ -96,6 +104,7 @@ apps/frontend/src/
 - **resizable**: Resizable panels
 
 #### Navigation
+
 - **tabs**: Tab navigation with content panels
 - **accordion**: Collapsible sections
 - **collapsible**: Simple collapse/expand
@@ -107,6 +116,7 @@ apps/frontend/src/
 - **context-menu**: Right-click menus
 
 #### Data Display
+
 - **table**: Responsive tables
 - **badge**: Status badges and labels
 - **avatar**: User avatars with fallbacks
@@ -116,6 +126,7 @@ apps/frontend/src/
 - **chart**: Recharts wrapper with theming
 
 #### Advanced Components
+
 - **carousel**: Image/content carousels (Embla)
 - **command**: Command palette (⌘K)
 - **calendar**: Date picker calendar
@@ -127,38 +138,41 @@ apps/frontend/src/
 - **aspect-ratio**: Aspect ratio containers
 
 #### Utilities
+
 - **utils.ts**: `cn()` function for merging Tailwind classes
 - **use-mobile.ts**: Hook for responsive mobile detection
 
 ## Component Design Patterns
 
 ### Variant-Based Styling (CVA)
+
 ```typescript
 const buttonVariants = cva(
-  "inline-flex items-center justify-center rounded-md text-sm font-medium",
+  'inline-flex items-center justify-center rounded-md text-sm font-medium',
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
-        destructive: "bg-destructive text-destructive-foreground",
-        outline: "border border-input hover:bg-accent",
+        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
+        destructive: 'bg-destructive text-destructive-foreground',
+        outline: 'border border-input hover:bg-accent',
         // ...
       },
       size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-9 rounded-md px-3",
-        lg: "h-11 rounded-md px-8",
+        default: 'h-10 px-4 py-2',
+        sm: 'h-9 rounded-md px-3',
+        lg: 'h-11 rounded-md px-8',
       },
     },
     defaultVariants: {
-      variant: "default",
-      size: "default",
+      variant: 'default',
+      size: 'default',
     },
   }
 );
 ```
 
 ### Composition Pattern
+
 ```typescript
 // Card component composition
 <Card>
@@ -176,7 +190,9 @@ const buttonVariants = cva(
 ```
 
 ### Accessibility First
+
 All components built on Radix UI primitives ensure:
+
 - Keyboard navigation
 - Screen reader support
 - Focus management
@@ -186,6 +202,7 @@ All components built on Radix UI primitives ensure:
 ## Application Components
 
 ### Core Pages
+
 1. **App.tsx**: Root component
    - Theme management (dark/light/system)
    - Global state (loading, auth, modal states)
@@ -205,6 +222,7 @@ All components built on Radix UI primitives ensure:
    - Data fetching and state management
 
 ### Layout Components
+
 - **Header.tsx**: Top navigation
   - Logo/branding
   - Theme toggle
@@ -218,6 +236,7 @@ All components built on Radix UI primitives ensure:
   - Social links
 
 ### Visualization Components
+
 1. **CommitHeatmap.tsx**: GitHub-style contribution calendar
    - Daily commit counts
    - Color-coded intensity
@@ -261,6 +280,7 @@ All components built on Radix UI primitives ensure:
    - Line-by-line changes
 
 ### Feature Components
+
 1. **AIInsights.tsx**: AI-powered analysis
    - Repository health score
    - Code quality recommendations
@@ -293,6 +313,7 @@ All components built on Radix UI primitives ensure:
    - Tutorial content
 
 ### Utility Components
+
 - **LoadingSpinner.tsx**: Loading indicator
 - **RiveLoader.tsx**: Animated Rive-based loader
 - **RiveLogo.tsx**: Animated logo
@@ -300,6 +321,7 @@ All components built on Radix UI primitives ensure:
 ## Styling Approach
 
 ### Tailwind CSS 4.1
+
 - **Utility-first CSS**: All styling via Tailwind utilities
 - **Custom theme**: Defined in `tailwind.config.js`
 - **CSS variables**: Theme colors defined as CSS variables for easy theming
@@ -307,6 +329,7 @@ All components built on Radix UI primitives ensure:
 - **Responsive**: Mobile-first breakpoints (`sm:`, `md:`, `lg:`, `xl:`, `2xl:`)
 
 ### Theme System
+
 - **next-themes**: System-aware theme switching
 - **Theme options**: light, dark, system
 - **CSS variables**: Colors defined as HSL values
@@ -320,6 +343,7 @@ All components built on Radix UI primitives ensure:
   - `--chart-1` through `--chart-5`
 
 ### Component Styling Pattern
+
 ```typescript
 import { cn } from './ui/utils';
 
@@ -339,18 +363,21 @@ export function MyComponent({ className, ...props }) {
 ## State Management
 
 ### Local State (React Hooks)
+
 - `useState` for component-level state
 - `useEffect` for side effects (data fetching, theme application)
 - `useMemo` for expensive computations
 - `useCallback` for memoized callbacks
 
 ### No Global State Library
+
 - No Redux, Zustand, or Context API currently
 - State lifted to nearest common ancestor
 - Props drilling for shared state
 - Direct API calls from components
 
 ### Repository Data Flow
+
 ```
 App.tsx (holds commits, heatmapData, repoUrl)
     ↓
@@ -362,6 +389,7 @@ Individual visualization components
 ## API Integration
 
 ### Centralized API Client (`services/api.ts`)
+
 - Axios-based HTTP client
 - Base URL configuration
 - Request/response interceptors
@@ -369,11 +397,14 @@ Individual visualization components
 - Type-safe with `@gitray/shared-types`
 
 ### API Methods
+
 - `getRepositoryFullData(url, options)`: Fetch all repository data
 - Additional methods for specific endpoints
 
 ### Type Safety
+
 All API requests/responses typed with interfaces from `@gitray/shared-types`:
+
 - `Commit`, `CommitHeatmapData`, `RepositorySummary`
 - `FileTypeDistribution`, `CodeChurnAnalysis`
 - Error types: `GitrayError`, `RepositoryError`, `ValidationError`
@@ -381,12 +412,14 @@ All API requests/responses typed with interfaces from `@gitray/shared-types`:
 ## Animation & Motion
 
 ### Framer Motion (`motion`)
+
 - Component animations
 - Page transitions
 - Gesture animations
 - Stagger effects
 
 ### Rive Animations
+
 - Loading animations
 - Logo animations
 - Interactive illustrations
@@ -395,27 +428,31 @@ All API requests/responses typed with interfaces from `@gitray/shared-types`:
 ## User Experience Features
 
 ### Toast Notifications (Sonner)
+
 ```typescript
 import { toast } from 'sonner';
 
-toast.success("Repository loaded successfully!");
-toast.error("Failed to load repository");
-toast.loading("Loading commits...");
+toast.success('Repository loaded successfully!');
+toast.error('Failed to load repository');
+toast.loading('Loading commits...');
 ```
 
 ### Dark/Light Mode
+
 - System detection by default
 - Manual toggle in header
 - Persisted preference
 - Smooth transitions
 
 ### Responsive Design
+
 - Mobile-first approach
 - Breakpoints: 640px, 768px, 1024px, 1280px, 1536px
 - Adaptive layouts
 - Touch-friendly interactions
 
 ### Accessibility
+
 - Keyboard navigation
 - Screen reader support
 - Focus indicators
@@ -425,15 +462,18 @@ toast.loading("Loading commits...");
 ## Testing
 
 ### Test Setup (`test-setup.ts`)
+
 - Vitest configuration
 - Testing Library setup
 - Mock setup for APIs
 
 ### Test Locations
+
 - Co-located with components: `ComponentName.test.tsx`
 - Located in `__tests__/` directory
 
 ### Testing Tools
+
 - **@testing-library/react**: Component testing
 - **@testing-library/jest-dom**: DOM matchers
 - **@testing-library/user-event**: User interaction simulation
@@ -443,16 +483,19 @@ toast.loading("Loading commits...");
 ## Build & Development
 
 ### Development
+
 ```bash
 pnpm dev:frontend  # Start Vite dev server (port 5173)
 ```
 
 ### Build
+
 ```bash
 pnpm build:frontend  # Production build
 ```
 
 ### Build Output
+
 - Optimized bundles in `dist/`
 - Code splitting by route/component
 - Asset optimization
@@ -461,12 +504,14 @@ pnpm build:frontend  # Production build
 ## Migration Notes (Old → New)
 
 ### Removed Dependencies
+
 - `react-calendar-heatmap` → Custom heatmap component
 - `apexcharts` / `react-apexcharts` → Recharts
 - `react-select` → Radix UI Select
 - `date-fns` → (May still be in use, check)
 
 ### Added Dependencies
+
 - All `@radix-ui/react-*` packages (30+)
 - `class-variance-authority`, `clsx`, `tailwind-merge`
 - `lucide-react` (icons)
@@ -478,6 +523,7 @@ pnpm build:frontend  # Production build
 - `vaul`, `cmdk`, `embla-carousel-react` (advanced components)
 
 ### Component Refactors
+
 - Old `ActivityHeatmap.tsx` → New `CommitHeatmap.tsx`
 - Old `CommitList.tsx` → Integrated into `DashboardPage.tsx` or removed
 - Old `RepoInput.tsx` → Integrated into `LandingPage.tsx`
@@ -486,6 +532,7 @@ pnpm build:frontend  # Production build
 - New features: `AIInsights`, `PremiumFeatures`
 
 ### Styling Migration
+
 - From custom CSS to Tailwind utilities
 - Consistent design system via CSS variables
 - Dark mode support added
@@ -494,6 +541,7 @@ pnpm build:frontend  # Production build
 ## Best Practices
 
 ### Component Creation
+
 1. Use shadcn/ui components as building blocks
 2. Compose with semantic HTML
 3. Apply Tailwind utilities for styling
@@ -501,6 +549,7 @@ pnpm build:frontend  # Production build
 5. Ensure accessibility (keyboard, ARIA, focus)
 
 ### Styling Guidelines
+
 1. Prefer Tailwind utilities over custom CSS
 2. Use CSS variables for theme colors
 3. Follow mobile-first responsive design
@@ -508,12 +557,14 @@ pnpm build:frontend  # Production build
 5. Keep specificity low
 
 ### Type Safety
+
 1. Import types from `@gitray/shared-types`
 2. Define component prop interfaces
 3. Use strict TypeScript mode
 4. Avoid `any` types
 
 ### Performance
+
 1. Lazy load heavy components
 2. Memoize expensive computations
 3. Use proper React keys
@@ -523,6 +574,7 @@ pnpm build:frontend  # Production build
 ## Future Considerations
 
 ### Potential Improvements
+
 - Global state management (Zustand/Context) if state becomes complex
 - Route-based code splitting for better performance
 - Progressive Web App (PWA) features
@@ -533,6 +585,7 @@ pnpm build:frontend  # Production build
 - Export functionality (PDF, CSV)
 
 ### Known Limitations
+
 - No global state management (may become limiting)
 - Direct API calls from components (no data layer abstraction)
 - Limited error boundary implementation
@@ -542,18 +595,21 @@ pnpm build:frontend  # Production build
 ## Debugging Tips
 
 ### Component Issues
+
 1. Check Radix UI documentation for primitive usage
 2. Verify Tailwind class application with browser DevTools
 3. Use React DevTools for component hierarchy
 4. Check console for accessibility warnings
 
 ### Styling Issues
+
 1. Verify CSS variable values in `:root` and `.dark`
 2. Check Tailwind class conflicts with browser inspector
 3. Use `cn()` utility correctly for class merging
 4. Ensure Tailwind CSS is properly imported in `index.css`
 
 ### Build Issues
+
 1. Ensure `@gitray/shared-types` is built first
 2. Check TypeScript errors: `tsc --noEmit`
 3. Verify all imports resolve correctly

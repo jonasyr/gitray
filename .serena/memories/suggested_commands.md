@@ -3,6 +3,7 @@
 ## Essential Commands (Most Commonly Used)
 
 ### Development Environment
+
 ```bash
 pnpm app                  # Interactive development environment manager
 pnpm dev                  # Build shared types + start all services with hot reload
@@ -11,6 +12,7 @@ pnpm dev:backend          # Start backend only (Express on port 3001)
 ```
 
 ### Testing
+
 ```bash
 pnpm test                 # Run all tests across workspace
 pnpm test:frontend        # Frontend tests only
@@ -22,6 +24,7 @@ pnpm test:ui              # Open Vitest UI
 ```
 
 ### Code Quality
+
 ```bash
 pnpm lint                 # Run ESLint on all code
 pnpm lint:fix             # Auto-fix linting issues
@@ -30,6 +33,7 @@ pnpm format               # Format all files with Prettier
 ```
 
 ### Building
+
 ```bash
 pnpm build                # Build everything (shared-types → backend → frontend)
 pnpm build:shared-types   # Build shared types only (REQUIRED before apps)
@@ -37,6 +41,7 @@ pnpm build:apps           # Build backend + frontend
 ```
 
 ### Environment Management
+
 ```bash
 pnpm env:status           # Show service status (frontend, backend, Redis)
 pnpm env:stop             # Stop all services
@@ -44,6 +49,7 @@ pnpm env:clean            # Clean environment (stop services + clean cache)
 ```
 
 ### Cleanup
+
 ```bash
 pnpm clean                # Clean dist + cache + node_modules
 pnpm clean:dist           # Remove build artifacts only
@@ -80,6 +86,7 @@ pnpm quick                # Frontend-only quick start
 ## Testing Variants
 
 ### Backend-Specific
+
 ```bash
 pnpm --filter backend test              # Backend unit tests
 pnpm --filter backend test:coverage     # Backend coverage
@@ -89,12 +96,14 @@ pnpm --filter backend test:perf:stress  # Stress test (2x load)
 ```
 
 ### Frontend-Specific
+
 ```bash
 pnpm --filter frontend test             # Frontend unit tests
 pnpm --filter frontend test:coverage    # Frontend coverage
 ```
 
 ### Coverage Details
+
 ```bash
 pnpm test:coverage:frontend    # Frontend coverage (apps/frontend/coverage)
 pnpm test:coverage:backend     # Backend coverage (apps/backend/coverage)
@@ -106,12 +115,14 @@ pnpm clean:coverage-output     # Clean coverage artifacts
 ## Git Hooks (Automated via Husky)
 
 ### Pre-commit (Automated)
+
 - ESLint auto-fix on `*.{ts,tsx,js,jsx}`
 - Prettier format on code files
 - Markdownlint on `*.md` files
 - Prettier format on `*.{json,yml,yaml}`
 
 ### Manual Hook Setup
+
 ```bash
 pnpm prepare              # Install Husky hooks
 ```
@@ -158,6 +169,7 @@ k6 run --vus 10 --duration 60s perf/load-test.ts
 ## Useful System Commands (Linux)
 
 ### File Operations
+
 ```bash
 ls -la                    # List files with details
 find . -name "*.ts"       # Find TypeScript files
@@ -165,6 +177,7 @@ grep -r "pattern" src/    # Search in files
 ```
 
 ### Git Operations
+
 ```bash
 git status                # Current branch status
 git log --oneline -10     # Recent commits
@@ -175,6 +188,7 @@ git checkout dev          # Switch to dev branch
 ## Build Order (IMPORTANT!)
 
 **Always build in this order:**
+
 1. `pnpm build:shared-types` (or `pnpm --filter @gitray/shared-types build`)
 2. `pnpm build:apps` (or manually: backend → frontend)
 
@@ -183,6 +197,7 @@ git checkout dev          # Switch to dev branch
 ## Environment Variables
 
 Create `.env` in project root:
+
 ```bash
 # Server
 PORT=3001
@@ -205,6 +220,7 @@ DEBUG_CACHE_LOGGING=false
 ## Quick Reference: Common Workflows
 
 ### Starting Development
+
 ```bash
 pnpm app                  # Interactive menu
 # OR
@@ -212,6 +228,7 @@ pnpm dev                  # Direct start (recommended)
 ```
 
 ### Before Committing
+
 ```bash
 pnpm lint                 # Check for issues
 pnpm test                 # Run tests
@@ -219,12 +236,14 @@ pnpm format               # Format code
 ```
 
 ### After Pulling Changes
+
 ```bash
 pnpm install              # Update dependencies
 pnpm build:shared-types   # Rebuild shared types
 ```
 
 ### Adding New Dependencies
+
 ```bash
 # Root level
 pnpm add -D <package>

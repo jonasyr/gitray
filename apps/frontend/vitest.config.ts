@@ -1,7 +1,7 @@
 // apps/frontend/vitest.config.ts - Create this file
 /// <reference types="vitest" />
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+import react from '@vitejs/plugin-react-swc';
 import * as path from 'path';
 import * as os from 'os';
 
