@@ -104,7 +104,8 @@ gitray/
 - Vite 6.3.5 for fast development and building
 - Tailwind CSS 4.1.7 for styling
 - shadcn/ui component library (built on Radix UI primitives)
-- Radix UI components for accessible UI primitives
+- Radix UI components for accessible UI primitives (20+ components including Dialog, Select,
+  Dropdown, Tabs, etc.)
 - Recharts for data visualizations and charts
 - Lucide React for icons
 - Rive for interactive animations
@@ -113,6 +114,8 @@ gitray/
 - next-themes for theme management
 - Embla Carousel for carousels
 - cmdk for command menu
+- class-variance-authority (CVA) for component variants
+- tailwind-merge for className merging
 
 **Development:**
 

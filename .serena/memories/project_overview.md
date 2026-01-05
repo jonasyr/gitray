@@ -19,19 +19,20 @@ GitRay is a professional Git visualization tool that transforms repository commi
 ### Backend
 
 - **Runtime**: Node.js 18+ with TypeScript 5.7
-- **Framework**: Express 5
+- **Framework**: Express 5.1.0
 - **Git Operations**: simple-git
 - **Caching**: Redis 7 (via ioredis)
 - **Logging**: Winston with daily rotate file
 - **Metrics**: Prometheus (prom-client)
 - **Validation**: Express-validator, Zod
 - **Security**: Helmet, CORS, express-rate-limit
+- **Date Utilities**: date-fns for date manipulation
 
 ### Frontend
 
-- **Framework**: React 18.3 with TypeScript 5.7
-- **Build Tool**: Vite 6
-- **Styling**: Tailwind CSS 4
+- **Framework**: React 18.3.1 with TypeScript 5.7
+- **Build Tool**: Vite 6.3.5
+- **Styling**: Tailwind CSS 4.1.7
 - **UI Components**: shadcn/ui (Radix UI primitives + CVA)
 - **Visualizations**: Recharts for charts, custom heatmap components
 - **Animations**: Rive (@rive-app/react-canvas), motion (Framer Motion)
@@ -40,6 +41,8 @@ GitRay is a professional Git visualization tool that transforms repository commi
 - **Toast Notifications**: Sonner
 - **Themes**: next-themes for dark/light mode
 - **Icons**: lucide-react
+- **Carousel**: Embla Carousel for carousels
+- **Command Menu**: cmdk for command palette
 
 ### Shared Infrastructure
 
@@ -48,8 +51,9 @@ GitRay is a professional Git visualization tool that transforms repository commi
 - **Performance Testing**: k6 for backend load testing
 - **Linting**: ESLint 9 (flat config)
 - **Formatting**: Prettier 3
+- **Markdown Linting**: markdownlint-cli2
 - **Git Hooks**: Husky + lint-staged
-- **CI/CD**: GitHub Actions (assumed from .github directory)
+- **CI/CD**: GitHub Actions
 
 ## Monorepo Structure
 
@@ -71,9 +75,14 @@ GitRay is a professional Git visualization tool that transforms repository commi
 
 ## Current Development Branch
 
-Main development branch: `dev`
-Current working branch: `87-featfrontend-ui-redesign-migration-to-shadcnui`
-Recent major changes: Complete frontend UI redesign with shadcn/ui component library
+**Main development branch**: `dev`
+**Current working branch**: `87-featfrontend-ui-redesign-migration-to-shadcnui`
+**Repository**: `gitray` (owner: `jonasyr`)
+**Recent major changes**: Complete frontend UI redesign with shadcn/ui component library
+
+## Current Date
+
+As of January 5, 2026, the project is actively maintained and in production-ready state with ongoing feature development.
 
 ## License
 

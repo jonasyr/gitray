@@ -15,9 +15,16 @@ complete UI redesign with shadcn/ui components.
 - **Vite 6.3** - Build tool with HMR
 - **Tailwind CSS 4.1** - Utility-first styling
 - **shadcn/ui** - High-quality component library built on Radix UI
+- **Radix UI** - 20+ accessible UI primitives (Dialog, Select, Dropdown, Tabs, Tooltip, etc.)
 - **Recharts** - Charting library for data visualization
 - **Axios** - HTTP client
+- **Lucide React** - Icon library
 - **@rive-app/react-canvas** - Interactive animations
+- **React Hook Form** - Form state management
+- **Sonner** - Toast notifications
+- **next-themes** - Theme management (dark/light mode)
+- **cmdk** - Command menu component
+- **class-variance-authority** - Component variant management
 
 ## 📦 Installation
 
