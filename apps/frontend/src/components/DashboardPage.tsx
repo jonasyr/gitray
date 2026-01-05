@@ -336,6 +336,15 @@ export default function DashboardPage({
   const repoOwner =
     summary?.repository.owner ?? urlParts[urlParts.length - 2] ?? 'Unknown';
 
+  // Detect Git platform from URL
+  const gitPlatform = useMemo(() => {
+    const url = repoUrl.toLowerCase();
+    if (url.includes('github.com')) return 'GitHub';
+    if (url.includes('gitlab.com')) return 'GitLab';
+    if (url.includes('bitbucket.org')) return 'Bitbucket';
+    return 'Source'; // fallback for other platforms
+  }, [repoUrl]);
+
   const repoData = {
     name: repoName,
     owner: repoOwner,
@@ -372,10 +381,10 @@ export default function DashboardPage({
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground hover:text-primary rounded-full border border-muted-foreground/30 hover:border-primary/50 transition-colors"
-                title="View source repository"
+                title={`View on ${gitPlatform}`}
               >
                 <GitFork className="h-3 w-3" />
-                <span>View Source</span>
+                <span>View on {gitPlatform}</span>
                 <ExternalLink className="h-3 w-3" />
               </a>
             </div>
