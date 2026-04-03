@@ -116,6 +116,8 @@ describe('FileTypeList Component', () => {
       metadata: {
         totalFiles: 100,
         totalSize: 1024000, // 1MB, so ~10KB/file
+        analyzedAt: new Date().toISOString(),
+        repositorySize: '1 MB',
       },
     };
 
@@ -162,6 +164,8 @@ describe('FileTypeList Component', () => {
       metadata: {
         totalFiles: 20,
         totalSize: 0,
+        analyzedAt: new Date().toISOString(),
+        repositorySize: '0 B',
       },
     };
 
