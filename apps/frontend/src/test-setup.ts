@@ -32,3 +32,11 @@ import React from 'react';
 globalThis.React = React;
 
 console.log('Vitest setup file loaded!');
+
+// Mock PointerEvent for Radix UI Tabs
+if (typeof window.PointerEvent === 'undefined') {
+  window.PointerEvent = window.MouseEvent as any;
+}
+window.HTMLElement.prototype.hasPointerCapture = vi.fn();
+window.HTMLElement.prototype.releasePointerCapture = vi.fn();
+window.HTMLElement.prototype.setPointerCapture = vi.fn();

@@ -1,4 +1,5 @@
-import { render, screen, act, fireEvent } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import DashboardPage from '../../src/components/DashboardPage';
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import * as api from '../../src/services/api';
@@ -120,9 +121,9 @@ describe('DashboardPage Component', () => {
 
     // Switch to Heatmap tab and ensure it handles it gracefully
     await act(async () => {
+      const user = userEvent.setup();
       const tab = screen.getByRole('tab', { name: /Heatmap/i });
-      fireEvent.pointerDown(tab);
-      fireEvent.click(tab);
+      await user.click(tab);
     });
 
     expect(await screen.findByTestId('mock-heatmap')).toBeInTheDocument();
