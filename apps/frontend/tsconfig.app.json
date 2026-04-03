@@ -17,7 +17,6 @@
     "jsx": "react-jsx",
 
     /* Path mapping */
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
       "@gitray/shared-types": ["../../packages/shared-types/src"],
@@ -33,6 +32,6 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["src"],
+  "include": ["src", "__tests__"],
   "references": [{ "path": "../../packages/shared-types" }]
 }

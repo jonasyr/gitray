@@ -70,6 +70,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      '@': path.resolve(__dirname, './src'),
       '@gitray/shared-types': path.resolve(
         __dirname,
         '../../packages/shared-types/src'
