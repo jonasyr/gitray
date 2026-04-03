@@ -236,6 +236,61 @@ describe('API Service Unit Tests', () => {
       expect(url).toContain('author=Alice');
       expect(result).toEqual(mockResponse.data);
     });
+
+    test('should handle network error (no response)', async () => {
+      // Arrange
+      const mockError = {
+        isAxiosError: true,
+        request: {}, // Indicates no response received
+      };
+      mockGet.mockRejectedValueOnce(mockError);
+
+      // Act & Assert
+      await expect(getRepositoryFullData('repo')).rejects.toThrow(
+        'No response from server. Please check your network connection.'
+      );
+    });
+
+    test('should handle server error response (e.g. 500)', async () => {
+      // Arrange
+      const mockError = {
+        isAxiosError: true,
+        response: { status: 500, data: { msg: 'Internal Server Error' } },
+        config: { url: '/api/repositories/full-data' },
+      };
+      mockGet.mockRejectedValueOnce(mockError);
+
+      // Act & Assert
+      await expect(getRepositoryFullData('repo')).rejects.toThrow(
+        'Full-data error (500): {"msg":"Internal Server Error"}'
+      );
+    });
+
+    test('should handle non-axios error', async () => {
+      // Arrange
+      (axios.isAxiosError as any).mockImplementationOnce(() => false);
+      const mockError = new Error('Generic error');
+      mockGet.mockRejectedValueOnce(mockError);
+
+      // Act & Assert
+      await expect(getRepositoryFullData('repo')).rejects.toThrow(
+        'An unexpected error occurred'
+      );
+    });
+
+    test('should handle axios error without response or request', async () => {
+      // Arrange
+      const mockError = {
+        isAxiosError: true,
+        message: 'Network Error',
+      };
+      mockGet.mockRejectedValueOnce(mockError);
+
+      // Act & Assert
+      await expect(getRepositoryFullData('repo')).rejects.toThrow(
+        'Error: Network Error'
+      );
+    });
   });
 
   describe('getRepositoryContributors', () => {
@@ -254,6 +309,61 @@ describe('API Service Unit Tests', () => {
         )
       );
       expect(result).toEqual(mockResponse.data.contributors);
+    });
+
+    test('should handle network error (no response)', async () => {
+      // Arrange
+      const mockError = {
+        isAxiosError: true,
+        request: {},
+      };
+      mockGet.mockRejectedValueOnce(mockError);
+
+      // Act & Assert
+      await expect(getRepositoryContributors('repo')).rejects.toThrow(
+        'No response from server. Please check your network connection.'
+      );
+    });
+
+    test('should handle server error response (e.g. 500)', async () => {
+      // Arrange
+      const mockError = {
+        isAxiosError: true,
+        response: { status: 500, data: { msg: 'Internal Server Error' } },
+        config: { url: '/api/repositories/contributors' },
+      };
+      mockGet.mockRejectedValueOnce(mockError);
+
+      // Act & Assert
+      await expect(getRepositoryContributors('repo')).rejects.toThrow(
+        'Contributors error (500): {"msg":"Internal Server Error"}'
+      );
+    });
+
+    test('should handle non-axios error', async () => {
+      // Arrange
+      (axios.isAxiosError as any).mockImplementationOnce(() => false);
+      const mockError = new Error('Generic error');
+      mockGet.mockRejectedValueOnce(mockError);
+
+      // Act & Assert
+      await expect(getRepositoryContributors('repo')).rejects.toThrow(
+        'An unexpected error occurred'
+      );
+    });
+
+    test('should handle axios error without response or request', async () => {
+      // Arrange
+      const mockError = {
+        isAxiosError: true,
+        message: 'Network Error',
+      };
+      mockGet.mockRejectedValueOnce(mockError);
+
+      // Act & Assert
+      await expect(getRepositoryContributors('repo')).rejects.toThrow(
+        'Error: Network Error'
+      );
     });
   });
 });
