@@ -23,11 +23,18 @@ function generateActivityData(commits: Commit[]) {
   // Create a map of date -> commit count
   const commitsByDate = new Map<string, number>();
 
+  const toLocalDateKey = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
   // Filter commits from last 30 days and count by date
   commits.forEach((commit) => {
     const commitDate = new Date(commit.date);
     if (commitDate >= thirtyDaysAgo && commitDate <= today) {
-      const dateKey = commitDate.toISOString().split('T')[0];
+      const dateKey = toLocalDateKey(commitDate);
       commitsByDate.set(dateKey, (commitsByDate.get(dateKey) || 0) + 1);
     }
   });
@@ -36,7 +43,7 @@ function generateActivityData(commits: Commit[]) {
   for (let i = 29; i >= 0; i--) {
     const date = new Date(today);
     date.setDate(date.getDate() - i);
-    const dateKey = date.toISOString().split('T')[0];
+    const dateKey = toLocalDateKey(date);
 
     data.push({
       date: date.toLocaleDateString('en-US', {
