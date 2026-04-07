@@ -57,7 +57,27 @@ function generateActivityData(commits: Commit[]) {
   return data;
 }
 
-export function ActivityChart({ commits = [] }: ActivityChartProps) {
+function ActivityChartTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: { value: unknown; payload: { date: string } }[];
+}) {
+  if (active && payload?.length) {
+    return (
+      <div className="bg-popover border border-border rounded-lg p-3 shadow-lg">
+        <p className="text-sm">{payload[0].payload.date}</p>
+        <p className="text-sm font-semibold text-primary">
+          {payload[0].value} commits
+        </p>
+      </div>
+    );
+  }
+  return null;
+}
+
+export function ActivityChart({ commits = [] }: Readonly<ActivityChartProps>) {
   const data = generateActivityData(commits);
   return (
     <div className="h-[280px] w-full -mb-6">
@@ -90,21 +110,7 @@ export function ActivityChart({ commits = [] }: ActivityChartProps) {
             className="text-muted-foreground"
             width={30}
           />
-          <Tooltip
-            content={({ active, payload }) => {
-              if (active && payload && payload.length) {
-                return (
-                  <div className="bg-popover border border-border rounded-lg p-3 shadow-lg">
-                    <p className="text-sm">{payload[0].payload.date}</p>
-                    <p className="text-sm font-semibold text-primary">
-                      {payload[0].value} commits
-                    </p>
-                  </div>
-                );
-              }
-              return null;
-            }}
-          />
+          <Tooltip content={ActivityChartTooltip} />
           <Area
             type="monotone"
             dataKey="commits"
