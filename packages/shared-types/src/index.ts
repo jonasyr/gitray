@@ -427,6 +427,8 @@ export interface ChurnFilterOptions {
   paths?: string[];
   /** Filter by specific risk levels */
   riskLevels?: ChurnRiskLevel[];
+  /** Maximum number of files to return (returns top N by change count) */
+  limit?: number;
 }
 
 /**

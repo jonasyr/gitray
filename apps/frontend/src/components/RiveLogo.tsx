@@ -1,4 +1,4 @@
-import React from 'react';
+import { useEffect, useState } from 'react';
 import { useRive } from '@rive-app/react-canvas';
 
 interface RiveLogoProps {
@@ -8,23 +8,58 @@ interface RiveLogoProps {
   className?: string;
   /** Whether to show hover effects */
   interactive?: boolean;
+  /** Current theme (light/dark/system) */
+  theme?: 'light' | 'dark' | 'system';
 }
 
 /**
  * Rive logo component that displays the brand logo with interactive elements.
+ * Automatically switches between light and dark mode logos based on the theme.
  * Uses the "State Machine 1" state machine for hover effects and interactions.
  */
-const RiveLogo: React.FC<RiveLogoProps> = ({
+export function RiveLogo({
   size = 60,
   className = '',
   interactive = true,
-}) => {
+  theme = 'dark',
+}: RiveLogoProps) {
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('dark');
+  const [logoKey, setLogoKey] = useState(0);
+
+  // Resolve system theme preference
+  useEffect(() => {
+    if (theme === 'system') {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const updateTheme = () => {
+        const newTheme = mediaQuery.matches ? 'dark' : 'light';
+        if (newTheme !== resolvedTheme) {
+          setResolvedTheme(newTheme);
+          setLogoKey((prev) => prev + 1);
+        }
+      };
+
+      updateTheme();
+      mediaQuery.addEventListener('change', updateTheme);
+      return () => mediaQuery.removeEventListener('change', updateTheme);
+    } else {
+      if (theme !== resolvedTheme) {
+        setResolvedTheme(theme);
+        setLogoKey((prev) => prev + 1);
+      }
+    }
+  }, [theme, resolvedTheme]);
+
+  const logoSrc =
+    resolvedTheme === 'dark'
+      ? '/Logo_Animation_StateMachine_DarkMode.riv'
+      : '/Logo_Animation_StateMachine_LightMode.riv';
+
   const { RiveComponent } = useRive({
-    src: '/Logo_Animation_StateMachine_DarkMode.riv',
+    src: logoSrc,
     stateMachines: 'State Machine 1',
     autoplay: true,
     onLoad: () => {
-      console.log('Rive logo loaded successfully');
+      console.log(`Rive logo loaded successfully (${resolvedTheme} mode)`);
     },
     onLoadError: (error) => {
       console.error('Failed to load Rive logo:', error);
@@ -33,12 +68,11 @@ const RiveLogo: React.FC<RiveLogoProps> = ({
 
   return (
     <div
+      key={logoKey}
       className={`flex items-center justify-center ${interactive ? 'cursor-pointer' : ''} ${className}`}
       style={{ width: size, height: size }}
     >
       <RiveComponent />
     </div>
   );
-};
-
-export default RiveLogo;
+}

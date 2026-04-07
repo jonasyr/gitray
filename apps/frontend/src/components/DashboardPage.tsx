@@ -1,0 +1,746 @@
+import { useState, useEffect, useMemo } from 'react';
+import {
+  Lock,
+  Users,
+  GitBranch,
+  Calendar,
+  TrendingUp,
+  AlertCircle,
+  Sparkles,
+  BarChart3,
+  DollarSign,
+  Flame,
+  Zap,
+  Target,
+  Trophy,
+  Star,
+  Rocket,
+  Crown,
+  Medal,
+  Award,
+  ExternalLink,
+  GitFork,
+} from 'lucide-react';
+import { motion } from 'motion/react';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from './ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Avatar, AvatarFallback } from './ui/avatar';
+import { Alert, AlertDescription } from './ui/alert';
+import { CommitHeatmap } from './CommitHeatmap';
+import { FileDistributionChart } from './FileDistributionChart';
+import { ActivityChart } from './ActivityChart';
+import { CodeChurnChart } from './CodeChurnChart';
+import { FileTypeList } from './FileTypeList';
+import { GraphViewTimeline } from './GraphViewTimeline';
+import { GitDiffViewer } from './GitDiffViewer';
+import { AIInsights } from './AIInsights';
+import { PremiumFeatures } from './PremiumFeatures';
+import {
+  Commit,
+  CommitHeatmapData,
+  FileTypeDistribution,
+  CodeChurnAnalysis,
+  RepositorySummary,
+} from '@gitray/shared-types';
+import {
+  getFileAnalysis,
+  getCodeChurn,
+  getRepositorySummary,
+} from '../services/api';
+
+const contributors = [
+  { name: 'John Doe', initials: 'JD' },
+  { name: 'Jane Smith', initials: 'JS' },
+  { name: 'Mike Johnson', initials: 'MJ' },
+  { name: 'Sarah Williams', initials: 'SW' },
+  { name: 'Tom Brown', initials: 'TB' },
+];
+
+interface DashboardPageProps {
+  commits: Commit[];
+  heatmapData: CommitHeatmapData | null;
+  isValidHeatmap: boolean;
+  repoUrl: string;
+  /** Current branch being analyzed (from backend API) */
+  currentBranch?: string;
+}
+
+// Helper function to format repository age with proper pluralization
+const formatAge = (years: number, months: number): string => {
+  const parts: string[] = [];
+
+  if (years > 0) {
+    parts.push(`${years} ${years === 1 ? 'year' : 'years'}`);
+  }
+
+  if (months > 0) {
+    parts.push(`${months} ${months === 1 ? 'month' : 'months'}`);
+  }
+
+  return parts.length > 0 ? parts.join(' ') : '0 months';
+};
+
+// Gamification: Get motivational message and icon based on streak length
+const getStreakMotivation = (streak: number) => {
+  if (streak === 0) {
+    return {
+      message: 'Start your journey today!',
+      icon: Target,
+      color: 'text-muted-foreground',
+      bgColor: 'bg-muted/30',
+    };
+  } else if (streak === 1) {
+    return {
+      message: 'Great start! Keep going!',
+      icon: Zap,
+      color: 'text-blue-400',
+      bgColor: 'bg-blue-500/10',
+    };
+  } else if (streak >= 2 && streak <= 4) {
+    return {
+      message: 'Building momentum!',
+      icon: TrendingUp,
+      color: 'text-cyan-400',
+      bgColor: 'bg-cyan-500/10',
+    };
+  } else if (streak >= 5 && streak <= 9) {
+    return {
+      message: "You're on fire! 🔥",
+      icon: Flame,
+      color: 'text-orange-400',
+      bgColor: 'bg-orange-500/10',
+    };
+  } else if (streak >= 10 && streak <= 20) {
+    return {
+      message: 'Impressive dedication!',
+      icon: Star,
+      color: 'text-yellow-400',
+      bgColor: 'bg-yellow-500/10',
+    };
+  } else if (streak >= 21 && streak <= 29) {
+    return {
+      message: 'Unstoppable force!',
+      icon: Rocket,
+      color: 'text-purple-400',
+      bgColor: 'bg-purple-500/10',
+    };
+  } else if (streak >= 30 && streak <= 59) {
+    return {
+      message: 'Achievement unlocked!',
+      icon: Trophy,
+      color: 'text-amber-400',
+      bgColor: 'bg-amber-500/10',
+    };
+  } else if (streak >= 60 && streak <= 99) {
+    return {
+      message: 'Legendary streak!',
+      icon: Medal,
+      color: 'text-red-400',
+      bgColor: 'bg-red-500/10',
+    };
+  } else if (streak >= 100 && streak <= 364) {
+    return {
+      message: 'Hall of Fame!',
+      icon: Crown,
+      color: 'text-yellow-300',
+      bgColor: 'bg-yellow-500/20',
+    };
+  } else {
+    return {
+      message: 'Absolute Legend!',
+      icon: Award,
+      color: 'text-pink-400',
+      bgColor: 'bg-pink-500/20',
+    };
+  }
+};
+
+export default function DashboardPage({
+  commits: commitsFromProps,
+  heatmapData,
+  isValidHeatmap,
+  repoUrl,
+  currentBranch,
+}: DashboardPageProps) {
+  const [fileDistribution, setFileDistribution] =
+    useState<FileTypeDistribution | null>(null);
+  const [churnData, setChurnData] = useState<CodeChurnAnalysis | null>(null);
+  const [commits, setCommits] = useState<Commit[]>(commitsFromProps);
+  const [heatmapMonths, setHeatmapMonths] = useState<3 | 6 | 12>(12);
+  const [summary, setSummary] = useState<RepositorySummary | null>(null);
+  const [activeTab, setActiveTab] = useState<string>('overview');
+  const [analyticsTab, setAnalyticsTab] = useState<string>('churn');
+
+  // Handler to navigate to File Types tab
+  const navigateToFileTypes = () => {
+    setActiveTab('analytics');
+    setAnalyticsTab('files');
+  };
+
+  // Update local commits state when props change
+  useEffect(() => {
+    setCommits(commitsFromProps);
+  }, [commitsFromProps]);
+
+  // Fetch file analysis, churn data, and summary when repoUrl changes
+  useEffect(() => {
+    if (repoUrl) {
+      // Fetch repository summary
+      getRepositorySummary(repoUrl)
+        .then((data) => {
+          console.log('Repository summary fetched:', data);
+          setSummary(data);
+        })
+        .catch((error) => {
+          console.error('Failed to fetch repository summary:', error);
+          setSummary(null);
+        });
+
+      // Fetch file analysis
+      getFileAnalysis(repoUrl)
+        .then((data) => {
+          setFileDistribution(data);
+        })
+        .catch((error) => {
+          console.error('Failed to fetch file analysis:', error);
+        });
+
+      // Fetch code churn analysis
+      getCodeChurn(repoUrl)
+        .then((data) => {
+          console.log('Fetched churn data:', data);
+          setChurnData(data);
+        })
+        .catch((error) => {
+          console.error('Failed to fetch code churn:', error);
+          setChurnData(null);
+        });
+    }
+  }, [repoUrl]);
+
+  // Calculate peak activity times from commits
+  const peakActivity = useMemo(() => {
+    if (!commits || commits.length === 0) {
+      return {
+        mostActiveDay: 'Wednesday',
+        avgCommitsPerDay: 12,
+        peakMonth: 'October 2024',
+        peakMonthCommits: 247,
+        currentStreak: 14,
+      };
+    }
+
+    // Calculate most active day of week
+    const dayCount: Record<string, number> = {};
+    const monthCount: Record<string, number> = {};
+    const days = [
+      'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ];
+
+    commits.forEach((commit) => {
+      const date = new Date(commit.date);
+      const dayName = days[date.getDay()];
+      const monthYear = date.toLocaleDateString('en-US', {
+        month: 'long',
+        year: 'numeric',
+      });
+
+      dayCount[dayName] = (dayCount[dayName] || 0) + 1;
+      monthCount[monthYear] = (monthCount[monthYear] || 0) + 1;
+    });
+
+    const mostActiveDay = Object.entries(dayCount).sort(
+      (a, b) => b[1] - a[1]
+    )[0];
+    const peakMonth = Object.entries(monthCount).sort((a, b) => b[1] - a[1])[0];
+
+    // Calculate current streak (consecutive days with commits ending at most recent commit)
+    // First, get unique dates and sort them properly
+    const uniqueDates = Array.from(
+      new Set(commits.map((c) => new Date(c.date).toDateString()))
+    )
+      .map((dateStr) => new Date(dateStr))
+      .sort((a, b) => b.getTime() - a.getTime()); // Sort descending (newest first)
+
+    let currentStreak = 0;
+    if (uniqueDates.length > 0) {
+      currentStreak = 1; // Start with the most recent commit day
+      const mostRecentDate = uniqueDates[0];
+
+      // Check if the most recent commit is today or yesterday
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      const recentDate = new Date(mostRecentDate);
+      recentDate.setHours(0, 0, 0, 0);
+
+      // Only count as active streak if the last commit was today or yesterday
+      if (recentDate < yesterday) {
+        currentStreak = 0; // Streak is broken
+      } else {
+        // Count consecutive days backwards from most recent commit
+        for (let i = 1; i < uniqueDates.length; i++) {
+          const currentDate = new Date(uniqueDates[i]);
+          currentDate.setHours(0, 0, 0, 0);
+          const previousDate = new Date(uniqueDates[i - 1]);
+          previousDate.setHours(0, 0, 0, 0);
+
+          const diffDays = Math.round(
+            (previousDate.getTime() - currentDate.getTime()) /
+              (1000 * 60 * 60 * 24)
+          );
+
+          if (diffDays === 1) {
+            currentStreak++;
+          } else {
+            break; // Streak is broken
+          }
+        }
+      }
+    }
+
+    // Calculate average commits per day for the most active day
+    const avgCommitsOnMostActiveDay = mostActiveDay?.[1] || 0;
+
+    return {
+      mostActiveDay: mostActiveDay?.[0] || 'Wednesday',
+      avgCommitsPerDay: avgCommitsOnMostActiveDay,
+      peakMonth: peakMonth?.[0] || 'October 2024',
+      peakMonthCommits: peakMonth?.[1] || 247,
+      currentStreak: currentStreak,
+    };
+  }, [commits]);
+
+  // Use summary data from API, parse from URL if not available
+  const urlParts = repoUrl ? repoUrl.split('/').filter(Boolean) : [];
+  const repoName =
+    summary?.repository.name ??
+    urlParts[urlParts.length - 1]?.replace('.git', '') ??
+    'Unknown';
+  const repoOwner =
+    summary?.repository.owner ?? urlParts[urlParts.length - 2] ?? 'Unknown';
+
+  // Detect Git platform from URL
+  const gitPlatform = useMemo(() => {
+    const url = repoUrl.toLowerCase();
+    if (url.includes('github.com')) return 'GitHub';
+    if (url.includes('gitlab.com')) return 'GitLab';
+    if (url.includes('bitbucket.org')) return 'Bitbucket';
+    return 'Source'; // fallback for other platforms
+  }, [repoUrl]);
+
+  const repoData = {
+    name: repoName,
+    owner: repoOwner,
+    totalCommits:
+      summary?.stats.totalCommits ?? (commits.length > 0 ? commits.length : 0),
+    lastCommit:
+      summary?.lastCommit.relativeTime ??
+      (commits[0]?.date
+        ? new Date(commits[0].date).toLocaleDateString()
+        : 'N/A'),
+    contributors: summary?.stats.contributors ?? 0,
+    created: summary?.created.date
+      ? new Date(summary.created.date).toLocaleDateString('en-CA') // en-CA gives YYYY-MM-DD format
+      : 'N/A',
+    age: summary?.age
+      ? formatAge(summary.age.years, summary.age.months)
+      : 'N/A',
+    status: summary?.stats.status ?? 'unknown',
+  };
+  return (
+    <div className="container mx-auto px-4 md:px-6 lg:px-8 py-6 md:py-8 space-y-6 md:space-y-8 max-w-7xl">
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 md:h-12 md:w-12 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center flex-shrink-0">
+            <GitBranch className="h-5 w-5 md:h-6 md:w-6 text-primary-foreground" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="truncate text-xl md:text-2xl">
+                {repoData.owner}/{repoData.name}
+              </h1>
+              <a
+                href={repoUrl.replace('.git', '')}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground hover:text-primary rounded-full border border-muted-foreground/30 hover:border-primary/50 transition-colors"
+                title={`View on ${gitPlatform}`}
+              >
+                <GitFork className="h-3 w-3" />
+                <span>View on {gitPlatform}</span>
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+            <p className="text-muted-foreground text-sm md:text-base">
+              Repository Analytics
+            </p>
+          </div>
+        </div>
+
+        <Alert className="border-primary/50 bg-primary/5">
+          <AlertCircle className="h-4 w-4 text-primary" />
+          <AlertDescription>
+            Analysis complete. Data last updated {repoData.lastCommit}.
+          </AlertDescription>
+        </Alert>
+      </div>
+
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className="space-y-6"
+      >
+        <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+          <TabsList className="!flex md:!grid w-auto md:!w-full md:grid-cols-6 h-auto min-w-max">
+            <TabsTrigger value="overview" className="gap-2">
+              <TrendingUp className="h-4 w-4" />
+              <span className="hidden sm:inline">Overview</span>
+              <span className="sm:hidden">Overview</span>
+            </TabsTrigger>
+            <TabsTrigger value="heatmap" className="gap-2">
+              <Calendar className="h-4 w-4" />
+              <span className="hidden sm:inline">Heatmap</span>
+              <span className="sm:hidden">Heat</span>
+            </TabsTrigger>
+            <TabsTrigger value="analytics" className="gap-2">
+              <BarChart3 className="h-4 w-4" />
+              <span className="hidden sm:inline">Analytics</span>
+              <span className="sm:hidden">Analytics</span>
+            </TabsTrigger>
+            <TabsTrigger value="insights" className="gap-2">
+              <Sparkles className="h-4 w-4" />
+              <span className="hidden sm:inline">AI Insights</span>
+              <span className="sm:hidden">AI</span>
+            </TabsTrigger>
+            <TabsTrigger value="paid" className="gap-2">
+              <Lock className="h-4 w-4" />
+              <span className="hidden sm:inline">Premium</span>
+              <span className="sm:hidden">Pro</span>
+            </TabsTrigger>
+            <TabsTrigger value="pricing" className="gap-2">
+              <DollarSign className="h-4 w-4" />
+              <span className="hidden sm:inline">Plans & Pricing</span>
+              <span className="sm:hidden">Price</span>
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="overview" className="space-y-4 md:space-y-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="grid gap-4 md:gap-6 md:grid-cols-3"
+          >
+            {/* Repo Summary Card */}
+            <Card className="md:col-span-2 hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle className="text-lg md:text-xl">
+                  Repository Summary
+                </CardTitle>
+                <CardDescription className="text-sm">
+                  Key metrics and information
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3 md:gap-4">
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Repository</p>
+                    <p className="font-semibold">{repoData.name}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Owner</p>
+                    <p className="font-semibold">{repoData.owner}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">
+                      Created <span className="text-xs">(YYYY-MM-DD)</span>
+                    </p>
+                    <p className="font-semibold">{repoData.created}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Age</p>
+                    <p className="font-semibold">{repoData.age}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Last Commit</p>
+                    <p className="font-semibold">{repoData.lastCommit}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">
+                      Total Commits
+                    </p>
+                    <p className="font-semibold">
+                      {repoData.totalCommits.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">
+                      Contributors
+                    </p>
+                    <p className="font-semibold">{repoData.contributors}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Status</p>
+                    <Badge
+                      className={
+                        repoData.status === 'active'
+                          ? 'bg-green-500/10 text-green-600 hover:bg-green-500/20'
+                          : repoData.status === 'inactive'
+                            ? 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20'
+                            : repoData.status === 'archived'
+                              ? 'bg-gray-500/10 text-gray-600 hover:bg-gray-500/20'
+                              : repoData.status === 'empty'
+                                ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20'
+                                : 'bg-blue-500/10 text-blue-600 hover:bg-blue-500/20'
+                      }
+                    >
+                      {repoData.status.charAt(0).toUpperCase() +
+                        repoData.status.slice(1)}
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Contributors Card */}
+            <Card className="hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  Contributors
+                </CardTitle>
+                <CardDescription>
+                  Top {contributors.length} contributors
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {contributors.map((contributor, index) => (
+                    <div key={index} className="flex items-center gap-3">
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback className="bg-gradient-to-br from-primary to-secondary text-primary-foreground text-xs">
+                          {contributor.initials}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="text-sm">{contributor.name}</span>
+                    </div>
+                  ))}
+                  <Button variant="ghost" className="w-full mt-2" size="sm">
+                    View all {repoData.contributors} contributors
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Activity Snapshot Card */}
+            <Card className="md:col-span-2 hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle>Activity Snapshot</CardTitle>
+                <CardDescription>Commits over the last 30 days</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ActivityChart commits={commits} />
+              </CardContent>
+            </Card>
+
+            {/* File Distribution Card */}
+            <Card className="hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle>File Distribution</CardTitle>
+                <CardDescription>Languages by percentage</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <FileDistributionChart fileDistribution={fileDistribution} />
+                <div className="mt-4 text-center">
+                  <button
+                    onClick={navigateToFileTypes}
+                    className="text-sm text-primary hover:underline cursor-pointer"
+                  >
+                    View detailed breakdown →
+                  </button>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </TabsContent>
+
+        <TabsContent value="heatmap" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Commit Heatmap</CardTitle>
+                  <CardDescription>
+                    Activity patterns over time with filters
+                  </CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant={heatmapMonths === 3 ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setHeatmapMonths(3)}
+                  >
+                    Last 3 months
+                  </Button>
+                  <Button
+                    variant={heatmapMonths === 6 ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setHeatmapMonths(6)}
+                  >
+                    Last 6 months
+                  </Button>
+                  <Button
+                    variant={heatmapMonths === 12 ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setHeatmapMonths(12)}
+                  >
+                    Last 12 months
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <CommitHeatmap
+                commits={commits}
+                heatmapData={heatmapData || undefined}
+                isValidHeatmap={isValidHeatmap}
+                monthsToShow={heatmapMonths}
+              />
+
+              <div className="pt-6 border-t">
+                <h4 className="font-medium mb-4">Peak Activity Times</h4>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Card className="bg-muted/50">
+                    <CardContent className="pt-6">
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Most Active Day
+                      </p>
+                      <p className="text-xl font-semibold">
+                        {peakActivity.mostActiveDay}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Avg. {peakActivity.avgCommitsPerDay} commits
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card className="bg-muted/50">
+                    <CardContent className="pt-6">
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Peak Month
+                      </p>
+                      <p className="text-xl font-semibold">
+                        {peakActivity.peakMonth}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {peakActivity.peakMonthCommits} total commits
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card className="bg-muted/50">
+                    <CardContent className="pt-6">
+                      <div className="flex items-start justify-between mb-2">
+                        <p className="text-sm text-muted-foreground">
+                          Current Streak
+                        </p>
+                        {(() => {
+                          const motivation = getStreakMotivation(
+                            peakActivity.currentStreak
+                          );
+                          const MotivationIcon = motivation.icon;
+                          return (
+                            <div
+                              className={`rounded-full p-1.5 ${motivation.bgColor}`}
+                            >
+                              <MotivationIcon
+                                className={`h-4 w-4 ${motivation.color}`}
+                              />
+                            </div>
+                          );
+                        })()}
+                      </div>
+                      <p className="text-xl font-semibold mb-1">
+                        {peakActivity.currentStreak} days
+                      </p>
+                      <p
+                        className={`text-xs font-medium ${getStreakMotivation(peakActivity.currentStreak).color}`}
+                      >
+                        {
+                          getStreakMotivation(peakActivity.currentStreak)
+                            .message
+                        }
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="analytics" className="space-y-6">
+          <Tabs
+            value={analyticsTab}
+            onValueChange={setAnalyticsTab}
+            className="space-y-6"
+          >
+            <TabsList>
+              <TabsTrigger value="churn">Code Churn</TabsTrigger>
+              <TabsTrigger value="files">File Types</TabsTrigger>
+              <TabsTrigger value="timeline">Timeline</TabsTrigger>
+              <TabsTrigger value="diff">Git Diff</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="churn">
+              <CodeChurnChart churnData={churnData} />
+            </TabsContent>
+
+            <TabsContent value="files">
+              <FileTypeList fileDistribution={fileDistribution} />
+            </TabsContent>
+
+            <TabsContent value="timeline">
+              <GraphViewTimeline
+                commits={commits}
+                currentBranch={currentBranch}
+              />
+            </TabsContent>
+
+            <TabsContent value="diff">
+              <GitDiffViewer />
+            </TabsContent>
+          </Tabs>
+        </TabsContent>
+
+        <TabsContent value="insights" className="space-y-6">
+          <AIInsights />
+        </TabsContent>
+
+        <TabsContent value="paid" className="space-y-6">
+          <PremiumFeatures />
+        </TabsContent>
+
+        <TabsContent value="pricing" className="space-y-6">
+          <PremiumFeatures showPricingOnly />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}

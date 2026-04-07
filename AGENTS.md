@@ -1,4 +1,5 @@
 <!-- markdownlint-disable -->
+
 # GitRay
 
 GitRay is a production-ready Git repository analysis and visualization platform that transforms commit history into interactive visualizations such as heatmaps, commit statistics, code churn analysis and time-series aggregations.
@@ -149,14 +150,21 @@ scripts/
 
 **Frontend:**
 
-- React 19.1.0
+- React 18.3.1
 - Vite 6.3.5
 - Tailwind CSS 4.1.7
 - axios for HTTP calls
-- ApexCharts and react-apexcharts for charts
-- react-calendar-heatmap for heatmaps
+- Recharts for data visualizations and charts
+- shadcn/ui component library (built on Radix UI primitives)
+- Radix UI components (Accordion, Dialog, Select, Dropdown, Tabs, Tooltip, etc.)
+- Lucide React for icons
 - @rive-app/react-canvas for animations
-- react-select for dropdowns
+- React Hook Form for form management
+- Sonner for toast notifications
+- next-themes for theme management
+- Embla Carousel for carousels
+- cmdk for command menu
+- class-variance-authority (CVA) for component variants
 
 **Shared Types:**
 

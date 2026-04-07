@@ -5,9 +5,6 @@
     { "path": "./tsconfig.node.json" }
   ],
   "compilerOptions": {
-    // … deine bestehenden Optionen …
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
     "composite": true
   }
 }

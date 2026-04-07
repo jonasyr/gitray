@@ -1,0 +1,234 @@
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-size: 16px;
+  --background: #eff7f6;
+  --foreground: #272829;
+  --card: #ffffff;
+  --card-foreground: #272829;
+  --popover: #ffffff;
+  --popover-foreground: #272829;
+  --primary: #5b9a8b;
+  --primary-foreground: #eff7f6;
+  --secondary: #ffa69e;
+  --secondary-foreground: #272829;
+  --muted: #d4dedd;
+  --muted-foreground: #6a7271;
+  --accent: #5b9a8b;
+  --accent-foreground: #eff7f6;
+  --destructive: #d4183d;
+  --destructive-foreground: #ffffff;
+  --border: rgba(39, 40, 41, 0.1);
+  --input: rgba(39, 40, 41, 0.1);
+  --input-background: #ffffff;
+  --switch-background: #d4dedd;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: #5b9a8b;
+  --chart-1: #5b9a8b;
+  --chart-2: #ffa69e;
+  --chart-3: #2e073f;
+  --chart-4: #7db9a5;
+  --chart-5: #ffb8b1;
+  --radius: 1rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #272829;
+  --sidebar-primary: #5b9a8b;
+  --sidebar-primary-foreground: #eff7f6;
+  --sidebar-accent: #f5faf9;
+  --sidebar-accent-foreground: #272829;
+  --sidebar-border: rgba(39, 40, 41, 0.1);
+  --sidebar-ring: #5b9a8b;
+}
+
+.dark {
+  --background: #272829;
+  --foreground: #eff7f6;
+  --card: #323435;
+  --card-foreground: #eff7f6;
+  --popover: #323435;
+  --popover-foreground: #eff7f6;
+  --primary: #5b9a8b;
+  --primary-foreground: #eff7f6;
+  --secondary: #ffa69e;
+  --secondary-foreground: #272829;
+  --muted: #3a3c3d;
+  --muted-foreground: #a8b0af;
+  --accent: #2e073f;
+  --accent-foreground: #eff7f6;
+  --destructive: #d4183d;
+  --destructive-foreground: #eff7f6;
+  --border: rgba(239, 247, 246, 0.1);
+  --input: rgba(239, 247, 246, 0.1);
+  --ring: #5b9a8b;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --chart-1: #5b9a8b;
+  --chart-2: #ffa69e;
+  --chart-3: #2e073f;
+  --chart-4: #7db9a5;
+  --chart-5: #ffb8b1;
+  --sidebar: #323435;
+  --sidebar-foreground: #eff7f6;
+  --sidebar-primary: #5b9a8b;
+  --sidebar-primary-foreground: #eff7f6;
+  --sidebar-accent: #3a3c3d;
+  --sidebar-accent-foreground: #eff7f6;
+  --sidebar-border: rgba(239, 247, 246, 0.1);
+  --sidebar-ring: #5b9a8b;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/**
+ * Base typography. This is not applied to elements which have an ancestor with a Tailwind text class.
+ */
+@layer base {
+  :where(:not(:has([class*=' text-']), :not(:has([class^='text-'])))) {
+    h1 {
+      font-size: var(--text-2xl);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h2 {
+      font-size: var(--text-xl);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h3 {
+      font-size: var(--text-lg);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h4 {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    p {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-normal);
+      line-height: 1.5;
+    }
+
+    label {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    button {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    input {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-normal);
+      line-height: 1.5;
+    }
+  }
+}
+
+html {
+  font-size: var(--font-size);
+  scroll-behavior: smooth;
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-br from-primary to-secondary bg-clip-text text-transparent;
+  }
+}
+
+/* Custom scrollbar for dark mode */
+.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: rgba(239, 247, 246, 0.05);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(91, 154, 139, 0.5);
+  border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(91, 154, 139, 0.7);
+}
+
+/* Custom scrollbar for light mode */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(39, 40, 41, 0.05);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(91, 154, 139, 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(91, 154, 139, 0.7);
+}

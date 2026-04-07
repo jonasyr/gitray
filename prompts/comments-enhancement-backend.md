@@ -2,14 +2,14 @@
 
 ## Project Context
 
-You are enhancing the backend codebase for *gitray*, an open-source project that
+You are enhancing the backend codebase for _gitray_, an open-source project that
 provides visualizations and analysis of Git repositories. This codebase uses
 TypeScript exclusively and will undergo professional code review focusing on
 comment quality and best practices adherence.
 
 ## Core Commenting Philosophy
 
-*BALANCE IS KEY*: Add meaningful, professional comments that enhance code
+_BALANCE IS KEY_: Add meaningful, professional comments that enhance code
 understanding WITHOUT creating comment clutter. Comments should illuminate the
 "why" and complex "how", not obvious "what".
 
@@ -18,7 +18,7 @@ understanding WITHOUT creating comment clutter. Comments should illuminate the
 ### 1. JSDoc for Public APIs
 
 typescript
-/**
+/\*\*
 
 - Analyzes Git repository commit patterns and generates statistical insights.
 -
@@ -34,16 +34,14 @@ typescript
 - includeFileChanges: true,
 - maxCommits: 1000
 - });
--
-
- */
+- \*/
 
 ### 2. Strategic Inline Comments
 
-- *Complex Business Logic*: Explain algorithms, calculations, and non-obvious decisions
-- *Performance Optimizations*: Why specific approaches were chosen
-- *Edge Cases*: Handling of unusual but important scenarios
-- *External Dependencies*: Integration points and API interactions
+- _Complex Business Logic_: Explain algorithms, calculations, and non-obvious decisions
+- _Performance Optimizations_: Why specific approaches were chosen
+- _Edge Cases_: Handling of unusual but important scenarios
+- _External Dependencies_: Integration points and API interactions
 
 ### 3. What NOT to Comment
 
@@ -58,11 +56,11 @@ typescript
 
 typescript
 // Example of GOOD commenting for database operations:
-/**
+/\*\*
 
 - Optimizes commit history queries by batching requests and using indexed fields.
 - Prevents memory overflow for repositories with 100k+ commits.
- */
+  \*/
 
 ### Git Integration Logic
 
@@ -108,26 +106,26 @@ typescript
 ### Type Definitions
 
 typescript
-/**
+/\*\*
 
 - Represents a Git commit with enhanced metadata for visualization.
 - Optimized for frontend consumption and chart generation.
- */
-interface CommitVisualizationData {
+  _/
+  interface CommitVisualizationData {
   // Only comment complex or domain-specific properties
-  /**Calculated impact score based on files changed and line additions/deletions*/
+  /\*\*Calculated impact score based on files changed and line additions/deletions_/
   impactScore: number;
-}
+  }
 
 ### Generic Functions
 
 typescript
-/**
+/\*\*
 
 - Generic repository data transformer that converts raw Git data
 - into visualization-ready formats while preserving type safety.
- */
-function transformRepositoryData<T extends RepositoryData>(data: T): VisualizationData<T>
+  \*/
+  function transformRepositoryData<T extends RepositoryData>(data: T): VisualizationData<T>
 
 ## Code Review Standards
 
@@ -141,12 +139,12 @@ Remember: This code will be professionally reviewed. Comments should:
 
 ## Implementation Instructions
 
-1. *Scan each file* for functions/classes that handle complex logic
-2. *Prioritize public APIs* and exported functions for comprehensive JSDoc
-3. *Focus on git-specific operations* that may not be familiar to all developers
-4. *Add strategic inline comments* for business logic and optimizations
-5. *Review existing comments* and enhance or remove as needed
-6. *Maintain consistency* in comment style across the entire backend
+1. _Scan each file_ for functions/classes that handle complex logic
+2. _Prioritize public APIs_ and exported functions for comprehensive JSDoc
+3. _Focus on git-specific operations_ that may not be familiar to all developers
+4. _Add strategic inline comments_ for business logic and optimizations
+5. _Review existing comments_ and enhance or remove as needed
+6. _Maintain consistency_ in comment style across the entire backend
 
 ## Final Quality Check
 
@@ -160,5 +158,5 @@ Before finalizing, ensure:
 
 ---
 
-*Remember*: Professional code comments are like good documentation—they make
+_Remember_: Professional code comments are like good documentation—they make
 the complex simple, not the simple complex.

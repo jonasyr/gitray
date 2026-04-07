@@ -1234,6 +1234,11 @@ class GitService {
     // Sort by changes (descending) - highest churn files first
     filtered.sort((a, b) => b.changes - a.changes);
 
+    // Apply limit if specified
+    if (options?.limit !== undefined && options.limit > 0) {
+      filtered = filtered.slice(0, options.limit);
+    }
+
     return filtered;
   }
 
