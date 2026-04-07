@@ -131,7 +131,7 @@ describe('RepositorySummaryService', () => {
         .mockResolvedValueOnce('100\n') // rev-list --count
         .mockResolvedValueOnce('2011-03-22T00:00:00.000Z\n') // log --reverse (first commit)
         .mockResolvedValueOnce(
-          '2025-11-15T10:30:00.000Z|abc123def|Test Author\n'
+          `${new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()}|abc123def|Test Author\n`
         ) // log -1 (last commit)
         .mockResolvedValueOnce('     10  Author One\n      5  Author Two\n'); // shortlog
 
