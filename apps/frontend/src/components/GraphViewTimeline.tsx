@@ -102,7 +102,7 @@ function processCommits(
   limit: number = 5
 ) {
   // Sort by date descending (newest first) and take top N
-  return commits
+  return [...commits]
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, limit)
     .map((commit) => {

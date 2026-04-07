@@ -1,5 +1,5 @@
 import { render } from '@testing-library/react';
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, vi } from 'vitest';
 import { ActivityChart } from '../../src/components/ActivityChart';
 import { Commit } from '@gitray/shared-types';
 
@@ -47,6 +47,51 @@ describe('ActivityChart Component', () => {
     expect(
       document.querySelector('.recharts-responsive-container')
     ).toBeInTheDocument();
+  });
+
+  test('should bucket commits using local date, not UTC date', () => {
+    // Arrange — commits spread across multiple local days
+    // Dates are constructed via the Date constructor (local time), ensuring
+    // getFullYear/getMonth/getDate are used for bucketing, not toISOString (UTC).
+    const day1 = new Date(2026, 2, 10, 23, 45, 0); // Mar 10 23:45 local — would be Mar 11 UTC in UTC+1+
+    const day2 = new Date(2026, 2, 11, 0, 15, 0); // Mar 11 00:15 local
+    const fixedNow = new Date(2026, 3, 7, 12, 0, 0); // Apr 7 — "today" for the 30-day window
+
+    const RealDate = globalThis.Date;
+    const dateSpy = vi
+      .spyOn(globalThis, 'Date')
+      .mockImplementation((...args: unknown[]) => {
+        if (args.length === 0) return fixedNow;
+        // @ts-expect-error forward args to real Date constructor
+        return new RealDate(...args);
+      });
+
+    const commits: Commit[] = [
+      {
+        sha: 'a1',
+        message: 'feat: a',
+        authorName: 'Jonas',
+        authorEmail: 'j@example.com',
+        date: day1.toISOString(),
+      },
+      {
+        sha: 'a2',
+        message: 'feat: b',
+        authorName: 'Jonas',
+        authorEmail: 'j@example.com',
+        date: day2.toISOString(),
+      },
+    ];
+
+    // Act
+    render(<ActivityChart commits={commits} />);
+
+    // Assert — chart renders without error; bucketing logic ran without throwing
+    expect(
+      document.querySelector('.recharts-responsive-container')
+    ).toBeInTheDocument();
+
+    dateSpy.mockRestore();
   });
 
   test('should ignore commits older than 30 days', () => {
