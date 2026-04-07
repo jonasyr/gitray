@@ -6,7 +6,12 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  type TooltipProps,
 } from 'recharts';
+import type {
+  ValueType,
+  NameType,
+} from 'recharts/types/component/DefaultTooltipContent';
 import { Commit } from '@gitray/shared-types';
 
 interface ActivityChartProps {
@@ -60,10 +65,7 @@ function generateActivityData(commits: Commit[]) {
 function ActivityChartTooltip({
   active,
   payload,
-}: {
-  active?: boolean;
-  payload?: { value: unknown; payload: { date: string } }[];
-}) {
+}: TooltipProps<ValueType, NameType>) {
   if (active && payload?.length) {
     return (
       <div className="bg-popover border border-border rounded-lg p-3 shadow-lg">
