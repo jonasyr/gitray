@@ -81,6 +81,11 @@
     "typescript-eslint": "^8.32.1",
     "vitest": "^3.2.3"
   },
+  "pnpm": {
+    "overrides": {
+      "lodash": "^4.17.21"
+    }
+  },
   "dependencies": {
     "@rive-app/react-canvas": "^4.21.3",
     "@types/react": "^18.3.24",

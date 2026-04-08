@@ -6,7 +6,12 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  type TooltipProps,
 } from 'recharts';
+import type {
+  ValueType,
+  NameType,
+} from 'recharts/types/component/DefaultTooltipContent';
 import { Commit } from '@gitray/shared-types';
 
 interface ActivityChartProps {
@@ -23,11 +28,18 @@ function generateActivityData(commits: Commit[]) {
   // Create a map of date -> commit count
   const commitsByDate = new Map<string, number>();
 
+  const toLocalDateKey = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
   // Filter commits from last 30 days and count by date
   commits.forEach((commit) => {
     const commitDate = new Date(commit.date);
     if (commitDate >= thirtyDaysAgo && commitDate <= today) {
-      const dateKey = commitDate.toISOString().split('T')[0];
+      const dateKey = toLocalDateKey(commitDate);
       commitsByDate.set(dateKey, (commitsByDate.get(dateKey) || 0) + 1);
     }
   });
@@ -36,7 +48,7 @@ function generateActivityData(commits: Commit[]) {
   for (let i = 29; i >= 0; i--) {
     const date = new Date(today);
     date.setDate(date.getDate() - i);
-    const dateKey = date.toISOString().split('T')[0];
+    const dateKey = toLocalDateKey(date);
 
     data.push({
       date: date.toLocaleDateString('en-US', {
@@ -50,7 +62,24 @@ function generateActivityData(commits: Commit[]) {
   return data;
 }
 
-export function ActivityChart({ commits = [] }: ActivityChartProps) {
+export function ActivityChartTooltip({
+  active,
+  payload,
+}: TooltipProps<ValueType, NameType>) {
+  if (active && payload?.length) {
+    return (
+      <div className="bg-popover border border-border rounded-lg p-3 shadow-lg">
+        <p className="text-sm">{payload[0].payload.date}</p>
+        <p className="text-sm font-semibold text-primary">
+          {payload[0].value} commits
+        </p>
+      </div>
+    );
+  }
+  return null;
+}
+
+export function ActivityChart({ commits = [] }: Readonly<ActivityChartProps>) {
   const data = generateActivityData(commits);
   return (
     <div className="h-[280px] w-full -mb-6">
@@ -83,21 +112,7 @@ export function ActivityChart({ commits = [] }: ActivityChartProps) {
             className="text-muted-foreground"
             width={30}
           />
-          <Tooltip
-            content={({ active, payload }) => {
-              if (active && payload && payload.length) {
-                return (
-                  <div className="bg-popover border border-border rounded-lg p-3 shadow-lg">
-                    <p className="text-sm">{payload[0].payload.date}</p>
-                    <p className="text-sm font-semibold text-primary">
-                      {payload[0].value} commits
-                    </p>
-                  </div>
-                );
-              }
-              return null;
-            }}
-          />
+          <Tooltip content={ActivityChartTooltip} />
           <Area
             type="monotone"
             dataKey="commits"

@@ -71,6 +71,10 @@ const timelineEvents = [
   },
 ];
 
+function pluralize(n: number, unit: string): string {
+  return `${n} ${unit}${n === 1 ? '' : 's'} ago`;
+}
+
 // Helper function to format relative time
 function formatRelativeTime(date: Date): string {
   const now = new Date();
@@ -83,15 +87,11 @@ function formatRelativeTime(date: Date): string {
   const diffMonths = Math.floor(diffDays / 30);
 
   if (diffSecs < 60) return 'just now';
-  if (diffMins < 60)
-    return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
-  if (diffHours < 24)
-    return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
-  if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
-  if (diffWeeks < 4)
-    return `${diffWeeks} week${diffWeeks !== 1 ? 's' : ''} ago`;
-  if (diffMonths < 12)
-    return `${diffMonths} month${diffMonths !== 1 ? 's' : ''} ago`;
+  if (diffMins < 60) return pluralize(diffMins, 'minute');
+  if (diffHours < 24) return pluralize(diffHours, 'hour');
+  if (diffDays < 7) return pluralize(diffDays, 'day');
+  if (diffWeeks < 4) return pluralize(diffWeeks, 'week');
+  if (diffMonths < 12) return pluralize(diffMonths, 'month');
   return date.toLocaleDateString();
 }
 
@@ -102,7 +102,7 @@ function processCommits(
   limit: number = 5
 ) {
   // Sort by date descending (newest first) and take top N
-  return commits
+  return [...commits]
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, limit)
     .map((commit) => {
@@ -127,7 +127,7 @@ function processCommits(
 export function GraphViewTimeline({
   commits = [],
   currentBranch = 'unknown',
-}: GraphViewTimelineProps) {
+}: Readonly<GraphViewTimelineProps>) {
   const [playing, setPlaying] = useState(false);
   const [timelinePosition, setTimelinePosition] = useState([50]);
   const [showMore, setShowMore] = useState(false);
@@ -157,12 +157,18 @@ export function GraphViewTimeline({
     }
   };
 
+  const commitLimit = showMore ? 20 : 5;
+  const eventsToShow =
+    commits.length > 0
+      ? processCommits(commits, currentBranch, commitLimit)
+      : timelineEvents;
+
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-4">
-        {branches.map((branch, index) => (
+        {branches.map((branch) => (
           <Card
-            key={index}
+            key={branch.name}
             className={branch.active ? 'border-primary/50' : ''}
           >
             <CardHeader className="pb-3">
@@ -348,11 +354,8 @@ export function GraphViewTimeline({
               )}
             </div>
             <div ref={scrollContainerRef} className="space-y-3">
-              {(commits.length > 0
-                ? processCommits(commits, currentBranch, showMore ? 20 : 5)
-                : timelineEvents
-              ).map((event, index) => (
-                <HoverCard key={index}>
+              {eventsToShow.map((event) => (
+                <HoverCard key={event.hash}>
                   <HoverCardTrigger asChild>
                     <div className="flex items-start gap-3 p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors min-w-0">
                       <div

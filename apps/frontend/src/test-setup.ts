@@ -33,6 +33,13 @@ globalThis.React = React;
 
 console.log('Vitest setup file loaded!');
 
+// Mock ResizeObserver for Recharts / responsive containers
+global.ResizeObserver = vi.fn().mockImplementation(() => ({
+  observe: vi.fn(),
+  unobserve: vi.fn(),
+  disconnect: vi.fn(),
+}));
+
 // Mock PointerEvent for Radix UI Tabs
 if (typeof window.PointerEvent === 'undefined') {
   window.PointerEvent = window.MouseEvent as any;
