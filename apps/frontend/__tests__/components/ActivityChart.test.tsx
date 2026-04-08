@@ -1,6 +1,9 @@
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, test, expect, vi } from 'vitest';
-import { ActivityChart } from '../../src/components/ActivityChart';
+import {
+  ActivityChart,
+  ActivityChartTooltip,
+} from '../../src/components/ActivityChart';
 import { Commit } from '@gitray/shared-types';
 
 describe('ActivityChart Component', () => {
@@ -116,5 +119,29 @@ describe('ActivityChart Component', () => {
     expect(
       document.querySelector('.recharts-responsive-container')
     ).toBeInTheDocument();
+  });
+
+  test('ActivityChartTooltip should render date and commit count when active', () => {
+    // Arrange
+    const payload = [{ value: 3, payload: { date: 'Apr 7' } }] as Parameters<
+      typeof ActivityChartTooltip
+    >[0]['payload'];
+
+    // Act
+    render(<ActivityChartTooltip active={true} payload={payload} />);
+
+    // Assert
+    expect(screen.getByText('Apr 7')).toBeInTheDocument();
+    expect(screen.getByText('3 commits')).toBeInTheDocument();
+  });
+
+  test('ActivityChartTooltip should render nothing when inactive', () => {
+    // Arrange / Act
+    const { container } = render(
+      <ActivityChartTooltip active={false} payload={[]} />
+    );
+
+    // Assert
+    expect(container.firstChild).toBeNull();
   });
 });

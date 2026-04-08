@@ -62,7 +62,7 @@ function generateActivityData(commits: Commit[]) {
   return data;
 }
 
-function ActivityChartTooltip({
+export function ActivityChartTooltip({
   active,
   payload,
 }: TooltipProps<ValueType, NameType>) {
