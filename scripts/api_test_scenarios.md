@@ -2,6 +2,12 @@
 
 # Comprehensive API Testing Scenarios
 
+> **Status note — verified 2026-09-04.** These scenarios cover `/api/repositories/*`, which is the
+> current live route family. Note that of the routes exercised here, only `full-data`, `summary`
+> and `churn` are called by the frontend; `heatmap`, `commits` and `contributors` are mounted but
+> have no production consumer. See `docs/BACKEND_ARCHITECTURE_AUDIT.md` §4.2.
+
+
 ## Route 1: `/api/repositories/heatmap` (REFACTORED)
 
 ### Valid Scenarios

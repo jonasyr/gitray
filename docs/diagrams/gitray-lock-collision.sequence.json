@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "C-1 — How the Dashboard Triggers the Lock Coalescing Defect",
+    "output": "gitray-lock-collision.html",
+    "viewBox": [1040, 520],
+    "column_fit": "spread",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "trigger",
+        "label": "The concurrent trigger",
+        "focus": ["dash", "summary", "fileanalysis"],
+        "note": "DashboardPage fires three un-awaited requests for one repository URL."
+      },
+      {
+        "id": "collision",
+        "label": "The collision",
+        "focus": ["summary", "fileanalysis", "lock"],
+        "note": "Both paths call withKeyLock with the same repo-access key but different functions."
+      },
+      {
+        "id": "consequence",
+        "label": "The wrong payload",
+        "focus": ["lock", "fileanalysis", "dash"],
+        "note": "The second caller receives the first caller's promise, and therefore its type."
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "dash",
+      "type": "frontend",
+      "label": "DashboardPage",
+      "sublabel": "3 concurrent fetches"
+    },
+    {
+      "id": "summary",
+      "type": "backend",
+      "label": "summary path",
+      "sublabel": "getOrGenerateSummary"
+    },
+    {
+      "id": "fileanalysis",
+      "type": "backend",
+      "label": "file-analysis path",
+      "sublabel": "withSharedRepository"
+    },
+    {
+      "id": "lock",
+      "type": "security",
+      "label": "lockManager",
+      "sublabel": "inflight Map, keyed by name"
+    },
+    {
+      "id": "git",
+      "type": "external",
+      "label": "git",
+      "sublabel": "clone subprocess"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 230,
+      "label": "Concurrent dispatch"
+    },
+    {
+      "from": 248,
+      "to": 358,
+      "label": "Same lock key, different fn"
+    },
+    {
+      "from": 374,
+      "to": 450,
+      "label": "Type confusion"
+    }
+  ],
+  "messages": [
+    {
+      "id": "req-summary",
+      "from": "dash",
+      "to": "summary",
+      "y": 172,
+      "label": "GET /repositories/summary",
+      "variant": "emphasis"
+    },
+    {
+      "id": "req-fa",
+      "from": "dash",
+      "to": "fileanalysis",
+      "y": 208,
+      "label": "GET /commits/file-analysis",
+      "variant": "emphasis"
+    },
+    {
+      "id": "lock-1",
+      "from": "summary",
+      "to": "lock",
+      "y": 262,
+      "label": "withKeyLock('repo-access:U', summaryFn)",
+      "variant": "security"
+    },
+    {
+      "id": "clone",
+      "from": "lock",
+      "to": "git",
+      "y": 298,
+      "label": "runs summaryFn -> sparse clone",
+      "variant": "default"
+    },
+    {
+      "id": "lock-2",
+      "from": "fileanalysis",
+      "to": "lock",
+      "y": 338,
+      "label": "withKeyLock('repo-access:U', handleFn)",
+      "variant": "security"
+    },
+    {
+      "id": "ret-wrong",
+      "from": "lock",
+      "to": "fileanalysis",
+      "y": 392,
+      "label": "returns summaryFn's promise",
+      "variant": "security"
+    },
+    {
+      "id": "fail",
+      "from": "fileanalysis",
+      "to": "dash",
+      "y": 430,
+      "label": "500 or silently wrong data",
+      "variant": "security"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "dash",
+      "from": 165,
+      "to": 437,
+      "type": "frontend"
+    },
+    {
+      "participant": "summary",
+      "from": 172,
+      "to": 400,
+      "type": "backend"
+    },
+    {
+      "participant": "fileanalysis",
+      "from": 208,
+      "to": 435,
+      "type": "backend"
+    },
+    {
+      "participant": "lock",
+      "from": 257,
+      "to": 398,
+      "type": "security"
+    },
+    {
+      "participant": "git",
+      "from": 293,
+      "to": 380,
+      "type": "external"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "The mechanism",
+      "items": [
+        "In-flight promise is stored under the lock NAME only",
+        "Second caller gets `return existing`; its fn never runs",
+        "REPRODUCED: churnData.files and summary.repository are undefined"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Why it fires normally",
+      "items": [
+        "Dashboard fires 3 requests without awaiting",
+        "Summary and coordinator share repo-access:U",
+        "Their return types differ: type confusion"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Reproduced on the running system",
+      "items": [
+        "3 of 3 cold repos: /summary and /churn both 500",
+        "Sequential: all four endpoints return 200",
+        "No unit test runs two operations on one repo URL"
+      ]
+    }
+  ]
+}

@@ -1,3 +1,6 @@
+> **Verified against the code 2026-09-04.** Corrections applied in place. Authoritative
+> architecture reference: `docs/BACKEND_ARCHITECTURE_AUDIT.md`; live route inventory in its §4.2.
+
 # GitRay - Frontend Architecture (shadcn/ui Migration)
 
 ## Overview
@@ -323,7 +326,19 @@ All components built on Radix UI primitives ensure:
 ### Tailwind CSS 4.1
 
 - **Utility-first CSS**: All styling via Tailwind utilities
-- **Custom theme**: Defined in `tailwind.config.js`
+- **Custom theme**: there is **no `tailwind.config.js`** — Tailwind 4 is CSS-first.
+
+> **Important, verified 2026-09-04.** The design tokens live in `src/styles/globals.css`
+> (`:root` custom properties, `@custom-variant dark`), but **that file is imported by nothing**.
+> `main.tsx` imports `src/index.css`, which is a **4,192-line pre-compiled Tailwind v4.1.3 bundle
+> committed to git** and containing no `@tailwind`/`@import`/`@theme` directives.
+>
+> Consequence: **editing `globals.css` has no effect on the running app.** Its tokens only reach
+> the UI because they are already baked into `index.css`. The single other mention of
+> `src/styles/globals.css` in the codebase is a *string literal in mock diff data* inside
+> `GitDiffViewer.tsx:90`, not an import.
+>
+> Changing the theme currently means regenerating or hand-editing `index.css`.
 - **CSS variables**: Theme colors defined as CSS variables for easy theming
 - **Dark mode**: Class-based dark mode (`dark:` prefix)
 - **Responsive**: Mobile-first breakpoints (`sm:`, `md:`, `lg:`, `xl:`, `2xl:`)
@@ -491,7 +506,9 @@ pnpm dev:frontend  # Start Vite dev server (port 5173)
 ### Build
 
 ```bash
-pnpm build:frontend  # Production build
+# There is NO root `build:frontend` script. Use one of:
+pnpm --filter frontend build     # production build of the frontend only
+pnpm build                       # shared-types -> backend -> frontend
 ```
 
 ### Build Output

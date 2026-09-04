@@ -1,3 +1,6 @@
+> **Verified against the code 2026-09-04.** Corrections applied in place. Authoritative
+> architecture reference: `docs/BACKEND_ARCHITECTURE_AUDIT.md`; live route inventory in its §4.2.
+
 # GitRay - Suggested Commands Reference
 
 ## Quick Reference
@@ -144,14 +147,14 @@ pnpm format
 ### Type Checking
 
 ```bash
-# Type check all packages
-pnpm type-check
+# There is NO root `type-check` script. Type check everything via the build:
+pnpm build
 
-# Type check backend only
+# Type check backend only (verified working)
 cd apps/backend && pnpm tsc --noEmit
 
-# Type check frontend only
-cd apps/frontend && pnpm tsc --noEmit
+# Type check frontend only (frontend also defines a `type-check` script)
+cd apps/frontend && pnpm type-check
 ```
 
 ## Package Management
@@ -264,9 +267,11 @@ pnpm build
 cd apps/backend
 pnpm test
 
-# Run backend integration tests
-cd apps/backend
-pnpm test:integration
+# There is NO `test:integration` script. Integration tests live in
+# apps/backend/__tests__/integration/ and run as part of the normal suite:
+cd apps/backend && pnpm test
+# ...or target them directly:
+npx vitest run --project backend apps/backend/__tests__/integration
 
 # View backend logs
 tail -f apps/backend/logs/combined.log
@@ -287,22 +292,30 @@ curl http://localhost:3001/metrics
 ### API Testing
 
 ```bash
-# Test repository endpoint
-curl -X POST http://localhost:3001/api/repositories \
+# The query parameter is ALWAYS repoUrl (never url).
+# These four are the endpoints the frontend actually calls.
+
+# commits + heatmap in one call (what the dashboard loads first)
+curl "http://localhost:3001/api/repositories/full-data?repoUrl=https://github.com/user/repo.git"
+
+# repository summary
+curl "http://localhost:3001/api/repositories/summary?repoUrl=https://github.com/user/repo.git"
+
+# code churn analysis
+curl "http://localhost:3001/api/repositories/churn?repoUrl=https://github.com/user/repo.git"
+
+# file type distribution
+curl "http://localhost:3001/api/commits/file-analysis?repoUrl=https://github.com/user/repo.git"
+
+# Admin endpoints need the X-Admin-Token header
+curl -H "X-Admin-Token: $ADMIN_TOKEN" http://localhost:3001/api/commits/cache/stats
+
+# Mounted but unused by the UI. POST + NDJSON, not GET + SSE.
+curl -X POST http://localhost:3001/api/commits/stream \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://github.com/user/repo"}'
+  -d '{"repoUrl":"https://github.com/user/repo.git"}'
 
-# Test heatmap endpoint
-curl "http://localhost:3001/api/commits/heatmap?url=https://github.com/user/repo"
-
-# Test streaming endpoint
-curl "http://localhost:3001/api/commits/stream?url=https://github.com/user/repo"
-
-# Test churn analysis
-curl "http://localhost:3001/api/repositories/churn?url=https://github.com/user/repo"
-
-# Test repository summary
-curl "http://localhost:3001/api/repositories/summary?url=https://github.com/user/repo"
+# There is no POST /api/repositories and no /api/cache/stats.
 ```
 
 ### Backend Scripts

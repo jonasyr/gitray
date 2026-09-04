@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "GitRay — Authentication and Authorization",
+    "output": "gitray-auth.html",
+    "viewBox": [1040, 520],
+    "column_fit": "spread",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "public",
+        "label": "Analytics are public",
+        "focus": ["client", "express", "handler"],
+        "note": "No auth middleware guards any analytics endpoint."
+      },
+      {
+        "id": "admin",
+        "label": "Admin token path",
+        "focus": ["express", "adminauth", "handler"],
+        "note": "A single static shared token guards four operational endpoints."
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "Any caller",
+      "sublabel": "no account exists"
+    },
+    {
+      "id": "express",
+      "type": "backend",
+      "label": "Express chain",
+      "sublabel": "helmet, cors, rate limit"
+    },
+    {
+      "id": "adminauth",
+      "type": "security",
+      "label": "requireAdminToken",
+      "sublabel": "X-Admin-Token"
+    },
+    {
+      "id": "handler",
+      "type": "backend",
+      "label": "Route handler",
+      "sublabel": "analytics or ops"
+    }
+  ],
+  "segments": [
+    { "from": 150, "to": 250, "label": "Analytics: unauthenticated" },
+    { "from": 268, "to": 400, "label": "Ops: shared static token" }
+  ],
+  "messages": [
+    {
+      "id": "req1",
+      "from": "client",
+      "to": "express",
+      "y": 172,
+      "label": "GET /api/repositories/summary",
+      "variant": "emphasis"
+    },
+    {
+      "id": "pass",
+      "from": "express",
+      "to": "handler",
+      "y": 208,
+      "label": "no auth middleware on this path",
+      "variant": "dashed"
+    },
+    {
+      "id": "ret1",
+      "from": "handler",
+      "to": "client",
+      "y": 240,
+      "label": "200 + repository analytics",
+      "variant": "return"
+    },
+    {
+      "id": "req2",
+      "from": "client",
+      "to": "express",
+      "y": 290,
+      "label": "GET /metrics",
+      "variant": "emphasis"
+    },
+    {
+      "id": "gate",
+      "from": "express",
+      "to": "adminauth",
+      "y": 322,
+      "label": "requireAdminToken",
+      "variant": "security"
+    },
+    {
+      "id": "ok",
+      "from": "adminauth",
+      "to": "handler",
+      "y": 358,
+      "label": "timingSafeEqual match",
+      "variant": "security"
+    },
+    {
+      "id": "deny",
+      "from": "adminauth",
+      "to": "client",
+      "y": 392,
+      "label": "403 on missing or wrong token",
+      "variant": "security"
+    }
+  ],
+  "activations": [
+    { "participant": "client", "from": 165, "to": 398, "type": "external" },
+    { "participant": "express", "from": 172, "to": 330, "type": "backend" },
+    { "participant": "adminauth", "from": 317, "to": 396, "type": "security" },
+    { "participant": "handler", "from": 203, "to": 366, "type": "backend" }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "No end-user auth exists",
+      "items": [
+        "All six /api/repositories/* routes are fully public",
+        "The frontend isSignedIn flag is cosmetic, set true after analysis",
+        "Two resume endpoints are unauthenticated and take a Redis key fragment"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "What is done well",
+      "items": [
+        "Constant-time comparison with a length pre-check",
+        "Fails closed when the token is unset, returning 500 not 200",
+        "Audit logging on success, missing token and mismatch"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Gaps",
+      "items": [
+        "config.adminAuth.requireForMetrics is defined and never read",
+        "adminAuth reads process.env directly, disagreeing with config",
+        "One shared token, no rotation, no per-caller identity"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "GitRay — External Systems and Boundaries",
+    "output": "gitray-external.html",
+    "quality_profile": "showcase",
+    "viewBox": [1120, 420],
+    "views": [
+      {
+        "id": "outbound",
+        "label": "Outbound reach",
+        "focus": ["be", "git", "redis0", "redis1"],
+        "note": "Git remotes and Redis are the only network dependencies."
+      },
+      {
+        "id": "inbound",
+        "label": "Inbound",
+        "focus": ["fe", "ops", "be"],
+        "note": "The browser and a Prometheus scrape are the only inbound callers."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "fe",
+      "type": "frontend",
+      "label": "Browser",
+      "sublabel": "Vite dev proxy",
+      "pos": [60, 40],
+      "size": [200, 66]
+    },
+    {
+      "id": "ops",
+      "type": "security",
+      "label": "Prometheus",
+      "sublabel": "scrapes /metrics",
+      "tag": "admin token",
+      "pos": [820, 40],
+      "size": [200, 66]
+    },
+    {
+      "id": "be",
+      "type": "backend",
+      "label": "Backend",
+      "sublabel": "Express :3001",
+      "pos": [420, 190],
+      "size": [220, 66]
+    },
+    {
+      "id": "git",
+      "type": "external",
+      "label": "Git remotes",
+      "sublabel": "HTTPS, allow-listed",
+      "tag": "SSRF guarded",
+      "pos": [60, 320],
+      "size": [220, 66]
+    },
+    {
+      "id": "redis0",
+      "type": "database",
+      "label": "Redis db0",
+      "sublabel": "facade keys",
+      "pos": [420, 320],
+      "size": [200, 66]
+    },
+    {
+      "id": "redis1",
+      "type": "database",
+      "label": "Redis db1",
+      "sublabel": "hybrid cache",
+      "pos": [680, 320],
+      "size": [200, 66]
+    },
+    {
+      "id": "fsys",
+      "type": "database",
+      "label": "Local filesystem",
+      "sublabel": "clones, cache, locks, logs",
+      "pos": [920, 320],
+      "size": [200, 66]
+    }
+  ],
+  "connections": [
+    {
+      "id": "fe-be",
+      "from": "fe",
+      "to": "be",
+      "label": "4 endpoints",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "ops-be",
+      "from": "ops",
+      "to": "be",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "be-git",
+      "from": "be",
+      "to": "git",
+      "label": "clone via simple-git",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "be-redis0",
+      "from": "be",
+      "to": "redis0",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "be-redis1",
+      "from": "be",
+      "to": "redis1",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "be-fs",
+      "from": "be",
+      "to": "fsys",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "slate",
+      "title": "Verified: nothing else",
+      "items": [
+        "No GitHub or GitLab API client anywhere in the backend",
+        "No axios, fetch, octokit or outbound HTTP other than git itself",
+        "No auth provider, object storage, email or telemetry SaaS"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "The boundary is well guarded",
+      "items": [
+        "isSafeGitUrl enforces protocol, host allow-list and private-IP rejection",
+        "DNS-rebinding resistant, with a dedicated verification script",
+        "Applied to every route through the shared validation chains"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Boundary caveats",
+      "items": [
+        "maxConcurrentProcesses is the only cap on concurrent git subprocesses",
+        "Two Redis databases with independent lifecycles",
+        "Filesystem is shared by clones, cache spill, locks and logs"
+      ]
+    }
+  ]
+}

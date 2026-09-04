@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "GitRay — Background Timers and Shutdown",
+    "output": "gitray-background-jobs.html",
+    "quality_profile": "showcase",
+    "viewBox": [1250, 460],
+    "views": [
+      {
+        "id": "implicit",
+        "label": "Started implicitly",
+        "focus": ["imp", "ctor", "cleanupQ", "hlcVal", "lockReap", "memMon"],
+        "note": "Six of eight timers start on import or in a constructor, not from startApplication."
+      },
+      {
+        "id": "unstoppable",
+        "label": "Cannot be stopped",
+        "focus": ["coordMet", "hlcVal"],
+        "note": "These intervals keep no handle, so nothing can ever clear them."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "imp",
+      "type": "backend",
+      "label": "Module import",
+      "sublabel": "top-level side effects",
+      "pos": [60, 40],
+      "size": [220, 66]
+    },
+    {
+      "id": "ctor",
+      "type": "backend",
+      "label": "Singleton constructors",
+      "sublabel": "run on first import",
+      "pos": [400, 40],
+      "size": [220, 66]
+    },
+    {
+      "id": "app",
+      "type": "backend",
+      "label": "startApplication()",
+      "sublabel": "the explicit entry point",
+      "pos": [1000, 40],
+      "size": [200, 66]
+    },
+    {
+      "id": "cleanupQ",
+      "type": "messagebus",
+      "label": "temp-dir cleanup",
+      "sublabel": "every 60s",
+      "tag": "stoppable, never stopped",
+      "pos": [40, 190],
+      "size": [200, 66]
+    },
+    {
+      "id": "lockReap",
+      "type": "messagebus",
+      "label": "stale lock reaper",
+      "sublabel": "every 5 min",
+      "tag": "skipped in tests",
+      "pos": [280, 190],
+      "size": [200, 66]
+    },
+    {
+      "id": "memMon",
+      "type": "messagebus",
+      "label": "memory monitor",
+      "sublabel": "every 1s",
+      "pos": [520, 190],
+      "size": [200, 66]
+    },
+    {
+      "id": "coordClean",
+      "type": "messagebus",
+      "label": "handle cleanup",
+      "sublabel": "every 5 min",
+      "pos": [760, 190],
+      "size": [200, 66]
+    },
+    {
+      "id": "hlcVal",
+      "type": "messagebus",
+      "label": "disk index check",
+      "sublabel": "every 30 min",
+      "tag": "production only",
+      "pos": [40, 340],
+      "size": [200, 66]
+    },
+    {
+      "id": "coordMet",
+      "type": "messagebus",
+      "label": "coordination metrics",
+      "sublabel": "every 30s",
+      "tag": "no handle kept",
+      "pos": [280, 340],
+      "size": [200, 66]
+    },
+    {
+      "id": "appMet",
+      "type": "messagebus",
+      "label": "metrics scheduler",
+      "sublabel": "every 30s",
+      "tag": "the only one cleared",
+      "pos": [1000, 340],
+      "size": [200, 66]
+    }
+  ],
+  "connections": [
+    {
+      "id": "imp-cleanup",
+      "from": "imp",
+      "to": "cleanupQ",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "imp-hlcval",
+      "from": "imp",
+      "to": "hlcVal",
+      "fromSide": "left",
+      "toSide": "left",
+      "via": [
+        [20, 73],
+        [20, 373]
+      ]
+    },
+    {
+      "id": "ctor-lock",
+      "from": "ctor",
+      "to": "lockReap",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "ctor-mem",
+      "from": "ctor",
+      "to": "memMon",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "ctor-coordclean",
+      "from": "ctor",
+      "to": "coordClean",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [510, 150],
+        [860, 150]
+      ]
+    },
+    {
+      "id": "ctor-coordmet",
+      "from": "ctor",
+      "to": "coordMet",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [510, 298],
+        [380, 298]
+      ]
+    },
+    {
+      "id": "app-appmet",
+      "from": "app",
+      "to": "appMet",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "Eight recurring timers",
+      "items": [
+        "Six start on import or in a constructor, not from startApplication",
+        "Importing repositoryCache alone starts disk, Redis and timer work",
+        "The memory monitor ticks every second by default"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Shutdown does not finish",
+      "items": [
+        "setupGracefulShutdown types its callback as () => void",
+        "index.ts passes an async callback, so the promise is dropped",
+        "process.exit(0) then runs: coordinator and cache shutdown are abandoned"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Unstoppable intervals",
+      "items": [
+        "coordination metrics and disk index check keep no timer handle",
+        "temp-dir cleanup is stoppable but stopCleanupScheduler is never called",
+        "Only the metrics scheduler is actually cleared on shutdown"
+      ]
+    }
+  ]
+}

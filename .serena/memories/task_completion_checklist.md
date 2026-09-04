@@ -1,5 +1,23 @@
 # GitRay - Task Completion Checklist
 
+## ⚠ Backend concurrency check (add this to any backend change)
+
+The unit suite does **not** cover concurrency, and it is non-deterministic (C-8). Before calling a
+backend change done, start the server and run the four live endpoints concurrently against a repo
+that is not cached:
+
+```bash
+R="https://github.com/sindresorhus/p-limit.git"; B=http://localhost:3001
+for ep in "repositories/full-data?repoUrl=$R" "repositories/summary?repoUrl=$R" \
+          "repositories/churn?repoUrl=$R" "commits/file-analysis?repoUrl=$R"; do
+  curl -s -o /dev/null -w "$ep -> %{http_code}\n" "$B/api/$ep" &
+done; wait
+```
+
+Today this returns two 500s (defect C-1). It must return four 200s once Phase 1 lands, and must
+keep doing so afterwards.
+
+
 ## Before Committing Code
 
 ### 1. Code Quality Checks

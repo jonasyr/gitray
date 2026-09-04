@@ -1,5 +1,28 @@
 # GitRay - Project Overview
 
+## ⚠ Current runtime state (verified 2026-09-04 by running the system)
+
+**The dashboard is broken on cold repositories.** Concurrent `/api/repositories/summary` and
+`/api/repositories/churn` return **500** (reproduced 3/3); sequential requests all return 200.
+Cause is C-1, lock coalescing in `lockManager.withKeyLock`, crashing at
+`repositoryRoutes.ts:219` and `:246`.
+
+Measured behaviour, for reference when reasoning about performance:
+
+| Endpoint | Cold | Warm |
+| --- | ---: | ---: |
+| `/api/repositories/full-data` | 1.53 s | 0.015 s |
+| `/api/repositories/summary` | 1.61 s | 0.030 s |
+| `/api/repositories/churn` | 0.17 s | 0.009 s |
+| `/api/commits/file-analysis` | 2.92 s | **1.33 s** (barely caches) |
+
+Other verified facts: no `git fetch` ever runs after the initial clone, so cached data is
+unboundedly stale; the commit parser silently drops commits with an empty subject and shifts fields
+when an author name contains `|`; the test suite is non-deterministic.
+
+Authoritative analysis: `docs/BACKEND_ARCHITECTURE_AUDIT.md`.
+
+
 ## Purpose
 
 GitRay is a professional Git visualization tool that transforms repository commit history into beautiful, interactive heatmaps and activity calendars. It provides deep insights into development patterns and team collaboration.

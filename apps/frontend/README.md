@@ -84,15 +84,14 @@ Tests are organized in the `__tests__/` directory:
 
 ```text
 __tests__/
-├── components/       # Component unit tests
-├── services/         # API service tests
-├── utils/           # Utility function tests
-└── example.test.tsx # Example test template
+├── components/   # Component unit tests (21 files)
+├── services/     # API service tests
+└── App.test.tsx  # Top-level app test
 ```
 
 ### Writing Tests
 
-Use the `example.test.tsx` file as a template for creating new tests:
+Follow the pattern in `__tests__/App.test.tsx` or any file under `__tests__/components/`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -137,7 +136,7 @@ apps/frontend/
 
 - `vite.config.ts` - Vite configuration with SWC plugin and proxy setup
 - `vitest.config.ts` - Vitest test configuration
-- `eslint.config.js` - ESLint rules for React and TypeScript
+- `eslint.config.mjs` - ESLint rules for React and TypeScript
 - `postcss.config.cjs` - PostCSS with Tailwind CSS
 - `tsconfig.json` - TypeScript compiler options
 
@@ -147,6 +146,19 @@ The frontend communicates with the backend API through:
 
 - **Development**: Vite proxy forwards `/api` requests to `http://localhost:3001`
 - **Production**: Configure `VITE_API_URL` environment variable
+
+Four endpoints are actually called (`src/services/api.ts`):
+
+| Endpoint | Called from |
+| --- | --- |
+| `GET /api/repositories/full-data` | `App.tsx` |
+| `GET /api/repositories/summary` | `DashboardPage.tsx` |
+| `GET /api/repositories/churn` | `DashboardPage.tsx` |
+| `GET /api/commits/file-analysis` | `DashboardPage.tsx` |
+
+`api.ts` also exports `getRepositoryHeatmap`, `getRepositoryCommits` and
+`getRepositoryContributors`. **No component calls them** - they are covered only by
+`__tests__/services/api.test.ts`.
 
 ## 🎨 UI Components
 
@@ -169,9 +181,13 @@ The project uses TypeScript ESLint with:
 
 ## 🔗 Related
 
-- [Backend README](../backend/README.md)
 - [Project Root Documentation](../../README.md)
+- [Architecture Audit](../../docs/BACKEND_ARCHITECTURE_AUDIT.md) - verified backend
+  architecture, known defects, and the refactoring plan
 - [Shared Types Package](../../packages/shared-types/)
+
+> The backend has no README of its own. `apps/backend/perf/README.md` covers only the k6
+> load-test harness.
 
 ## 📄 License
 

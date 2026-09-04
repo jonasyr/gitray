@@ -1,0 +1,184 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "GitRay — Module Dependency Knot",
+    "output": "gitray-module-dependencies.html",
+    "quality_profile": "showcase",
+    "viewBox": [1100, 460],
+    "views": [
+      {
+        "id": "cycle",
+        "label": "The 6-module cycle",
+        "focus": ["metrics", "cache", "hlc", "mpm", "gits", "coord"],
+        "note": "These six are mutually reachable: none can be loaded or tested alone."
+      },
+      {
+        "id": "entry",
+        "label": "How routes reach it",
+        "focus": ["routes", "rcache", "coord", "hlc"],
+        "note": "Every live endpoint enters the knot through repositoryCache."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "routes",
+      "type": "backend",
+      "label": "routes/*",
+      "sublabel": "4 live endpoints",
+      "pos": [340, 60],
+      "size": [200, 66]
+    },
+    {
+      "id": "rcache",
+      "type": "backend",
+      "label": "repositoryCache",
+      "sublabel": "fan-in 4",
+      "pos": [620, 60],
+      "size": [220, 66]
+    },
+    {
+      "id": "metrics",
+      "type": "backend",
+      "label": "metrics",
+      "sublabel": "76 metric families",
+      "tag": "in cycle - fan-in 17",
+      "pos": [60, 190],
+      "size": [190, 66]
+    },
+    {
+      "id": "cache",
+      "type": "backend",
+      "label": "cache",
+      "sublabel": "backend facade",
+      "pos": [340, 190],
+      "size": [190, 66],
+      "tag": "in cycle"
+    },
+    {
+      "id": "hlc",
+      "type": "backend",
+      "label": "hybridLruCache",
+      "sublabel": "tier chain",
+      "pos": [620, 190],
+      "size": [190, 66],
+      "tag": "in cycle"
+    },
+    {
+      "id": "mpm",
+      "type": "backend",
+      "label": "memoryPressureManager",
+      "sublabel": "OOM guard",
+      "pos": [620, 340],
+      "size": [190, 66],
+      "tag": "in cycle"
+    },
+    {
+      "id": "gits",
+      "type": "backend",
+      "label": "gitService",
+      "sublabel": "git exec",
+      "pos": [340, 340],
+      "size": [190, 66],
+      "tag": "in cycle"
+    },
+    {
+      "id": "coord",
+      "type": "backend",
+      "label": "repositoryCoordinator",
+      "sublabel": "clone handles",
+      "pos": [60, 340],
+      "size": [190, 66],
+      "tag": "in cycle"
+    }
+  ],
+  "connections": [
+    {
+      "id": "routes-rcache",
+      "from": "routes",
+      "to": "rcache"
+    },
+    {
+      "id": "rcache-hlc",
+      "from": "rcache",
+      "to": "hlc",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "metrics-cache",
+      "from": "metrics",
+      "to": "cache"
+    },
+    {
+      "id": "cache-hlc",
+      "from": "cache",
+      "to": "hlc"
+    },
+    {
+      "id": "hlc-mpm",
+      "from": "hlc",
+      "to": "mpm",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "mpm-metrics",
+      "from": "mpm",
+      "to": "metrics",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [
+        [870, 373],
+        [870, 25],
+        [30, 25],
+        [30, 223]
+      ]
+    },
+    {
+      "id": "gits-cache",
+      "from": "gits",
+      "to": "cache",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "coord-gits",
+      "from": "coord",
+      "to": "gits"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Verified cycles",
+      "items": [
+        "One SCC of six: metrics, cache, hybridLruCache, memoryPressureManager, gitService, repositoryCoordinator",
+        "Three direct two-cycles: metrics<->cache, metrics<->memoryPressureManager, metrics<->repositoryCoordinator",
+        "metrics imports memoryPressureManager dynamically, which avoids a static cycle"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Consequences",
+      "items": [
+        "gitService imports the cache service: the lowest layer reaches upward",
+        "No module in the knot can be unit-tested without the other five",
+        "Import order is implicit, which is a likely cause of the flaky suite"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Fan-in",
+      "items": [
+        "logger 22, metrics 17, config 11, cache 7",
+        "metrics is imported by routes, services and utils alike",
+        "Leaves: logger, config, hashUtils, urlSecurity, serializationWorker, requestId, strictContentType, routes/index"
+      ]
+    }
+  ]
+}

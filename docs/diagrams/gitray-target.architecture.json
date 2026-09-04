@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "GitRay — Target Architecture (Option B, recommended)",
+    "output": "gitray-target-architecture.html",
+    "quality_profile": "showcase",
+    "viewBox": [1300, 680],
+    "views": [
+      {
+        "id": "one-path",
+        "label": "One path per concern",
+        "focus": ["rr", "an", "ac", "gc", "git"],
+        "note": "One route style, one analytics layer, one cache, one clone path."
+      },
+      {
+        "id": "correctness",
+        "label": "Correctness fixes",
+        "focus": ["mutex", "ac", "rid", "gc"],
+        "note": "Single-flight moves onto the full cache key; the lock becomes a pure mutex."
+      },
+      {
+        "id": "freshness",
+        "label": "Freshness by construction",
+        "focus": ["gc", "ac", "git"],
+        "note": "headSha in every cache key makes a refreshed clone self-invalidating."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "fe",
+      "type": "frontend",
+      "label": "Frontend",
+      "sublabel": "React 18 + Vite",
+      "tag": "unchanged",
+      "pos": [430, 40],
+      "size": [190, 66]
+    },
+    {
+      "id": "rr",
+      "type": "backend",
+      "label": "repositoryRoutes",
+      "sublabel": "/api/repositories/*",
+      "tag": "one route style",
+      "pos": [280, 175],
+      "size": [190, 66]
+    },
+    {
+      "id": "ar",
+      "type": "security",
+      "label": "adminRoutes",
+      "sublabel": "/metrics, /cache/*",
+      "tag": "X-Admin-Token",
+      "pos": [760, 175],
+      "size": [200, 66]
+    },
+    {
+      "id": "rid",
+      "type": "backend",
+      "label": "repositoryId",
+      "sublabel": "canonicalise(url)",
+      "pos": [40, 310],
+      "size": [190, 66]
+    },
+    {
+      "id": "an",
+      "type": "backend",
+      "label": "gitAnalytics",
+      "sublabel": "pure domain functions",
+      "tag": "no I/O",
+      "pos": [280, 310],
+      "size": [190, 66]
+    },
+    {
+      "id": "ac",
+      "type": "backend",
+      "label": "analyticsCache",
+      "sublabel": "single-flight by full key",
+      "tag": "the only cache",
+      "pos": [760, 310],
+      "size": [200, 66]
+    },
+    {
+      "id": "mutex",
+      "type": "security",
+      "label": "lockManager",
+      "sublabel": "mutual exclusion only",
+      "tag": "no coalescing",
+      "pos": [40, 445],
+      "size": [190, 66]
+    },
+    {
+      "id": "gc",
+      "type": "backend",
+      "label": "gitClient",
+      "sublabel": "one clone path + refresh",
+      "tag": "owns headSha",
+      "pos": [280, 445],
+      "size": [190, 66]
+    },
+    {
+      "id": "hlc",
+      "type": "backend",
+      "label": "HybridLRUCache",
+      "sublabel": "memory to disk to Redis",
+      "pos": [1000, 445],
+      "size": [200, 66]
+    },
+    {
+      "id": "git",
+      "type": "external",
+      "label": "Git remotes",
+      "sublabel": "HTTPS clone + fetch",
+      "pos": [280, 580],
+      "size": [190, 66]
+    },
+    {
+      "id": "redis",
+      "type": "database",
+      "label": "Redis",
+      "sublabel": "single database",
+      "tag": "optional — see Phase 6",
+      "pos": [1000, 580],
+      "size": [200, 66]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Backend process — dependency rule: http to domain to git, never upward",
+      "wraps": ["rr", "ar", "rid", "an", "ac", "mutex", "gc", "hlc"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "fe-rr",
+      "from": "fe",
+      "to": "rr",
+      "label": "4 endpoints",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "fe-ar",
+      "from": "fe",
+      "to": "ar",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "rr-rid",
+      "from": "rr",
+      "to": "rid",
+      "label": "canonicalise",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "rr-an",
+      "from": "rr",
+      "to": "an"
+    },
+    {
+      "id": "ar-ac",
+      "from": "ar",
+      "to": "ac",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "an-ac",
+      "from": "an",
+      "to": "ac",
+      "label": "getOrCompute"
+    },
+    {
+      "id": "an-gc",
+      "from": "an",
+      "to": "gc"
+    },
+    {
+      "id": "ac-gc",
+      "from": "ac",
+      "to": "gc",
+      "label": "cache miss",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "id": "mutex-gc",
+      "from": "mutex",
+      "to": "gc",
+      "label": "mutex only",
+      "variant": "security",
+      "labelDy": -30
+    },
+    {
+      "id": "gc-git",
+      "from": "gc",
+      "to": "git",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ac-hlc",
+      "from": "ac",
+      "to": "hlc"
+    },
+    {
+      "id": "hlc-redis",
+      "from": "hlc",
+      "to": "redis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "What changes",
+      "items": [
+        "Single-flight moves onto the full cache key",
+        "Three clone paths become one gitClient",
+        "Four caches become one analyticsCache"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Why defects cannot recur",
+      "items": [
+        "C-1 cannot recur: nothing deduplicates on a lock name",
+        "headSha in every key self-invalidates, fixing staleness",
+        "file-analysis joins the cache that already gives 50-100x"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Preserved",
+      "items": [
+        "SSRF guard, hardened 404, admin token",
+        "Route factory and shared-types contract",
+        "Frontend unchanged: same 4 endpoints"
+      ]
+    }
+  ]
+}

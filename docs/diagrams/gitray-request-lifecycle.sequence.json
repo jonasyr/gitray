@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "GitRay — Request Lifecycle, Cold Path",
+    "output": "gitray-request-lifecycle.html",
+    "viewBox": [1040, 520],
+    "column_fit": "spread",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "chain",
+        "label": "Middleware chain",
+        "focus": ["client", "mw", "route"],
+        "note": "Eight middlewares run before any handler sees the request."
+      },
+      {
+        "id": "cold",
+        "label": "Cold miss",
+        "focus": ["route", "cache", "git"],
+        "note": "A miss walks the whole history even when only 100 commits were asked for."
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "client",
+      "type": "frontend",
+      "label": "Frontend",
+      "sublabel": "axios"
+    },
+    {
+      "id": "mw",
+      "type": "security",
+      "label": "Middleware chain",
+      "sublabel": "helmet to validation"
+    },
+    {
+      "id": "route",
+      "type": "backend",
+      "label": "Route factory",
+      "sublabel": "repositoryRoutes"
+    },
+    {
+      "id": "cache",
+      "type": "backend",
+      "label": "repositoryCache",
+      "sublabel": "3 tiers + locks"
+    },
+    {
+      "id": "git",
+      "type": "external",
+      "label": "git",
+      "sublabel": "clone + log"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 235,
+      "label": "Validated and rate limited"
+    },
+    {
+      "from": 253,
+      "to": 350,
+      "label": "Locks held across clone and log"
+    },
+    {
+      "from": 368,
+      "to": 444,
+      "label": "Sliced to the requested page"
+    }
+  ],
+  "messages": [
+    {
+      "id": "req",
+      "from": "client",
+      "to": "mw",
+      "y": 172,
+      "label": "GET /repositories/full-data?limit=100",
+      "variant": "emphasis"
+    },
+    {
+      "id": "guard",
+      "from": "mw",
+      "to": "route",
+      "y": 212,
+      "label": "rate limit, memory pressure, SSRF check",
+      "variant": "security"
+    },
+    {
+      "id": "ask",
+      "from": "route",
+      "to": "cache",
+      "y": 272,
+      "label": "getCachedCommits(skip, limit)",
+      "variant": "default"
+    },
+    {
+      "id": "clone",
+      "from": "cache",
+      "to": "git",
+      "y": 320,
+      "label": "holds ordered locks, clones, git log with NO pagination",
+      "variant": "emphasis"
+    },
+    {
+      "id": "all",
+      "from": "git",
+      "to": "cache",
+      "y": 386,
+      "label": "every commit in history",
+      "variant": "return"
+    },
+    {
+      "id": "resp",
+      "from": "cache",
+      "to": "client",
+      "y": 430,
+      "label": "100 commits + heatmap",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "client",
+      "from": 165,
+      "to": 436,
+      "type": "frontend"
+    },
+    {
+      "participant": "mw",
+      "from": 172,
+      "to": 220,
+      "type": "security"
+    },
+    {
+      "participant": "route",
+      "from": 207,
+      "to": 280,
+      "type": "backend"
+    },
+    {
+      "participant": "cache",
+      "from": 267,
+      "to": 434,
+      "type": "backend"
+    },
+    {
+      "participant": "git",
+      "from": 315,
+      "to": 392,
+      "type": "external"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Middleware order",
+      "items": [
+        "helmet, cors, rate limit, requestId, metrics, memory pressure",
+        "strictContentType then express.json, then per-route validation",
+        "404 returns hardened JSON to avoid XSS via path reflection"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Pagination is not in the data path",
+      "items": [
+        "skip and limit route the request to the filtered tier",
+        "A miss calls git log with no pagination arguments at all",
+        "The full history is materialised, then sliced to 100"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Held across the whole walk",
+      "items": [
+        "Cache locks are held across clone and log, up to 120s",
+        "Lock keys contain only the repo URL, never the filters",
+        "Concurrent callers on one repo queue behind, then time out"
+      ]
+    }
+  ]
+}

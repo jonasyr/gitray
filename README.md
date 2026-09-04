@@ -1,5 +1,13 @@
 # GitRay
 
+> **⚠ Known issue: the dashboard fails on uncached repositories**
+>
+> Analysing a repository for the first time currently returns HTTP 500 from the summary and code
+> churn panels. This is a concurrency defect in the caching layer (`lockManager`), reproduced on
+> 3 of 3 test repositories; requesting the endpoints one at a time succeeds. A fix is planned as
+> Phase 1 of the refactor described in
+> [`docs/BACKEND_ARCHITECTURE_AUDIT.md`](docs/BACKEND_ARCHITECTURE_AUDIT.md).
+
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
@@ -278,16 +286,14 @@ https://git.yourcompany.com/username/repository.git
 The backend provides a RESTful API for programmatic access:
 
 ```bash
-# Get repository commits
-curl -X POST http://localhost:3001/api/repositories \
-  -H "Content-Type: application/json" \
-  -d '{"repoUrl": "https://github.com/username/repo.git"}'
+# Get commits + heatmap in one call (this is what the dashboard uses)
+curl "http://localhost:3001/api/repositories/full-data?repoUrl=https://github.com/username/repo.git"
 
 # Get commit heatmap data
-curl "http://localhost:3001/api/commits/heatmap?repoUrl=https://github.com/username/repo.git&timePeriod=day"
+curl "http://localhost:3001/api/repositories/heatmap?repoUrl=https://github.com/username/repo.git"
 
-# Get repository info
-curl "http://localhost:3001/api/commits/info?repoUrl=https://github.com/username/repo.git"
+# Get file type distribution
+curl "http://localhost:3001/api/commits/file-analysis?repoUrl=https://github.com/username/repo.git"
 
 # Get code churn analysis
 curl "http://localhost:3001/api/repositories/churn?repoUrl=https://github.com/username/repo.git"
@@ -598,15 +604,17 @@ curl "http://localhost:3001/api/repositories/summary?repoUrl=https://github.com/
 
 #### Commit Operations
 
-##### GET /api/commits/heatmap
-
-- Query parameters: `repoUrl`, `timePeriod`, `authors`, `fromDate`, `toDate`
-- Response: `CommitHeatmapData`
-
-##### GET /api/commits/info
+##### GET /api/commits/file-analysis
 
 - Query parameters: `repoUrl`
-- Response: Repository information and statistics
+- Response: `FileTypeDistribution`
+- This is the only `/api/commits/*` route the frontend calls.
+
+> **Note.** `GET /api/commits/`, `/api/commits/heatmap` and `/api/commits/info` also exist, but they
+> duplicate the `/api/repositories/*` routes with a different response envelope and have no
+> consumer. `POST /api/commits/stream` returns NDJSON (not Server-Sent Events) and is likewise
+> unused. See `docs/BACKEND_ARCHITECTURE_AUDIT.md` for the full route inventory and the
+> recommendation to remove them.
 
 #### Health and Monitoring
 
@@ -822,8 +830,10 @@ decisions, please refer to the [Wiki](https://github.com/jonasyr/gitray/wiki)
 The backend API is documented through:
 
 - **Health Endpoints**: `/health`, `/health/detailed`, `/health/memory`
-- **Repository API**: `/api/repositories` for commit data
-- **Heatmap API**: `/api/commits/heatmap` for visualization data
+- **Repository API**: `/api/repositories/*` — `full-data`, `summary`, `churn` (the live surface)
+- **File analysis**: `/api/commits/file-analysis`
+- **Architecture audit**: `docs/BACKEND_ARCHITECTURE_AUDIT.md` — verified route inventory,
+  known defects, and the phased refactoring plan
 - **Metrics**: `/metrics` for Prometheus-compatible monitoring
 
 ### Configuration Files

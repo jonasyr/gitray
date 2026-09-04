@@ -4,10 +4,43 @@
 
 Guidance for Claude when contributing to the GitRay monorepo. Follow these rules before any other doc unless overridden by a nearer `AGENTS.md`.
 
+## ⚠ Known critical defect — read before touching the backend
+
+**The dashboard is currently broken on any repository that is not already cached.**
+
+Firing the four live endpoints concurrently — which is exactly what `DashboardPage.tsx` does —
+returns HTTP **500** from `/api/repositories/summary` and `/api/repositories/churn`. Reproduced on
+3 of 3 cold repositories. Run one at a time, all four succeed.
+
+**Root cause (C-1):** `lockManager.withKeyLock` deduplicates on the *lock name* rather than the
+operation, so concurrent operations sharing a lock key receive each other's payloads. The route
+handlers then dereference a field the wrong payload does not have:
+
+- `repositoryRoutes.ts:219` → `churnData.files.length` → `Cannot read properties of undefined`
+- `repositoryRoutes.ts:246` → `summary.repository.name` → `Cannot read properties of undefined`
+
+**Reproduce it:**
+
+```bash
+R="https://github.com/sindresorhus/p-limit.git"; B=http://localhost:3001
+for ep in "repositories/full-data?repoUrl=$R" "repositories/summary?repoUrl=$R" \
+          "repositories/churn?repoUrl=$R" "commits/file-analysis?repoUrl=$R"; do
+  curl -s -o /dev/null -w "$ep -> %{http_code}\n" "$B/api/$ep" &
+done; wait
+```
+
+**Do not build features on top of this.** The fix is Phase 1 of the migration plan. Full analysis,
+including four other verified defects and the recommended refactor, is in
+`docs/BACKEND_ARCHITECTURE_AUDIT.md`.
+
+Also note: the test suite is **non-deterministic** (finding C-8) — the same command has produced
+four different outcomes on an unmodified tree. A green run is not proof.
+
+
 ## Project Snapshot
 
 - **Monorepo**: pnpm workspaces with TypeScript project references
-- **Frontend**: React 19 + Vite 6 + Tailwind CSS 4
+- **Frontend**: React 18 + Vite 6 + Tailwind CSS 4
 - **Backend**: Express 5 with simple-git, Redis caching, Prometheus metrics
 - **Shared**: `packages/shared-types` exported via `@gitray/shared-types`
 - **Testing**: Vitest across apps; k6 for backend perf
@@ -103,9 +136,13 @@ If unsure where to place code, search existing modules and mirror their location
 
 ## Context Links
 
-- Architecture: `docs/ARCHITECTURE.md` (overall design, caches, streaming)
-- API: `docs/API.md` (endpoints/contracts)
-- Testing: `docs/TESTING.md` (testing strategy, coverage)
+- **Architecture audit (authoritative, evidence-based): `docs/BACKEND_ARCHITECTURE_AUDIT.md`**
+  Read this before any structural work. It documents the verified current architecture, five
+  critical/high defects (including a live cross-request data-corruption bug in `lockManager`),
+  dead code, documentation drift, and the recommended phased refactor.
+- Diagrams: `docs/diagrams/*.html` (current architecture, target architecture, the lock defect)
+- `docs/ARCHITECTURE.md`, `docs/API.md` and `docs/TESTING.md` do **not** exist yet; they are
+  planned as part of the audit's migration Phase 7.
 
 ## When in Doubt
 

@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "GitRay — Option C: PostgreSQL + Job Queue",
+    "output": "gitray-option-c.html",
+    "quality_profile": "showcase",
+    "viewBox": [1300, 680],
+    "views": [
+      {
+        "id": "read",
+        "label": "Read path",
+        "focus": ["fe", "rr", "an", "db"],
+        "note": "Reads are served from SQL. The API never shells out to git."
+      },
+      {
+        "id": "index",
+        "label": "Indexing path",
+        "focus": ["queue", "worker", "gc", "git", "db"],
+        "note": "A separate worker process drains index_jobs and writes facts."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "fe",
+      "type": "frontend",
+      "label": "Frontend",
+      "sublabel": "needs a pending state",
+      "tag": "202 Accepted",
+      "pos": [430, 40],
+      "size": [190, 66]
+    },
+    {
+      "id": "rr",
+      "type": "backend",
+      "label": "repositoryRoutes",
+      "sublabel": "/api/repositories/*",
+      "pos": [280, 175],
+      "size": [190, 66]
+    },
+    {
+      "id": "ar",
+      "type": "security",
+      "label": "adminRoutes",
+      "sublabel": "/metrics, ops",
+      "pos": [760, 175],
+      "size": [200, 66]
+    },
+    {
+      "id": "an",
+      "type": "backend",
+      "label": "domain analytics",
+      "sublabel": "computed from rows",
+      "tag": "no git",
+      "pos": [280, 310],
+      "size": [190, 66]
+    },
+    {
+      "id": "queue",
+      "type": "messagebus",
+      "label": "index_jobs",
+      "sublabel": "FOR UPDATE SKIP LOCKED",
+      "pos": [760, 310],
+      "size": [200, 66]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "commits, commit_files, rollups",
+      "tag": "source of truth",
+      "pos": [280, 445],
+      "size": [220, 66]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "apps/worker",
+      "sublabel": "NEW second process",
+      "pos": [760, 445],
+      "size": [200, 66]
+    },
+    {
+      "id": "gc",
+      "type": "backend",
+      "label": "gitClient",
+      "sublabel": "clone + incremental fetch",
+      "pos": [1040, 445],
+      "size": [200, 66]
+    },
+    {
+      "id": "git",
+      "type": "external",
+      "label": "Git remotes",
+      "sublabel": "HTTPS",
+      "pos": [1040, 580],
+      "size": [200, 66]
+    },
+    {
+      "id": "redis",
+      "type": "database",
+      "label": "Redis",
+      "sublabel": "optional after this",
+      "tag": "may be dropped",
+      "pos": [600, 580],
+      "size": [200, 66]
+    }
+  ],
+  "connections": [
+    {
+      "id": "fe-rr",
+      "from": "fe",
+      "to": "rr",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "fe-ar",
+      "from": "fe",
+      "to": "ar",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "rr-an",
+      "from": "rr",
+      "to": "an"
+    },
+    {
+      "id": "an-db",
+      "from": "an",
+      "to": "db",
+      "label": "SQL reads",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "ar-queue",
+      "from": "ar",
+      "to": "queue",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "queue-worker",
+      "from": "queue",
+      "to": "worker"
+    },
+    {
+      "id": "worker-gc",
+      "from": "worker",
+      "to": "gc"
+    },
+    {
+      "id": "gc-git",
+      "from": "gc",
+      "to": "git",
+      "variant": "emphasis"
+    },
+    {
+      "id": "worker-db",
+      "from": "worker",
+      "to": "db",
+      "label": "batched writes"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Proposed schema",
+      "items": [
+        "repositories, index_state, commits, commit_files",
+        "daily_activity and file_churn, generation-stamped",
+        "index_jobs claimed with SKIP LOCKED"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "What only C solves",
+      "items": [
+        "Pagination becomes real SQL LIMIT/OFFSET over indexed rows",
+        "Incremental indexing from the last head_sha",
+        "Repeat views cost a query, not a clone"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Why it is not the next step",
+      "items": [
+        "2 to 3 months, high regression risk during dual-read",
+        "Adds Postgres plus a worker to a stalled two-person project",
+        "Benchmarks would be measured against C-1-corrupted numbers"
+      ]
+    }
+  ]
+}

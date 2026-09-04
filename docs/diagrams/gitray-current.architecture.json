@@ -1,0 +1,331 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "GitRay — Current Verified Architecture",
+    "output": "gitray-current-architecture.html",
+    "quality_profile": "showcase",
+    "viewBox": [1240, 680],
+    "repository": {
+      "url": "https://github.com/jonasyr/gitray",
+      "revision": "12efe61db49b1f3c23d48035e49b73f63acf47fd"
+    },
+    "views": [
+      {
+        "id": "live-path",
+        "label": "Live request path",
+        "focus": ["fe", "rr", "rc", "rco", "gs", "git"],
+        "note": "The four endpoints the dashboard actually calls, and the code they reach."
+      },
+      {
+        "id": "clone-paths",
+        "label": "Three clone paths",
+        "focus": ["rco", "rss", "fas", "gs", "git"],
+        "note": "One dashboard load clones the same repository three separate times."
+      },
+      {
+        "id": "lock-collision",
+        "label": "Lock coalescing defect",
+        "focus": ["lm", "rc", "rco"],
+        "note": "withKeyLock coalesces on lock name, so concurrent operations swap results."
+      },
+      {
+        "id": "cache-stack",
+        "label": "Caching mechanisms",
+        "focus": ["rc", "cachestack", "rss", "redis"],
+        "note": "Three tiers, a facade, a service-local cache, and two Redis databases."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "fe",
+      "type": "frontend",
+      "label": "Frontend",
+      "sublabel": "React 18 + Vite",
+      "tag": "no router, no store",
+      "pos": [430, 40],
+      "size": [190, 66],
+      "sources": [
+        {
+          "path": "apps/frontend/src/App.tsx"
+        }
+      ]
+    },
+    {
+      "id": "rr",
+      "type": "backend",
+      "label": "repositoryRoutes",
+      "sublabel": "/api/repositories/*",
+      "tag": "LIVE",
+      "pos": [280, 175],
+      "size": [190, 66],
+      "sources": [
+        {
+          "path": "apps/backend/src/routes/repositoryRoutes.ts"
+        }
+      ]
+    },
+    {
+      "id": "cr",
+      "type": "backend",
+      "label": "commitRoutes",
+      "sublabel": "/api/commits/*",
+      "tag": "mostly dead",
+      "pos": [760, 175],
+      "size": [190, 66],
+      "sources": [
+        {
+          "path": "apps/backend/src/routes/commitRoutes.ts"
+        }
+      ]
+    },
+    {
+      "id": "rc",
+      "type": "backend",
+      "label": "RepositoryCacheManager",
+      "sublabel": "3 tiers + transactions",
+      "tag": "3100 LOC",
+      "pos": [280, 310],
+      "size": [190, 66],
+      "sources": [
+        {
+          "path": "apps/backend/src/services/repositoryCache.ts"
+        }
+      ]
+    },
+    {
+      "id": "lm",
+      "type": "security",
+      "label": "lockManager",
+      "sublabel": "locks + coalescing",
+      "tag": "C-1 defect",
+      "pos": [40, 310],
+      "size": [190, 66],
+      "sources": [
+        {
+          "path": "apps/backend/src/utils/lockManager.ts",
+          "line": 289
+        }
+      ]
+    },
+    {
+      "id": "cachestack",
+      "type": "backend",
+      "label": "cache.ts + HybridLRUCache",
+      "sublabel": "memory to disk to Redis",
+      "pos": [40, 445],
+      "size": [200, 66],
+      "sources": [
+        {
+          "path": "apps/backend/src/utils/hybridLruCache.ts"
+        }
+      ]
+    },
+    {
+      "id": "rco",
+      "type": "backend",
+      "label": "repositoryCoordinator",
+      "sublabel": "shared handles, refcount",
+      "pos": [280, 445],
+      "size": [190, 66],
+      "sources": [
+        {
+          "path": "apps/backend/src/services/repositoryCoordinator.ts"
+        }
+      ]
+    },
+    {
+      "id": "rss",
+      "type": "backend",
+      "label": "repositorySummaryService",
+      "sublabel": "own sparse clone",
+      "pos": [530, 445],
+      "size": [190, 66],
+      "sources": [
+        {
+          "path": "apps/backend/src/services/repositorySummaryService.ts",
+          "line": 158
+        }
+      ]
+    },
+    {
+      "id": "fas",
+      "type": "backend",
+      "label": "fileAnalysisService",
+      "sublabel": "own shallow clone",
+      "pos": [780, 445],
+      "size": [190, 66],
+      "sources": [
+        {
+          "path": "apps/backend/src/services/fileAnalysisService.ts",
+          "line": 1065
+        }
+      ]
+    },
+    {
+      "id": "redis",
+      "type": "database",
+      "label": "Redis",
+      "sublabel": "db0 facade + db1 cache",
+      "tag": "no SQL database exists",
+      "pos": [40, 580],
+      "size": [200, 66]
+    },
+    {
+      "id": "gs",
+      "type": "backend",
+      "label": "gitService",
+      "sublabel": "git exec + parsing",
+      "pos": [280, 580],
+      "size": [190, 66],
+      "sources": [
+        {
+          "path": "apps/backend/src/services/gitService.ts",
+          "line": 42
+        }
+      ]
+    },
+    {
+      "id": "git",
+      "type": "external",
+      "label": "Git remotes",
+      "sublabel": "HTTPS clone",
+      "pos": [660, 580],
+      "size": [190, 66]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Backend process — all cache, lock and handle state is per-process",
+      "wraps": ["rr", "cr", "rc", "lm", "cachestack", "rco", "rss", "fas", "gs"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "fe-rr",
+      "from": "fe",
+      "to": "rr",
+      "label": "3 live endpoints",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "fe-cr",
+      "from": "fe",
+      "to": "cr",
+      "label": "file-analysis",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "rr-rc",
+      "from": "rr",
+      "to": "rc"
+    },
+    {
+      "id": "cr-fas",
+      "from": "cr",
+      "to": "fas",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "lm-rc",
+      "from": "lm",
+      "to": "rc",
+      "label": "shared keys",
+      "variant": "security",
+      "labelDy": -30
+    },
+    {
+      "id": "rc-rco",
+      "from": "rc",
+      "to": "rco"
+    },
+    {
+      "id": "rc-rss",
+      "from": "rc",
+      "to": "rss",
+      "label": "cached twice",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "rc-cachestack",
+      "from": "rc",
+      "to": "cachestack",
+      "label": "3 tiers",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "rco-gs",
+      "from": "rco",
+      "to": "gs",
+      "label": "clone 1",
+      "variant": "emphasis",
+      "labelDy": 30
+    },
+    {
+      "id": "gs-git",
+      "from": "gs",
+      "to": "git",
+      "variant": "emphasis"
+    },
+    {
+      "id": "rss-git",
+      "from": "rss",
+      "to": "git",
+      "label": "clone 2",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "fas-git",
+      "from": "fas",
+      "to": "git",
+      "label": "clone 3",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "cachestack-redis",
+      "from": "cachestack",
+      "to": "redis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Broken today",
+      "items": [
+        "C-1 reproduced: /summary + /churn 500 on cold repos",
+        "Sequential requests all pass - concurrency alone"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Duplication",
+      "items": [
+        "Three clone paths per dashboard load",
+        "Four cache layers plus two Redis databases",
+        "Two route architectures, migration unfinished"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Verified absences",
+      "items": [
+        "No SQL database, ORM, or migrations",
+        "No end-user auth, only an admin token",
+        "No concurrency test exists, so C-1 is invisible to the suite"
+      ]
+    }
+  ]
+}

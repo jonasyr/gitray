@@ -1,3 +1,6 @@
+> **Verified against the code 2026-09-04.** Corrections applied in place. Authoritative
+> architecture reference: `docs/BACKEND_ARCHITECTURE_AUDIT.md`; live route inventory in its §4.2.
+
 # GitRay Memory Update Summary
 
 ## Date: January 5, 2026
@@ -95,19 +98,35 @@ gitray/ (Monorepo)
 - Core Pages: `LandingPage`, `DashboardPage`, `Header`, `Footer`
 - Visualizations: `CommitHeatmap`, `ActivityChart`, `CodeChurnChart`, `FileDistributionChart`, `FileTypeList`, `GraphViewTimeline`, `GitDiffViewer`
 - Features: `AIInsights`, `PremiumFeatures`, `SettingsDrawer`, `NewsDrawer`, `InfoModal`
-- UI Library: 47+ shadcn/ui components in `components/ui/`
+- UI Library: 46 shadcn/ui component files + 2 helpers in `components/ui/`
 
 ### API Endpoints
 
-- `POST /api/repositories` - Fetch commit list
-- `GET /api/commits/heatmap` - Aggregated heatmap data
-- `GET /api/commits/info` - Repository statistics
-- `GET /api/commits/stream` - Stream commit data (SSE)
-- `GET /api/repositories/churn` - Code churn analysis
-- `GET /api/repositories/summary` - Repository metadata
-- `GET /api/cache/stats` - Cache metrics
-- `GET /health`, `/health/detailed`, `/health/memory` - Health checks
+**Called by the frontend (the only four that matter):**
+
+- `GET /api/repositories/full-data` - commits + heatmap in one response (`App.tsx`)
+- `GET /api/repositories/summary` - repository metadata (`DashboardPage.tsx`)
+- `GET /api/repositories/churn` - code churn analysis (`DashboardPage.tsx`)
+- `GET /api/commits/file-analysis` - file type distribution (`DashboardPage.tsx`)
+
+**Mounted but with no frontend consumer:**
+
+- `GET /api/repositories/commits`, `/heatmap`, `/contributors`
+- `GET /api/commits/`, `/heatmap`, `/info` - duplicates of the `/api/repositories/*` routes
+- `POST /api/commits/stream` - NDJSON, **not** SSE and **not** a GET
+- `GET /api/commits/resume/:repoPath`, `POST /api/commits/resume/clear` - **unauthenticated**
+
+**Admin, require the `X-Admin-Token` header:**
+
+- `GET /api/commits/cache/stats` (note the `/commits` prefix; there is no `/api/cache/stats`)
+- `POST /api/commits/cache/invalidate`
+- `GET /api/commits/cache/repositories`
 - `GET /metrics` - Prometheus metrics
+
+**Health:** `GET /health`, `/health/detailed`, `/health/live`, `/health/ready`, `/health/memory`,
+`/health/coordination`, and a separate `/coordination`.
+
+There is **no** `POST /api/repositories`.
 
 ## Configuration
 

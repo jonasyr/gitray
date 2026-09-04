@@ -4,6 +4,39 @@
 
 GitRay is a production-ready Git repository analysis and visualization platform that transforms commit history into interactive visualizations such as heatmaps, commit statistics, code churn analysis and time-series aggregations.
 
+## ⚠ Known critical defect — read before touching the backend
+
+**The dashboard is currently broken on any repository that is not already cached.**
+
+Firing the four live endpoints concurrently — which is exactly what `DashboardPage.tsx` does —
+returns HTTP **500** from `/api/repositories/summary` and `/api/repositories/churn`. Reproduced on
+3 of 3 cold repositories. Run one at a time, all four succeed.
+
+**Root cause (C-1):** `lockManager.withKeyLock` deduplicates on the *lock name* rather than the
+operation, so concurrent operations sharing a lock key receive each other's payloads. The route
+handlers then dereference a field the wrong payload does not have:
+
+- `repositoryRoutes.ts:219` → `churnData.files.length` → `Cannot read properties of undefined`
+- `repositoryRoutes.ts:246` → `summary.repository.name` → `Cannot read properties of undefined`
+
+**Reproduce it:**
+
+```bash
+R="https://github.com/sindresorhus/p-limit.git"; B=http://localhost:3001
+for ep in "repositories/full-data?repoUrl=$R" "repositories/summary?repoUrl=$R" \
+          "repositories/churn?repoUrl=$R" "commits/file-analysis?repoUrl=$R"; do
+  curl -s -o /dev/null -w "$ep -> %{http_code}\n" "$B/api/$ep" &
+done; wait
+```
+
+**Do not build features on top of this.** The fix is Phase 1 of the migration plan. Full analysis,
+including four other verified defects and the recommended refactor, is in
+`docs/BACKEND_ARCHITECTURE_AUDIT.md`.
+
+Also note: the test suite is **non-deterministic** (finding C-8) — the same command has produced
+four different outcomes on an unmodified tree. A green run is not proof.
+
+
 ## Development Environment
 
 ### Prerequisites
@@ -193,7 +226,14 @@ At higher pressure levels it throttles requests, evicts cache entries or blocks 
 
 ### Streaming Support
 
-For large repositories (50k+ commits), the backend streams commit data using Server-Sent Events. The `/api/commits/stream` endpoint should be used for high-latency queries.
+A streaming path exists for large repositories (above `STREAMING_COMMIT_THRESHOLD`, default 50k
+commits): `POST /api/commits/stream`, which responds with **newline-delimited JSON**
+(`application/x-ndjson`) — **not** Server-Sent Events, and **not** a GET.
+
+**Do not build on it.** It is unused by the frontend, and it pages with `git log --skip=N`, which
+re-walks history on every batch (quadratic) while the caller re-accumulates all batches into a
+single array. See `docs/BACKEND_ARCHITECTURE_AUDIT.md` finding C-4; the audit recommends deleting
+this path.
 
 ### Observability
 
@@ -201,15 +241,33 @@ The backend exposes Prometheus metrics at `/metrics`, with counters, gauges and 
 
 ### API Endpoints
 
-- `POST /api/repositories` – fetch commit list for a repository
-- `GET /api/commits/heatmap` – return aggregated heatmap data
-- `GET /api/commits/info` – get repository statistics
-- `GET /api/commits/stream` – stream commit data (Server-Sent Events)
+Verified against the route modules and the frontend API client. Only four endpoints are actually
+called by the UI; the rest are mounted but unused (see `docs/BACKEND_ARCHITECTURE_AUDIT.md` §4.2).
+
+**Live — called by the frontend:**
+
+- `GET /api/repositories/full-data` – commits + heatmap in one response (`App.tsx`)
+- `GET /api/repositories/summary` – repository stats (creation, commits, contributors)
 - `GET /api/repositories/churn` – code churn analysis
-- `GET /api/repositories/summary` – repository stats (creation, commits, contributors, status)
-- `GET /api/cache/stats` – cache metrics
-- `GET /health` – health status
+- `GET /api/commits/file-analysis` – file type distribution
+
+**Mounted but not called by the UI:**
+
+- `GET /api/repositories/commits`, `/heatmap`, `/contributors`
+- `GET /api/commits/`, `/heatmap`, `/info` – duplicates of the `/api/repositories/*` routes
+- `POST /api/commits/stream` – NDJSON streaming (see above)
+- `GET /api/commits/resume/:repoPath`, `POST /api/commits/resume/clear` – **unauthenticated**
+
+**Admin — require the `X-Admin-Token` header:**
+
+- `GET /api/commits/cache/stats`
+- `POST /api/commits/cache/invalidate`
+- `GET /api/commits/cache/repositories`
 - `GET /metrics` – Prometheus metrics
+
+**Health:**
+
+- `GET /health`, `/health/detailed`, `/health/live`, `/health/ready`, `/health/memory`, `/health/coordination`
 
 ### Configuration
 

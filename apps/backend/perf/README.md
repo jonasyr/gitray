@@ -1,5 +1,13 @@
 # Backend Performance Testing Guide
 
+> **⚠ Targets a dead endpoint — verified 2026-09-04.**
+> `load-test.ts` drives `GET /api/commits/heatmap`, which no frontend code calls. The live
+> surface is `/api/repositories/{full-data,summary,churn}` plus `/api/commits/file-analysis`.
+> Any number produced by this harness measures a path no user exercises.
+>
+> Repoint the script before trusting its output, and note that pre-fix measurements are also
+> distorted by audit finding C-1. See `docs/BACKEND_ARCHITECTURE_AUDIT.md`.
+
 ## Setup
 
 1. Install k6

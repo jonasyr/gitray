@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "GitRay — Persistence Model (there is no database)",
+    "output": "gitray-persistence-architecture.html",
+    "quality_profile": "showcase",
+    "viewBox": [1170, 470],
+    "views": [
+      {
+        "id": "owners",
+        "label": "Four independent mechanisms",
+        "focus": ["rcm", "cafac", "coord", "lm"],
+        "note": "Nothing coordinates these four; each persists state on its own terms."
+      },
+      {
+        "id": "tiers",
+        "label": "Cache tier chain",
+        "focus": ["rcm", "hlc", "mem", "disk", "redis1"],
+        "note": "Three logical tiers collapse onto one physical memory-disk-Redis chain."
+      },
+      {
+        "id": "degraded",
+        "label": "Degraded mode",
+        "focus": ["cafac", "memmap"],
+        "note": "When Redis is down the fallback drops TTLs and grows without bound."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "rcm",
+      "type": "backend",
+      "label": "RepositoryCacheManager",
+      "sublabel": "raw / filtered / aggregated",
+      "tag": "3 tiers",
+      "pos": [40, 40],
+      "size": [200, 66]
+    },
+    {
+      "id": "cafac",
+      "type": "backend",
+      "label": "cache.ts facade",
+      "sublabel": "picks a backend",
+      "pos": [280, 40],
+      "size": [190, 66]
+    },
+    {
+      "id": "coord",
+      "type": "backend",
+      "label": "repositoryCoordinator",
+      "sublabel": "RepositoryHandle map",
+      "tag": "in-process",
+      "pos": [700, 40],
+      "size": [200, 66]
+    },
+    {
+      "id": "lm",
+      "type": "security",
+      "label": "lockManager",
+      "sublabel": "advisory locks",
+      "pos": [940, 40],
+      "size": [180, 66]
+    },
+    {
+      "id": "hlc",
+      "type": "backend",
+      "label": "HybridLRUCache",
+      "sublabel": "one chain per tier",
+      "pos": [40, 190],
+      "size": [220, 66]
+    },
+    {
+      "id": "memmap",
+      "type": "database",
+      "label": "Map fallback",
+      "sublabel": "no TTL, unbounded",
+      "tag": "P-3",
+      "pos": [300, 190],
+      "size": [200, 66]
+    },
+    {
+      "id": "redis0",
+      "type": "database",
+      "label": "Redis db0",
+      "sublabel": "summary, resume keys",
+      "pos": [540, 190],
+      "size": [180, 66]
+    },
+    {
+      "id": "mem",
+      "type": "database",
+      "label": "Process memory",
+      "sublabel": "LRU entries",
+      "pos": [40, 340],
+      "size": [170, 66]
+    },
+    {
+      "id": "disk",
+      "type": "database",
+      "label": "Local disk",
+      "sublabel": "hybrid cache spill",
+      "pos": [250, 340],
+      "size": [190, 66]
+    },
+    {
+      "id": "redis1",
+      "type": "database",
+      "label": "Redis db1",
+      "sublabel": "prefix gitray:cache:",
+      "pos": [490, 340],
+      "size": [170, 66]
+    },
+    {
+      "id": "clones",
+      "type": "database",
+      "label": "Shared clones",
+      "sublabel": "gitray-shared-repos",
+      "tag": "never refreshed",
+      "pos": [700, 340],
+      "size": [200, 66]
+    },
+    {
+      "id": "lockfiles",
+      "type": "database",
+      "label": "Lock files",
+      "sublabel": "os.tmpdir, per host",
+      "pos": [940, 340],
+      "size": [180, 66]
+    }
+  ],
+  "connections": [
+    {
+      "id": "rcm-hlc",
+      "from": "rcm",
+      "to": "hlc",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "cafac-hlc",
+      "from": "cafac",
+      "to": "hlc",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "cafac-memmap",
+      "from": "cafac",
+      "to": "memmap",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "cafac-redis0",
+      "from": "cafac",
+      "to": "redis0",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "hlc-mem",
+      "from": "hlc",
+      "to": "mem",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "hlc-disk",
+      "from": "hlc",
+      "to": "disk",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "hlc-redis1",
+      "from": "hlc",
+      "to": "redis1",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "coord-clones",
+      "from": "coord",
+      "to": "clones",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "lm-lockfiles",
+      "from": "lm",
+      "to": "lockfiles",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "slate",
+      "title": "No database exists",
+      "items": [
+        "No SQL, ORM, migrations or entities anywhere",
+        "State lives in memory, on local disk, and in Redis",
+        "In-process caches, clone handles and lock files are per-process"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Overlaps and gaps",
+      "items": [
+        "Summary is cached twice: db0 for 24h and tier 3 for 2h",
+        "Redis keys embed ephemeral temp paths, so they never hit",
+        "Clones are never refreshed once written"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Degraded mode is worst",
+      "items": [
+        "Map fallback discards the TTL the other backends honour",
+        "It has no size bound and never evicts on write",
+        "This is the documented Redis-down path"
+      ]
+    }
+  ]
+}
