@@ -35,6 +35,10 @@ themes.
 The recommendation is **C reached through B's phases**: B is the prerequisite that makes the
 persisted index correct, not an alternative to it. See the audit §15.1.
 
+`gitray-option-c.html` was revised on 2026-09-05 after the team's planning vault was read: its cost
+figures now include branch and tag coverage, and its cards carry the schema decisions that the
+roadmap, the pricing tiers and GDPR make load-bearing (audit §17.9).
+
 Option A reuses the exact node positions of the current-state diagram so the two can be flipped
 between; B, C and D share a second common layout for the same reason.
 

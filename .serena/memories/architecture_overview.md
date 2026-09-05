@@ -30,17 +30,46 @@ Destination is a **PostgreSQL-backed index with delta updates**, reached only af
 and Git-layer phases. A cache cannot meet the requirements (persisted, shared, any repo size,
 notify on completion) because it is evictable and lost on restart.
 
-Measured: a 1M-commit repository costs ~24 s for commit metadata and ~9.4 min for file churn —
-~15 minutes once, then milliseconds per delta.
+Measured, indexing branches and tags (not just the default branch): a 1M-commit repository costs
+~24-41 s for commit metadata and 10-35 min for file churn — ~15-25 minutes once, then milliseconds
+per delta. The range is repository shape: blob density varies 13x and throughput 3.7x between real
+repositories.
 
-Two measured design constraints:
-- `--filter=blob:none` is **624x slower** for `--numstat`; use a full clone for the churn pass.
+Measured design constraints:
+- `--filter=blob:none` is **624x slower** for `--numstat`; use a full clone for the churn pass,
+  then prune to blobless to retain. Pruning is safe: the penalty is on *bulk* traversal, not
+  *point* lookup — a single-file diff on a blobless clone costs 0.55 s.
 - Index metadata and churn as **separate jobs** so the dashboard is usable in under a minute.
+- **Never `--mirror`-clone and never index `--all`** — a GitHub mirror fetches `refs/pull/*` (3,288
+  refs on `git/git`), inflating the commit universe 2.48x with unmerged fork commits. Index the
+  union of `--branches --tags`.
 
-Rejected: an `analysis_sessions` table — there is no authentication anywhere and results are
-global, so `(repository, index_state, index_job)` covers every responsibility it would have.
+Rejected: an `analysis_sessions` table — it conflates job state with session state, and
+`(repository, index_state, index_job)` covers every responsibility it would have. Note the reason
+is *not* "there are no users": the team's roadmap has accounts at Priority 2 and sells private
+repositories as a paid tier.
 
-Plan and schema: `docs/BACKEND_ARCHITECTURE_AUDIT.md` §15-16.
+Schema decisions that are load-bearing (validated against the team's planning vault
+`NiklasSkulll/GitRayDocs`, read 2026-09-05 — audit §17.9):
+- **Per-commit-per-file facts, never monthly buckets** — 3-10M rows at 1M commits, and bucketing
+  permanently forecloses change coupling, code ownership and bus factor.
+- **A `refs` table, and no branch column on `commits`** — the Priority-1 Graph View Timeline needs
+  branches, and a commit is reachable from many refs, so branch membership is a query.
+- **Store the commit `body`** — Tag Clustering and Issue Overlay read `Fixes #123` trailers. Costs
+  16x the subject (~813 MB at 1M commits); extract refs into a narrow table at index time.
+- **`repositories.visibility` + `owner_user_id` from the first migration** — private repositories
+  are a paid tier and their index must never be served globally. A security boundary, not a
+  feature; it cannot be retrofitted.
+- **`index_state` keyed `(repository_id, coverage)`** — the free tier indexes `last_12_months`; if
+  coverage is a label rather than a key, a partial index is served forever as though complete.
+- **A single global `authors` table** — GDPR applies (German GbR; commit authors are third-party
+  personal data). Erasure must cost one row and must pseudonymise the identity, never delete facts.
+
+Unresolved, for the team to decide: their own documents conflict on contributor ranking — the
+backend refactor note says "Keine Ranking-Ausgabe im UI (DSGVO)" while the roadmap has Contribution
+Ranking at Priority 1 and leaderboards at Priority 4 (audit §17.9 R-7).
+
+Plan and schema: `docs/BACKEND_ARCHITECTURE_AUDIT.md` §15-17.
 
 
 

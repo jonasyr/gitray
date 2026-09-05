@@ -17,7 +17,7 @@
         "id": "index",
         "label": "Two-phase indexing",
         "focus": ["queue", "worker", "gc", "git", "db"],
-        "note": "Metadata job completes in ~24s at 1M commits; churn follows in ~9.4 min."
+        "note": "Metadata job completes in ~24-41s at 1M commits; churn follows in 10-35 min."
       }
     ]
   },
@@ -70,7 +70,7 @@
       "type": "database",
       "label": "PostgreSQL",
       "sublabel": "facts at full granularity",
-      "tag": "1.7-6.1M rows at 1M commits",
+      "tag": "3-10M rows at 1M commits",
       "pos": [280, 445],
       "size": [220, 66]
     },
@@ -81,16 +81,16 @@
       "sublabel": "NEW second process",
       "pos": [760, 445],
       "size": [200, 66],
-      "tag": "metadata 24s, churn 10-35min"
+      "tag": "metadata 24-41s, churn 10-35min"
     },
     {
       "id": "gc",
       "type": "backend",
       "label": "gitClient",
-      "sublabel": "full clone to index",
+      "sublabel": "full to index, blobless to keep",
       "pos": [1040, 445],
       "size": [200, 66],
-      "tag": "blobless to retain"
+      "tag": "--branches --tags, never --mirror"
     },
     {
       "id": "git",
@@ -176,9 +176,9 @@
       "dot": "emerald",
       "title": "Measured at 1M commits",
       "items": [
-        "Metadata index: ~24 s. Churn index: 10-35 min",
-        "commit_files: only 1.7-6.1M rows - trivial for Postgres",
-        "Disk is the constraint: 4-50 GB per repo, not the DB"
+        "Metadata index ~24-41 s; churn index 10-35 min",
+        "Branches and tags cost 1.0-1.7x more commits than HEAD",
+        "Disk is the constraint: 4-50 GB per repo, never the DB"
       ]
     },
     {
@@ -186,17 +186,17 @@
       "title": "Keep the door open",
       "items": [
         "Per-commit-per-file facts, never monthly buckets",
-        "Bucketing kills coupling, ownership and bus factor",
-        "authors table: 3.4% of emails have multiple names"
+        "refs table: the Graph View needs branches and tags",
+        "Store the body: Tag Clustering reads Fixes #123 trailers"
       ]
     },
     {
       "dot": "amber",
-      "title": "Two freshness tiers",
+      "title": "Designed in from day one",
       "items": [
-        "Metadata delta on a 47 MB blobless clone: seconds",
-        "Churn delta needs blobs: ~94 s per 200 commits",
-        "So churn freshness lags metadata freshness"
+        "visibility + owner_user_id: private repos are a paid tier",
+        "index_state keyed by coverage, or partial reads as complete",
+        "Global authors table: GDPR erasure costs one row"
       ]
     }
   ]

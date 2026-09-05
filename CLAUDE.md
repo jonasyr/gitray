@@ -45,15 +45,35 @@ Requirements driving this: any repository size including 1M+ commits; a one-time
 persisted and never lost; shared globally with every visitor; optional notification on completion.
 A cache cannot satisfy these — it is evictable and lost on restart.
 
-Measured feasibility for a 1M-commit repository: **~24 s** to index commit metadata, **~9.4 min**
-for file churn — about **15 minutes once**, then milliseconds per delta.
+Measured feasibility for a 1M-commit repository, indexing branches and tags (not just the default
+branch): **~24-41 s** for commit metadata, **10-35 min** for file churn — roughly **15-25 minutes
+once**, then milliseconds per delta. The wide range is repository shape, not method: blob density
+varies 13x and throughput 3.7x between real repositories.
 
-Two measured constraints that shape the design:
+Measured constraints that shape the design:
 
 - **Do not clone with `--filter=blob:none` when you need `--numstat`.** It is **624x slower**,
-  because Git lazily fetches every blob over the network. Full clone for the churn pass.
-- **Index metadata and churn as separate jobs** (24 s vs 9.4 min), so the dashboard is usable in
-  under a minute.
+  because Git lazily fetches every blob over the network. Full clone for the churn pass — then
+  prune to blobless for retention, which is safe: a single-file diff on a blobless clone costs
+  0.55 s, because the penalty is on *bulk* traversal, not *point* lookup.
+- **Index metadata and churn as separate jobs**, so the dashboard is usable in under a minute.
+- **Never `--mirror`-clone and never index `--all`.** A mirror of a GitHub repo fetches
+  `refs/pull/*` — 3,288 refs on `git/git` — inflating the commit universe 2.48x with unmerged fork
+  commits and nearly doubling disk. Index the union of `--branches --tags`.
+
+Four schema decisions are load-bearing and were validated against the team's planning vault
+(`NiklasSkulll/GitRayDocs`, read 2026-09-05) — see audit §17.9:
+
+- **Per-commit-per-file facts, never monthly buckets.** Only 3-10M rows at 1M commits, and
+  bucketing forecloses change coupling, code ownership and bus factor permanently.
+- **A `refs` table, and no branch column on `commits`.** The Priority-1 Graph View Timeline needs
+  branches; a commit is reachable from many refs, so branch membership is a query, not a column.
+- **`repositories.visibility` and `owner_user_id` from the first migration.** Private repositories
+  are a paid tier; a private index must never be served globally. This is a security boundary that
+  cannot be retrofitted.
+- **A single global `authors` table.** GDPR applies — the entity is a German GbR and commit authors
+  are third-party personal data. Erasure must cost one row, and must pseudonymise the identity
+  rather than delete facts.
 
 **Hard prerequisites before any persistence work** — the current Git layer would corrupt the index:
 

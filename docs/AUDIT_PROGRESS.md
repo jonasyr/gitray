@@ -294,8 +294,72 @@ audit §17.8.
 - **Nullable additions/deletions** for binary files; **`old_path`** for the 1.4% renames, which
   appear in two formats.
 
-### Blocked
+### Blocked → RESOLVED (2026-09-05)
 
-`NiklasSkulll/GitRayDocs` returns **404** for the available token — the feature roadmap could not
-be read. If it contains per-line features (blame, line-level ownership) or code-content analysis,
-the schema needs a further column family, and that must be decided **before Phase 6**.
+`NiklasSkulll/GitRayDocs` returned **404** over HTTPS with the available token. It was then cloned
+successfully over **SSH** and read in full. The 404 was an authorisation artefact of the transport,
+not evidence the repository was unshared — an earlier draft over-read it as a hard blocker.
+
+## Roadmap reconciliation round (2026-09-05)
+
+Read: 7 planning notes, 2,945 lines — `GitRay-Features-Roadmap.md`,
+`GitRay Backend Refactor - Analysis Sessions, Indexing & Postgres-Persistenz.md`,
+`GitRay-Technical-Architecture.md`, `GitRay-Business-Legal.md`, `GitRay-Project-Overview.md`,
+`GitRay-UI-Design.md`, `Datalyt-Technologies-GbR-und-GitRay.md`.
+
+Answer to the blocking question: **no per-line features** (no blame, no line-level ownership), so
+**no further column family is needed**. The Diff Viewer, Refactoring Detection and PlantUML items
+read blobs from the clone on demand, not from the database.
+
+### Measurements taken this round
+
+| Measure | `git/git` | `facebook/react` |
+| --- | ---: | ---: |
+| Commits from `HEAD` | 82,135 | 21,678 |
+| Commits from `--branches --tags` | **85,557** (1.04x) | **35,213** (1.62x) |
+| Commits from `--all` on a `--mirror` clone | **203,538** (2.48x) | 35,213 |
+| Ref namespaces on the mirror | 3,288 `refs/pull`, 1,008 tags, 8 heads | 968 heads, 174 tags |
+| Mirror clone size | **601 MB** (vs 317 MB bare) | — |
+| Message body vs subject (10k commits) | 813 B vs 49 B — **16x** | — |
+| Single-file diff on a blobless clone | — | **550 ms** cold, **35 ms** warm |
+| Whole-commit diff on a blobless clone | — | **550 ms** |
+
+### Findings R-1 … R-7 (audit §17.9)
+
+| # | Finding |
+| --- | --- |
+| **R-1** | Branch coverage costs **1.0-1.7x** more commits. **Never `--mirror`-clone or index `--all`** — `refs/pull/*` inflates `git/git` 2.48x with unmerged fork commits and nearly doubles disk. Needs a `refs` table; delta rule becomes **per ref**. |
+| **R-2** | Priority-1 Tag Clustering and Issue Overlay need the commit **body** (16x the subject, ~813 MB at 1M commits). Store it, plus an extracted `commit_refs` table so the overlay is a join, not a scan. |
+| **R-3** | **Rescues S-6.** The Diff Viewer does *not* break blobless retention — the penalty is on *bulk* traversal, not *point* lookup (0.55 s per file). Two-tier retention stands. |
+| **R-4** | **Corrects an earlier claim.** "There are no users" is true of the code, false of the plan: accounts are Priority 2 and private repos are a paid tier. `repositories` needs `visibility` + `owner_user_id` from the first migration — a security boundary, not a feature. |
+| **R-5** | Coverage tiers are a confirmed pricing requirement. `index_state` must be keyed `(repository_id, coverage)` — v1 got this right — or a partial index is served forever as complete. v1's own `file_churn` has no time dimension and cannot serve its own coverage tiers. |
+| **R-6** | **GDPR was absent from this audit.** German GbR; commit authors are third-party personal data. This is the real justification for a **global** `authors` table: erasure costs one row, and must pseudonymise rather than delete facts. Flags an unresolved conflict between requirement 4 (persist forever) and the vault's storage-limitation commitment — a legal question, not an engineering one. |
+| **R-7** | **Contradiction inside the team's own documents, surfaced not resolved**: the refactor note forbids ranking in the UI on DSGVO grounds; the roadmap has Contribution Ranking at Priority 1 and leaderboards at Priority 4. Blocks a Priority-1 feature. |
+
+### Drift found in the planning vault (audit §12.5)
+
+React **19** (actual 18.3.1), **Jest** and `jest.config.cjs` (actual Vitest 3.2.3, no such file),
+`tailwind.config.cjs` (does not exist), backend **CommonJS** (actual ESM), `react-calendar-heatmap`
+as current (actual Recharts), and `GitService` "shallow clone with `--depth 50`" — which
+`utils/gitUtils.ts:13` records as abandoned because it produced incomplete history. **Nothing in
+that repository was modified.**
+
+### Documents updated this round
+
+| File | Change |
+| --- | --- |
+| `docs/BACKEND_ARCHITECTURE_AUDIT.md` | New **§17.9** (R-1…R-7 + summary of what changed); **§2.4b** requirements 6-11; **§12.5** vault drift; §14 schema — `refs`, `commit_refs`, `commits.body`, `repositories.visibility`/`owner_user_id`, `index_state` keyed by coverage, GDPR rationale on `authors`; §1.5 cost table + corrected `analysis_sessions` reasoning; §16 Phase 6 ref selection and Phase 7 per-ref delta; §17.7 branch caveat; §17.8 dependency resolved; §11 `PremiumFeatures` reclassified; §12.4 v1 verdict corrected; §2.2, §2.3 |
+| `docs/diagrams/gitray-option-c.architecture.json` + `.html` | Cost figures with branch coverage; cards rewritten for refs/body/visibility/coverage/GDPR; `--branches --tags, never --mirror`. Re-delivered 9/9 showcase, browser containment pass at 4 viewports |
+| `docs/diagrams/README.md` | Note on the revision |
+| `CLAUDE.md` | Architectural direction: corrected figures, mirror/`--all` warning, four load-bearing schema decisions |
+| `.serena/memories/project_overview.md`, `architecture_overview.md` | Same, for the actively-used memories |
+
+### Still open
+
+- **R-7** — the ranking contradiction is the team's decision, not the architect's.
+- **R-6** — whether retention limits apply to derived aggregate facts is a legal question for the
+  advisor already engaged for the Datenschutzerklärung.
+- Unchanged from before: `scripts/*.sh` deep behavioural read; cross-module-writes as an explicit
+  Phase 5 category; SonarCloud not run locally.
+- `~/Downloads/BACKEND_ARCHITECTURE_AUDIT.md` deliberately **not** overwritten — the brief withheld
+  authorisation to replace it.

@@ -221,11 +221,15 @@ forbids.
 
 Measurement says the plan is affordable (§17.7). For a 1,000,000-commit repository:
 
-| Stage | Cost |
-| --- | --- |
-| Commit metadata index | **~24 seconds** |
-| File churn index (`--numstat`) | **~9.4 minutes** |
-| **One-time total** | **~15 minutes**, then milliseconds per delta, shared by everyone |
+| Stage | Default branch | With branches and tags (x1.0-1.7, §17.9 R-1) |
+| --- | --- | --- |
+| Commit metadata index | ~24 seconds | **~24-41 seconds** |
+| File churn index (`--numstat`) | ~9.4 minutes | **~9.4-16 minutes** |
+| **One-time total** | ~15 minutes | **~15-25 minutes**, then milliseconds per delta, shared by everyone |
+
+The right-hand column is the one to plan against: the Priority-1 Graph View Timeline and the branch
+dropdown need branches and tags, which cost 4% more commits on `git/git` and 62% more on `react`.
+The wide spread comes from the repositories themselves, not from the method (§17.8, §17.9 R-1).
 
 So the team's original instinct — index into Postgres, then delta-update — is **correct**. An
 earlier draft of this audit recommended stopping at Option B; that draft did not have the
@@ -245,9 +249,22 @@ Three refinements this audit adds to the team's plan, all measured:
   fetches every blob (§17.7 S-1). This contradicts the v1 audit's recommendation.
 - **Index metadata and churn as two separate jobs** — 24 s versus 9.4 min. Otherwise the dashboard
   waits 15 minutes for data that was ready in 24 seconds (§17.7 S-2).
-- **Reject the `analysis_sessions` table.** There are no users — no authentication exists anywhere,
-  and results are global by requirement. `(repository, index_state, index_job)` covers every
-  responsibility a session would have.
+- **Reject the `analysis_sessions` table** — but not for the reason an earlier draft gave. That
+  draft argued "there are no users and results are global by requirement". The first half is true
+  of the code today; the second is **not true of the plan** — the team's roadmap has user accounts
+  at Priority 2 and sells private repositories as a paid tier (§17.9 R-4). The table is still the
+  wrong shape, because it conflates job state with session state, and
+  `(repository, index_state, index_job)` covers every responsibility it had. What the roadmap does
+  change is `repositories`, which needs `visibility` and `owner_user_id` **from the first
+  migration**: a private repository's index must never be served globally, and that is a security
+  boundary that cannot be retrofitted from evidence that will no longer exist.
+
+Three further constraints come from the team's own planning vault, read in full on 2026-09-05
+(§17.9): commit **bodies** must be stored for Priority-1 Tag Clustering and Issue Overlay (16x the
+subject, ~813 MB at 1M commits); **coverage** must be part of the index key, not a label, or a
+free-tier 12-month index will be served forever as though it were complete; and **GDPR** applies —
+the entity is a German GbR, commit authors are third-party personal data, and the right to erasure
+is what makes a single global `authors` table the correct design rather than merely a tidy one.
 
 ## 2. Scope and Methodology
 
@@ -276,6 +293,12 @@ Three refinements this audit adds to the team's plan, all measured:
 Both ran **before** any file in this repository was modified, so they are a true pre-existing
 baseline. See §13 for what this baseline does and does not prove.
 
+Beyond the baseline, the audit ran the application itself to reproduce C-1 (§0.2, §18.5) and
+executed three rounds of Git measurement against real external repositories to test the persistence
+plan — scale (§17.7), data shape (§17.8) and ref topology (§17.9). Those commands are listed in
+place with their results. **No command in any round wrote to this repository's source tree**;
+external clones were made under the session scratchpad.
+
 ### 2.4 Product requirements (stated by the team, 2026-09-05)
 
 These were **not** part of the original audit brief and were supplied after the first draft. They
@@ -291,8 +314,32 @@ change the recommendation materially, so they are recorded verbatim in substance
 **The current architecture cannot satisfy any of 1, 3, 4 or 5**, and requirement 2 is the reason
 persistence — rather than caching — is the right mechanism. §15 is rewritten around these.
 
+#### 2.4b Requirements recovered from the team's planning vault (read 2026-09-05)
+
+The private planning repository `NiklasSkulll/GitRayDocs` was cloned over SSH and read in full.
+It contains binding product, legal and architectural intent that the five spoken requirements above
+do not capture, and that **changes the schema**. Full analysis is in §17.9; the requirements are:
+
+| # | Requirement | Source | Schema impact |
+| --- | --- | --- | --- |
+| 6 | **Branch-aware analysis.** "Graph View Timeline" (Priority 1 ⭐) renders all branches and merges; the landing-page mock has a branch dropdown populated dynamically | `GitRay-Features-Roadmap.md`, `GitRay-UI-Design.md:114,132,231` | A `refs` table, and an indexed commit universe wider than the default branch (§17.9 R-1) |
+| 7 | **Git Diff Viewer** (Priority 1): click any file, see the diff, syntax-highlighted | `GitRay-Features-Roadmap.md` | Needs blob content at arbitrary commits — constrains the retention policy (§17.9 R-3) |
+| 8 | **Tag Clustering** (Priority 1) and **Issue Overlay**: group commits by issue tag and message pattern; link commits to Issues/PRs | `GitRay-Features-Roadmap.md` | Requires the **full commit message body**, which the current design stores nowhere (§17.9 R-2) |
+| 9 | **User accounts (Priority 2) and private repositories (paid tier).** Accounts store GitHub tokens; the free tier is "public repositories only" | `GitRay-Features-Roadmap.md`, `GitRay-Business-Legal.md` | **Contradicts requirement 2 for private repos.** Needs visibility/ownership from day one (§17.9 R-4) |
+| 10 | **Coverage tiers as a pricing lever**: free plan limited to `last_12_months`, premium gets full history | `GitRay Backend Refactor…md` §9 Phase 4, `GitRay-Business-Legal.md` | `coverage` must be part of the index's identity, not a label (§17.9 R-5) |
+| 11 | **GDPR compliance is mandatory** — the entity is a German GbR with a named supervisory authority. Right to erasure, storage limitation, data minimisation | `GitRay-Business-Legal.md` | Author identity is third-party personal data. Drives the `authors` design and conflicts with requirement 4 (§17.9 R-6) |
+
+**Requirement 2 is now known to be conditional.** It holds for public repositories. Private
+repositories are an explicit paid feature, and their index must not be globally readable. This is a
+security boundary that is cheap to design in now and expensive to retrofit.
+
 ### 2.3 Tooling used, and its limits
 
+- **The planning vault** (`NiklasSkulll/GitRayDocs`) was read on 2026-09-05 by cloning over **SSH**.
+  Worth recording because it was initially reported in this audit as inaccessible: `gh api` returned
+  **404**, which was an authorisation artefact of the HTTPS token, not evidence that the repository
+  was missing or unshared. An earlier draft over-read that 404 as a hard blocker. **Lesson applied:
+  a 404 from one transport is not proof of absence** — the SSH clone succeeded immediately.
 - **Serena (LSP)** — used for reference searches. **Not sufficient alone**: it returned an empty
   result for `withTempRepository`, which codebase-memory and grep both show has 14+ call sites in
   its own unit test. Every DEAD claim was therefore re-verified against the code graph (§13.3).
@@ -1402,7 +1449,13 @@ function is the starting point rather than something to delete.
   feature that is far out of scope right now (§17 Q-7). **Do not delete it.** Two things should
   change: label it in the UI as sample data, and fix the copy so it stops describing an *Angular*
   project as though it were a real analysis of the loaded repository.
-- **`PremiumFeatures.tsx` (421 LOC)** — static marketing/upsell UI for features that do not exist.
+- **`PremiumFeatures.tsx` (421 LOC)** — static marketing/upsell UI. Reclassified after reading the
+  planning vault: this is **not** speculative. `GitRay-Business-Legal.md` specifies a costed
+  freemium model (Premium 9.99 EUR/month, Team 29.99 EUR/month, desktop 149 EUR one-off) and the
+  free tier is "public repositories only". The component is a placeholder for a decided business
+  model whose backing features do not exist **yet**. **Do not delete**; the tiers it advertises are
+  the same ones that make `coverage` and `repositories.visibility` load-bearing in the schema
+  (§17.9 R-4, R-5).
 - **Frontend `isSignedIn`** — cosmetic; there is no auth. **VERIFIED** `App.tsx:20,72`.
 - **`distributedCacheInvalidation`** — Redis pub/sub built for multi-instance deployment, in a
   system whose locks and caches are per-process (§7.5). Constructed and wired, but its purpose is
@@ -1479,7 +1532,7 @@ reconstruction is largely sound. Claim-by-claim:
 | **M-7** `console.error` in routes | **CORRECT.** |
 | "`docs/` referenced by CLAUDE.md does not exist" | **CORRECT** at time of writing. |
 | **Method note:** "test suite and build were not executed" | **Now resolved** — both were executed here and both pass (§13). |
-| **Recommendation:** adopt PostgreSQL + job queue, delete the cache layer | **PREMATURE.** Directionally defensible but rejected as the *next* step — see §14 Option C and §15. |
+| **Recommendation:** adopt PostgreSQL + job queue, delete the cache layer | **CORRECT as the destination, premature as the next step.** This audit reversed its own earlier verdict once the product requirements (§2.4) and the planning vault (§17.9) were known: Postgres is the right end state and is Phase 6, but Phases 1 and 3 are hard prerequisites — an index built on today's lock layer and commit parser would be silently wrong. See §14 Option C and §15.1. |
 
 **What v1 missed** (added by this audit): the `repo-access:U` collision that the dashboard actually
 triggers; the memory-fallback TTL/eviction defect (P-3); the `ADMIN_AUTH_ENABLED` dual-source config
@@ -1489,6 +1542,36 @@ the React 19 vs 18 discrepancy; and a verified build/test baseline.
 
 **Conclusion:** v1 should be **retired in favour of this document**, not merged with it. Its
 findings are preserved above with independent verification.
+
+### 12.5 The planning vault (`NiklasSkulll/GitRayDocs`), read 2026-09-05
+
+The team's Obsidian planning vault was cloned over SSH and read in full. Its **product** content is
+authoritative and drives §17.9. Its **technical** content has drifted from the code in the same way
+the in-repo documentation had, and for the same reason — it was written on 2025-11-24 and describes
+intentions rather than the built system. Every row below was checked against the manifests.
+
+| Claim | Source | Reality (VERIFIED) |
+| --- | --- | --- |
+| React **v19** | `GitRay-Technical-Architecture.md`, `GitRay-Project-Overview.md` | **`^18.3.1`** in `apps/frontend/package.json`. The same error this audit found in `GEMINI.md` |
+| **Jest** for unit and integration tests; `jest.config.cjs` documented as a root config file | `GitRay-Technical-Architecture.md` | **Vitest `^3.2.3`**. There is no `jest.config.cjs` anywhere in the repository |
+| `tailwind.config.cjs` with content paths and theme extensions | `GitRay-Technical-Architecture.md` | **Does not exist.** Tailwind 4 is configured CSS-first; only `postcss.config.cjs` is present |
+| Backend `tsconfig`: "Module: **CommonJS**" | `GitRay-Technical-Architecture.md` | **ESM.** `"module": "ESNext"` and `"type": "module"` in `apps/backend/package.json` |
+| `react-calendar-heatmap` listed as the **current** visualisation library | `GitRay-Technical-Architecture.md` | **Not a dependency.** The heatmap is built on **Recharts `^2.15.2`** |
+| `D3.js` / `visx` / `Chart.js` planned | `GitRay-Technical-Architecture.md` | None present; Recharts was chosen instead. Planned-vs-built, not an error, but the note was never updated |
+| `GitService.cloneRepository` does a "shallow clone with `--depth 50`" | `GitRay-Technical-Architecture.md` | **Superseded in code.** `utils/gitUtils.ts:13` states plainly that "Previous implementation used --depth which resulted in incomplete history" and now uses blob filtering instead. The vault documents the abandoned approach |
+
+**Assessment.** This is not a criticism of the vault's purpose — it is a planning space, and its
+product, legal and design content is exactly what this audit was missing. But its
+`GitRay-Technical-Architecture.md` should be treated as **STALE for implementation facts** and is
+now a fourth source of the React 19 error (after `CLAUDE.md`, `GEMINI.md` and the Serena memories,
+all corrected in this branch). The most consequential drift is the `--depth 50` description, because
+a reader planning the indexer from that note would reproduce the very incomplete-history bug the
+code has already moved away from.
+
+**Recommendation:** in `GitRay-Technical-Architecture.md`, replace the "Tech Stack", "Configuration
+Files" and "Backend Services Deep Dive" sections with a pointer to the repository manifests and to
+this audit, keeping the vault authoritative for intent and the repository authoritative for fact.
+Those edits belong to the vault's owners; nothing in that repository was modified by this audit.
 
 ---
 
@@ -1696,26 +1779,65 @@ The three cache tiers, the transaction engine, `HybridLRUCache` and the coordina
 | `canonical_url` | `text` | no | | **UNIQUE**. Output of `canonicaliseRepoUrl` (Option A step 4) |
 | `host` | `text` | no | | denormalised for allow-list reporting |
 | `default_branch` | `text` | yes | | resolved at first index |
+| `visibility` | `text` | no | `'public'` | CHECK in (`public`, `private`). **A security boundary, not a feature** (§17.9 R-4). Requirement 2 — one analysis shown to everyone — holds only for `public`; private repositories are an explicit paid tier |
+| `owner_user_id` | `bigint` | yes | | NULL for the shared public corpus; set when a repository was indexed under a user's token. Nullable FK, so it costs nothing before accounts exist |
 | `created_at`, `updated_at` | `timestamptz` | no | `now()` | |
 
-`index_state` — generation-stamped progress per repository and branch
+`index_state` — generation-stamped progress per repository **and coverage**
+
+Keyed by coverage rather than by branch. Coverage is a pricing lever (§17.9 R-5) — the free plan
+indexes `last_12_months`, premium the full history — but it is keyed for **correctness**: a
+12-month index and a full index are different fact sets for the same repository, and if coverage
+were a label the delta rule would read a partial index's `head_sha`, conclude the repository is up
+to date, and serve truncated history as complete forever. The v1 schema got this right with
+`UNIQUE (repo_id, coverage)`; per-branch frontiers live in `refs` instead.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `id` | `bigserial` | no | PK |
 | `repository_id` | `bigint` | no | FK to `repositories(id)` **ON DELETE CASCADE** |
-| `branch` | `text` | no | **UNIQUE (repository_id, branch)** |
-| `head_sha` | `char(40)` | yes | last fully indexed commit |
-| `generation` | `integer` | no | bumped on force-reindex; every rollup row carries it |
+| `coverage` | `text` | no | **UNIQUE (repository_id, coverage)**. CHECK in (`full`, `last_12_months`, `last_30_days`) |
+| `kind` | `text` | no | `metadata` or `churn` — the two tiers index and refresh independently (§17.7 S-2, §17.8) |
+| `generation` | `integer` | no | bumped on force-reindex; every fact and rollup row carries it |
 | `status` | `text` | no | CHECK in (`pending`, `indexing`, `ready`, `failed`) |
 | `last_indexed_at` | `timestamptz` | yes | supplies the staleness signal C-2 currently lacks |
 | `error` | `text` | yes | last failure message |
+
+`refs` — branches and tags, and the per-ref indexing frontier
+
+Required by the Priority-1 Graph View Timeline and the branch dropdown (§17.9 R-1). Note what is
+**not** here: there is no branch column on `commits`. A commit is reachable from many refs, so
+branch membership is a query over `refs` plus ancestry — putting "the branch" on a fact row is
+wrong for every merged commit.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `repository_id` | `bigint` | no | FK CASCADE, part of PK |
+| `name` | `text` | no | **PK (repository_id, name)**. Full ref name, e.g. `refs/heads/main` |
+| `kind` | `text` | no | CHECK in (`branch`, `tag`) |
+| `target_sha` | `char(40)` | no | current tip as of the last fetch |
+| `indexed_sha` | `char(40)` | yes | the frontier this audit's delta rule advances **per ref** (§16 Phase 7). A force-push invalidates one ref, not the repository |
+| `is_default` | `boolean` | no | exactly one true per repository |
+
+**Ingest rule:** populate from `git for-each-ref refs/heads refs/tags` and walk
+`rev-list --branches --tags`. **Never `--mirror`-clone and never index `--all`** — on `git/git` that
+pulls in 3,288 `refs/pull/*` refs and inflates the commit universe 2.48x with unmerged fork commits
+(§17.9 R-1).
 
 `authors` — identity, deduplicated and mergeable
 
 Measurement (§17.8): distinct authors are **sublinear** (2,790 for 82k commits), and **3.4% of
 e-mail addresses appear under more than one name spelling**. Denormalised author strings would
 foreclose contributor merging and team grouping, so this is a table, not two columns.
+
+**The stronger reason is GDPR (§17.9 R-6).** Commit author names and e-mail addresses are personal
+data of third parties who never interacted with GitRay, and the operating entity is a German GbR
+bound to the right to erasure. This table is **global, not per repository**, which is what makes an
+erasure request cost **one row** — redact `display_name` and `email_normalised`, keep the surrogate
+`id`, and every fact row and aggregate stays valid. Denormalised strings would mean rewriting
+millions of fact rows; v1's per-repository `contributors` table would mean one row per repository
+the person ever touched. **Erasure is pseudonymisation of this row, never deletion of facts** —
+deleting commits would corrupt every aggregate and break the `count == rev-list --count` invariant.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -1735,6 +1857,7 @@ foreclose contributor merging and team grouping, so this is a table, not two col
 | `authored_at` | `timestamptz` | no | `%aI` |
 | `committed_at` | `timestamptz` | no | `%cI`. **Both are stored** — they diverge after a rebase, and today's code mixes them (H-3) |
 | `subject` | `text` | no | **may be empty string**; today's parser drops such commits (§17.4) |
+| `body` | `text` | yes | Required by Priority-1 Tag Clustering and Issue Overlay, which read trailers such as `Fixes #123` that are almost never on the subject line. Measured cost: **813 B per commit against 49 B for the subject — 16x**, so ~813 MB at 1M commits (§17.9 R-2). Affordable; do not scan it at query time, see `commit_refs` |
 | `parents` | `char(40)[]` | no | **Essential.** 12-26% of commits are merges (§17.8); without parents there is no topology, no branch analysis, no way to separate merge noise from work |
 | `is_merge` | `boolean` | no | derived from `array_length(parents,1) > 1`. Merges emit **no** `--numstat` output, so without this flag `commits` and `commit_files` look inconsistent and `rev-list --count` will not reconcile |
 | `generation` | `integer` | no | see rebuild semantics, §16 Phase 7 |
@@ -1762,6 +1885,23 @@ none of which is reconstructible without a full re-index.
 
 Index: `(repository_id, path)`. Batch inserts must be chunked — the largest single commit observed
 touched **2,814 files**.
+
+`commit_refs` — issue and pull-request references extracted from the message at index time
+
+Serves the Priority-1 Issue Overlay and Tag Clustering as an indexed join instead of a full-text
+scan over ~813 MB of message bodies (§17.9 R-2). Extraction is free at index time — the parser
+already holds the message — and re-deriving it later would mean re-reading every commit.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `repository_id` | `bigint` | no | FK CASCADE, part of PK |
+| `sha` | `char(40)` | no | FK → `commits`, **PK (repository_id, sha, ref_kind, ref_number)** |
+| `ref_kind` | `text` | no | CHECK in (`issue`, `pull`) |
+| `ref_number` | `integer` | no | the `#123` |
+| `relation` | `text` | yes | `fixes`, `closes`, `refs`, … parsed from the trailer verb where present |
+| `generation` | `integer` | no | |
+
+Index: `(repository_id, ref_kind, ref_number)`.
 
 `daily_activity` and `file_churn` — rollups, materialised **in addition to** the facts, never
 instead of them. Shapes as before: `(repository_id, day, author_id)` and `(repository_id, path)`,
@@ -2261,16 +2401,27 @@ before starting (baseline confirmed in §13); commit per phase.
   requirements 3, 4 and 5 (§2.4) are met.
 - **Preconditions:** Phases 1-5. **Phase 3 is non-negotiable** — the parser, the single clone path
   and a real ref must exist first, or the persisted index will be silently wrong (§15.1).
-- **Schema:** as specified in §14 Option C — `repositories`, `index_state`, `commits`,
-  `commit_files`, `daily_activity`, `file_churn`, `index_jobs`. **No `analysis_sessions` table.**
+- **Schema:** as specified in §14 Option C — `repositories`, `index_state`, `refs`, `authors`,
+  `commits`, `commit_files`, `commit_refs`, `daily_activity`, `file_churn`, `index_jobs`.
+  **No `analysis_sessions` table.** `repositories.visibility` and `owner_user_id` ship in this
+  first migration even though nothing enforces them yet (§17.9 R-4), and `index_state` is keyed
+  `(repository_id, coverage)` (§17.9 R-5).
+- **Ref selection (§17.9 R-1):** index the union of `--branches --tags`, recorded in `refs`.
+  **Do not `--mirror`-clone and do not index `--all`** — on `git/git` that pulls 3,288
+  `refs/pull/*` refs, inflating the commit universe 2.48x with unmerged fork commits and nearly
+  doubling clone size (601 MB against 317 MB). Budget **1.0-1.7x** the §17.7 figures for branch
+  coverage.
 - **Job queue:** `index_jobs` claimed with `SELECT … FOR UPDATE SKIP LOCKED`, leased with an expiry
   so a crashed worker's row returns to `queued`. A partial unique index prevents two pending jobs
   for the same `(repository_id, kind)`.
 - **Two-phase indexing (§17.7 S-2):** `kind='metadata'` first (~24 s at 1M commits), then
   `kind='churn'` (~9.4 min). `index_state` reports each independently so the dashboard can render
   everything except the churn panel within a minute.
-- **Clone policy (§17.7 S-1):** a **full** bare clone for the initial churn pass — *not*
-  `--filter=blob:none`, which is 624x slower on `--numstat`. Prune to blobless for retention.
+- **Clone policy (§17.7 S-1, §17.8 S-6, §17.9 R-3):** a **full** bare clone for the initial churn
+  pass — *not* `--filter=blob:none`, which is 624x slower on `--numstat`. **Prune to blobless for
+  retention**, which is now measured as safe for the Priority-1 Diff Viewer: the penalty is on
+  *bulk* traversal, not *point* lookup, and a single-file diff on a blobless clone costs 0.55 s
+  cold and 0.035 s warm.
 - **Idempotency:** `commits` inserted `ON CONFLICT DO NOTHING`; rollups recomputed from facts, never
   `+=`'d; `index_state.head_sha` advances only in the transaction that commits the facts.
 - **Compatibility:** dual-read. Serve from SQL when `index_state.status='ready'`, else fall back to
@@ -2280,21 +2431,30 @@ before starting (baseline confirmed in §13); commit per phase.
   once); and an **equivalence test** asserting SQL-derived output matches Git-derived output for a
   fixed repository.
 - **Verification:** a 1M-commit repository indexes end to end; `commits` row count equals
-  `git rev-list --count`. That equality is the regression test for the parser bug (§17.4).
+  `git rev-list --count --branches --tags`. That equality is the regression test for the parser
+  bug (§17.4), and the ref selection must match the one used to index or it will never reconcile.
 - **Rollback:** feature-flag the SQL read path; the Git path remains until Phase 8.
 - **Checkpoint:** ✅
 
 ### Phase 7 — Delta updates
 
 - **Objective:** keep the shared index fresh cheaply. Fixes C-2 permanently.
-- **Rule (adopted from v1 §9.2 unchanged):**
+- **Rule (adopted from v1 §9.2, extended to run per ref — §17.9 R-1):**
 
   ```text
-  fetch → new_head = rev-parse refs/remotes/origin/<default>
-  if new_head == head_sha                                   → no-op, touch indexed_at
-  if git merge-base --is-ancestor <head_sha> <new_head>     → delta: rev-list head_sha..new_head
-  else                                                       → NON-FAST-FORWARD → rebuild
+  fetch --prune
+  for each ref in refs/heads + refs/tags:            # NOT --all; see Phase 6 ref selection
+      new_tip = rev-parse <ref>
+      if new_tip == refs.indexed_sha                            -> no-op
+      if git merge-base --is-ancestor <indexed_sha> <new_tip>   -> delta: rev-list indexed_sha..new_tip
+      else                                                      -> NON-FAST-FORWARD -> rebuild this ref
+  parse the union of all deltas once, then advance every refs.indexed_sha in one transaction
   ```
+
+  Running per ref matters: a force-pushed feature branch invalidates **that ref's frontier only**,
+  not the repository's index. Deleted refs are removed by `--prune`; their commits stay as facts
+  until they are unreachable from every ref, at which point the generation sweep collects them.
+  Parse the **union** of the per-ref deltas so a commit merged into several branches is read once.
 
 - **Why rebuild is safe:** `rev-list <ref>` yields the full sha set in seconds; diff it against
   stored shas and only genuinely new commits need parsing. A force-push rewriting 50 commits costs
@@ -2376,8 +2536,14 @@ unusable:
   *Angular* project.
 - Frontend restructuring (router, state library, code splitting). Worth doing, unrelated, safe to
   defer — except the F-1 theme fix, which is independent and can be done any time.
-- Coverage tiers / pricing enforcement. The column costs nothing in Phase 6; the enforcement logic
-  should wait until the index is proven.
+- Coverage **enforcement** and pricing logic. Note the nuance after reading the planning vault
+  (§17.9 R-5): coverage is a **confirmed product requirement**, not a speculative one — the free
+  plan is limited to `last_12_months` — and it must be part of the `index_state` key in Phase 6 for
+  correctness, not merely as a column. Only the *enforcement* waits until the index is proven.
+- GDPR implementation — the erasure endpoint, retention automation and the ranking decision
+  (§17.9 R-6, R-7). The schema is designed so these remain cheap (one row per identity), but they
+  are legal-facing work, and R-7 is an unresolved contradiction between the team's own documents
+  that must be decided by them before the Priority-1 Contribution Ranking feature is specified.
 
 ## 17. Risks and Open Questions
 
@@ -2561,6 +2727,11 @@ Three conclusions that bear directly on the architecture decision:
 Measured on real repositories on 2026-09-05, to test whether the team's persistence plan is viable
 at the stated scale. **This is the most decision-relevant data in the audit.**
 
+> **Scope caveat added after §17.9.** Every figure in this section was measured on the **default
+> branch**. The Priority-1 Graph View Timeline and the branch dropdown require branches and tags,
+> which cost **1.0-1.7x** more commits (4% on `git/git`, 62% on `react`). Treat these numbers as
+> the floor and apply that multiplier — see §17.9 R-1.
+
 | Repository | Commits | Full bare clone | Blobless bare clone | `--numstat` on FULL | `--numstat` on BLOBLESS |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `p-limit` *(clean, isolated run)* | 81 | 150 KB | 111 KB | **63 ms** | **39,299 ms** |
@@ -2727,12 +2898,214 @@ Given that the full-granularity table is only 1.7-6.1 M rows per 1M-commit repos
 performance reason to aggregate away information at write time.** Materialise rollups *in addition*
 to the facts, never *instead of* them.
 
-**Open dependency:** the team's feature roadmap (`GitRayDocs/GitRayPlanning/3_notes/`) could not be
-read — the repository is private and returns 404 for the available token. The recommendations above
-are derived from the measured data shape and from what the existing endpoints already do. **If the
-roadmap contains features needing per-line data (blame, ownership by line) or code content (AI
-analysis of source), the schema needs a further column family**, and that decision should be made
-before Phase 6.
+**Dependency RESOLVED (2026-09-05).** The team's planning vault
+(`GitRayDocs/GitRayPlanning/3_notes/`) was cloned over SSH and read in full; the earlier 404 was an
+access problem, not a missing repository. It confirms the full-granularity decision above and adds
+six requirements the measured data shape alone could not reveal — branch coverage, commit bodies,
+account and private-repository support, coverage tiers, and GDPR. **See §17.9**, which supersedes
+this note and lists exactly what changed as a result.
+
+On the specific question posed here: the roadmap has **no per-line feature** (no blame, no
+line-level ownership), so no further column family is needed. The nearest items — a Git Diff Viewer
+at Priority 1, and Refactoring Detection and PlantUML generation at Priority 3-4 — read blobs from
+the clone on demand rather than from the database, and §17.9 R-3 measures that this works on the
+pruned blobless copy.
+
+### 17.9 Roadmap reconciliation — what the planning vault requires of the schema
+
+**Status: VERIFIED.** `NiklasSkulll/GitRayDocs` was cloned over SSH on 2026-09-05 and read in full
+(7 planning notes, 2,945 lines). This resolves the blocking dependency recorded in §17.8. Six
+requirements land on the schema; three of them **change decisions made earlier in this audit**, and
+each is measured below rather than asserted.
+
+#### R-1 — Branch coverage: the commit universe is wider than HEAD, and how much wider varies 15x
+
+Every cost figure elsewhere in this audit (§17.7, §17.8) was measured on the **default branch
+only**. The roadmap's Priority-1 "Graph View Timeline" and the branch dropdown in
+`GitRay-UI-Design.md:132` require branches and tags. Measured on two clones:
+
+| Ref selection | `git/git` | vs HEAD | `facebook/react` | vs HEAD |
+| --- | ---: | ---: | ---: | ---: |
+| `HEAD` | 82,135 | 1.00x | 21,678 | 1.00x |
+| **`--branches --tags`** | **85,557** | **1.04x** | **35,213** | **1.62x** |
+| `--all` on a `--mirror` clone | 203,538 | **2.48x** | 35,213 | 1.62x |
+
+Two findings, both actionable:
+
+1. **Branch coverage is affordable, but budget for it.** It costs **4% more commits on `git/git`
+   and 62% more on `react`** (968 branches). Multiply the §17.7 and §17.8 cost and row estimates by
+   **1.0-1.7x**; they were not wrong, but they were the floor.
+2. **Never clone with `--mirror`, and never index `--all`.** A mirror of a GitHub repository
+   fetches `refs/pull/*` — **3,288 pull-request refs on `git/git`** — which inflates the commit
+   universe to **2.48x** with commits from forks that were never merged and are not part of the
+   project's history. It also nearly doubles disk: the `git/git` mirror is **601 MB** against
+   **317 MB** for the ordinary bare clone (§17.8). The correct selection is
+   **`--branches --tags`**.
+
+   ```text
+   git for-each-ref  # on the git/git mirror
+     3288 refs/pull      <- fetched by --mirror, must not be indexed
+     1008 refs/tags
+        8 refs/heads
+        1 refs/notes
+   ```
+
+**Schema consequence:** a `refs` table, and `commits` keyed by `(repository_id, sha)` with no branch
+column — a commit is reachable from many refs, so branch membership is a *query* over `refs` plus
+ancestry, never a column on the fact row. Storing "the branch" on a commit is the classic error here
+and would be wrong for every merged commit.
+
+**Migration consequence (§16 Phase 7):** the delta rule is currently written for one ref. It must
+run **per ref**, and the `merge-base --is-ancestor` fast-forward guard applies per ref: a branch
+that was force-pushed invalidates only that branch's frontier, not the repository's index. The
+reconciliation invariant becomes `count(commits) == git rev-list --count --branches --tags`.
+
+#### R-2 — The commit body is required, and costs 16x the subject
+
+"Tag Clustering" (Priority 1) groups commits by issue tag and by message pattern
+(`bugfix`, `feature`, `refactor`); "Issue Overlay" links commits to GitHub Issues and PRs. Both read
+the **body**, not the subject — a `Fixes #123` trailer is almost never on the subject line. The
+schema in §14 stores `subject` only.
+
+Measured over 10,000 `git/git` commits:
+
+| Stored field | Bytes | Per commit | Extrapolated to 1M commits |
+| --- | ---: | ---: | ---: |
+| `subject` (`%s`) | 489,499 | 49 B | **49 MB** |
+| full message (`%B`) | 8,129,757 | 813 B | **813 MB** |
+
+**Verdict: store the body.** 813 MB at the extreme end of the size range is affordable, and the
+feature is Priority 1. But do **not** make the Issue Overlay scan it: extract issue and PR
+references at index time into a narrow `commit_refs` table, so the overlay is an indexed join rather
+than a full-text scan of 813 MB. Extraction at index time is free — the parser already has the
+message in hand — and re-deriving it later would mean re-reading every commit.
+
+#### R-3 — The Diff Viewer does **not** break blobless retention (this rescues S-6)
+
+§17.8 measured that `--numstat` over a blobless clone is 37-100x slower, and concluded that blobs
+must be present for churn indexing. The Priority-1 Diff Viewer appeared to extend that to
+retention — if a user can click any file in any commit, the blobs can never be pruned.
+
+Measured on the blobless `react` clone (47 MB):
+
+| Operation | Cold (lazy fetch) | Warm |
+| --- | ---: | ---: |
+| Single-file diff, `git diff <sha>^ <sha> -- <path>` | **550 ms** | **35 ms** |
+| Whole-commit diff, `git show <sha>` | **550 ms** | — |
+
+**The distinction is bulk versus point access, not blobless versus full.** A partial clone's lazy
+fetch costs roughly one network round trip; that is catastrophic when repeated across 200 commits
+(93.7 s, §17.8 S-6) and entirely acceptable once, on click (0.55 s). So the two-tier retention
+policy in §17.8 **stands and is now stronger**:
+
+| Access pattern | Clone needed | Measured |
+| --- | --- | --- |
+| Bulk history traversal (churn indexing, `--numstat`) | **full** | 37-100x penalty on blobless |
+| Point lookup (Diff Viewer, one file or one commit) | **blobless is fine** | 0.55 s cold, 0.035 s warm |
+
+Prune to blobless after the churn pass, and serve the Diff Viewer from the blobless copy.
+
+#### R-4 — Accounts and private repositories exist, and requirement 2 does not survive contact with them
+
+§1.5 and §14 reject the v1 `analysis_sessions` table partly on the grounds that "there are no
+users — no authentication exists anywhere, and results are global by requirement." **The first half
+of that sentence is true today and the second half is not true of the plan.** The roadmap has user
+accounts at Priority 2, and `GitRay-Business-Legal.md` makes private-repository support a paid tier
+with the free tier explicitly "public repositories only".
+
+**The rejection of `analysis_sessions` still stands**, but on its own merits and not this one: it
+conflates job state with session state, and `(repository, index_state, index_job)` covers every
+responsibility it had (§14). What must change is the `repositories` table:
+
+| Column | Why it must exist from the first migration |
+| --- | --- |
+| `visibility` (`'public'` / `'private'`) | A private repository's index must never be served to a visitor who is not authorised. Requirement 2 — "shown to everyone" — is **conditional on public**. |
+| `owner_user_id` (nullable FK) | NULL for the public global corpus; set for a repository indexed under a user's token. |
+
+This is a **security boundary**, not a feature. Adding it later means a migration that must
+retroactively decide the visibility of every already-indexed repository, with no reliable evidence
+to decide it from — and the failure mode is disclosing the structure, file paths and contributor
+identities of a private codebase. The columns cost nothing now. **Enforcement** logic can wait; the
+columns cannot.
+
+#### R-5 — Coverage is part of the index's identity, and v1 got this right
+
+`GitRay Backend Refactor...md` §9 Phase 4 and `GitRay-Business-Legal.md` make coverage a pricing
+lever: the free plan is limited to `last_12_months`, premium gets full history. The v1 schema
+encodes this correctly with `UNIQUE (repo_id, coverage)` on `analysis_runs` — **this audit should
+credit that rather than drop it.**
+
+It matters for correctness, not just billing: a 12-month index and a full index are **different
+fact sets for the same repository**. If coverage is a label rather than part of the key, the delta
+rule will read a partial index's `head_sha`, conclude the repository is up to date, and permanently
+serve truncated history as though it were complete. `index_state` is therefore keyed
+`(repository_id, coverage)`.
+
+One consequence the v1 document does not draw: its `file_churn` table stores lifetime totals per
+path with **no time dimension at all**, so it cannot answer "churn in the last 12 months" — the very
+query its own coverage tiers require, and it forecloses hotspot decay. The per-commit-per-file
+granularity argued for in §17.8 resolves this; it is another reason not to pre-aggregate.
+
+#### R-6 — GDPR: the strongest argument for the `authors` table, and a real conflict with requirement 4
+
+`GitRay-Business-Legal.md` establishes that the operating entity is a German **GbR** subject to a
+named supervisory authority, and commits GitRay to the right to erasure, storage limitation and data
+minimisation. This audit had **no coverage of it**, and it bears directly on the schema: commit
+author names and e-mail addresses are **personal data of third parties who never interacted with
+GitRay**, indexed at a scale of thousands of identities per repository.
+
+**This is the real justification for a single global `authors` table** — stronger than the
+deduplication argument in §17.8:
+
+| Design | Cost of one erasure request |
+| --- | --- |
+| Author strings denormalised onto `commits` | Rewrite every matching fact row — millions, across every repository indexed |
+| v1's per-repository `contributors` table | One row **per repository** the person ever contributed to |
+| **A global `authors` table (recommended)** | **One row.** Redact `display_name` and `email_normalised`, keep the surrogate `id`; every fact row and every aggregate stays valid |
+
+Erasure should therefore be **pseudonymisation of the identity row**, never deletion of facts —
+deleting commits would silently corrupt every aggregate and break the
+`count == rev-list --count` invariant.
+
+**An unresolved conflict the team must decide, not the architect:** requirement 4 says the analysis
+"must be persisted so the work is never lost"; `GitRay-Business-Legal.md` commits to **storage
+limitation** — "define retention periods, automatic deletion after period expires" — and to
+"delete temporary repositories after analysis", which is in tension with retaining clones for cheap
+delta updates. The technical reading that satisfies both is that retention limits apply to *personal
+data and working clones*, while derived aggregate facts persist. **That reading is a legal question,
+not an engineering one**, and should be put to the same advisor already engaged for the
+Datenschutzerklärung.
+
+#### R-7 — A contradiction inside the team's own documents (not hidden, not resolved here)
+
+The two planning notes disagree, and the schema cannot settle it:
+
+- `GitRay Backend Refactor...md` §8.2, on the `contributors` table:
+  **"Keine Ranking-Ausgabe im UI (DSGVO)"** — no ranking may be displayed, on data-protection
+  grounds.
+- `GitRay-Features-Roadmap.md` Priority 1: **"Contribution Ranking"** — lines added/removed,
+  commit counts, files touched, per user. Priority 4 adds **leaderboards** and **gamification with
+  member levels by commit count**. `GitRay-Project-Overview.md` lists "Contribution analysis and
+  ranking" in the core value proposition.
+
+These cannot all be true. The schema is unaffected — `commit_count` is stored either way, and it is
+the *display* that is at issue — but this is a **product and legal decision that blocks a Priority-1
+feature**, and it should be resolved before that feature is specified. Ranking colleagues by output
+is precisely the kind of processing a works council or a DPO will scrutinise.
+
+#### Summary — what changed in this audit as a result
+
+| § | Was | Now |
+| --- | --- | --- |
+| §17.7, §17.8 cost models | Default branch only | Multiply by **1.0-1.7x** for branch coverage (R-1) |
+| §17.8 retention | "Prune to blobless" left the Diff Viewer unresolved | **Confirmed safe** — point lookups cost 0.55 s (R-3) |
+| §14 `commits` | `subject` only | Adds `body`, plus an extracted `commit_refs` table (R-2) |
+| §14 schema | No refs | Adds `refs`; branch membership is a query, never a column (R-1) |
+| §14 `repositories` | Global, unqualified | Adds `visibility` + `owner_user_id` (R-4) |
+| §14 `index_state` | Keyed by repository | Keyed by **`(repository_id, coverage)`** (R-5) |
+| §1.5 reasoning | "There are no users" | True today, **false of the plan** (R-4) |
+| §14 `authors` | Justified by deduplication | Justified primarily by **GDPR erasure** (R-6) |
+| — | GDPR absent | New constraint, with one unresolved legal conflict (R-6, R-7) |
 
 ### 17.3 Diagram index
 
