@@ -252,7 +252,7 @@ Extrapolated to 1M commits on a full clone: metadata **~24 s**, churn **~9.4 min
 ### Documents updated for the reversal
 
 Audit §1.5, §2.4 (new: requirements), §14 Option B/C, §15.1 (rewritten), §16 (Phases 6-10 added,
-Phase 3 clone policy corrected), §17.7 (new: scale measurements), §17.3 diagram index;
+Phase 3 clone policy corrected), §17.7 (new: scale measurements), §17.10 diagram index;
 `gitray-option-c` and `gitray-target-architecture` diagrams; `docs/diagrams/README.md`;
 `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`; two Serena memories.
 
@@ -377,7 +377,7 @@ belongs to.
 | Nothing added | The capture renders only what the delivered artifact already contains; no diagram was redrawn, and no `.json` spec or `.html` was modified this round |
 | Reproducible | `node docs/diagrams/capture-png.mjs` — the only new file. A second run reproduced all twelve at identical dimensions and sizes |
 | Placement | Where a section already carried a Mermaid sketch (§4.1, §5.1, §6.1, §7.1) the sketch was **kept** and the rendered diagram placed after it. C-1's sequence sits under `#### C-1`, not under `### 10.1 CRITICAL` |
-| Also updated | Audit §17.3 (index now links every file and names the section it is embedded in); `docs/diagrams/README.md` (gallery of all twelve + regeneration steps); `CLAUDE.md` context links |
+| Also updated | Audit §17.10 (index now links every file and names the section it is embedded in); `docs/diagrams/README.md` (gallery of all twelve + regeneration steps); `CLAUDE.md` context links |
 
 Verification: `pnpm lint:md` — 0 errors across 12 files; every image and diagram link resolved
 against the working tree (**NONE broken**); `git diff` on `*.ts/*.tsx/*.mjs/*.js/*.css` under
@@ -387,3 +387,44 @@ Note the maintenance hazard this introduces, and why the script exists: a PNG is
 `.json` spec is re-delivered and `capture-png.mjs` is not re-run, the Markdown silently shows the
 previous diagram while claiming to show the current one. That is recorded in `CLAUDE.md` and in the
 diagrams README.
+
+## Shareable rendering round (2026-09-05)
+
+The audit existed only as Markdown plus separate diagram files, which is fine in the repository and
+poor for sending to anyone. It now also ships as **one self-contained file**.
+
+| Output | Detail |
+| --- | --- |
+| `docs/GitRay-Architecture-Audit.html` | 4.2 MB, single file. Stylesheet, all twelve diagram PNGs (data URIs), the five Mermaid figures pre-rendered to SVG, and syntax highlighting are all inlined. **Zero network requests** — verified by asserting no `img/script/link` resolves to an `http(s)` URL |
+| `docs/GitRay-Architecture-Audit.pdf` | 6.3 MB, 117 pages, A4, generated from the same file through its print stylesheet |
+| `docs/audit-html/` | `build.mjs` (the generator), `style.css`, `transform.js` (runs in the page), `runtime.js` (ships with the output). Mermaid and highlight.js are pinned and cached into a gitignored `.cache/` on first run |
+
+Reading affordances added by the renderer, all derived from the Markdown rather than authored:
+a contents rail with scroll-spy and a filter, a reading-progress line, `figure`/`figcaption` pairs
+for the twelve diagrams, severity chips on the C/S/R/Q finding headings (32 of them), and **205
+cross-references**: every `§n.n` in the prose became a link to that section.
+
+### Defects this round found in the Markdown itself
+
+| Defect | Fix |
+| --- | --- |
+| **Two different sections were both numbered §0.2.** All seven inbound `§0.2` references mean the first (the C-1 reproduction), so the references were never wrong — but the number was ambiguous | Second became §0.3, and "Where to start" §0.3 became §0.4 |
+| §2.4 preceded §2.3, and §13.3 preceded §13.2 | Blocks moved so the numbering ascends; no content changed, no reference affected |
+| §17.3 (the diagram index) sat at the end of §17, after §17.9 | Renumbered **§17.10**, which is where it reads; it had no inbound references. Two mentions in this ledger were updated |
+| A doubled `---` before §0 | Collapsed. The renderer now also drops a rule that immediately precedes a heading, since the heading carries its own |
+
+### Verification
+
+| Check | Result |
+| --- | --- |
+| Section numbers | no duplicates, none out of order, no dangling `§` reference except `§9.2`, which correctly points into the **v1** document |
+| Internal anchors in the HTML | 317 links checked, **0 dead** |
+| External resources | **none** — the file is fully offline |
+| Images / Mermaid | 12/12 decoded, 5/5 rendered, at 1440x900, 1920x1080 and 900x1200 |
+| Horizontal overflow | none at any of the three viewports; wide tables scroll inside their own container |
+| `pnpm lint:md` | 0 errors |
+| Source tree | `git diff` on `apps/` and `packages/` — **empty** |
+
+Same hazard as the diagram PNGs, and worth repeating: the HTML and the PDF are copies. Edit the
+Markdown without re-running `node docs/audit-html/build.mjs --pdf` and they will keep presenting the
+previous version as current.

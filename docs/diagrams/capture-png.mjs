@@ -16,6 +16,7 @@
  * ARCHIFY_SKILL overrides the Archify install location; ARCHIFY_CHROME is only
  * needed when no Chrome or Chromium is discoverable on PATH.
  */
+/* global process, console, Buffer, URL */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

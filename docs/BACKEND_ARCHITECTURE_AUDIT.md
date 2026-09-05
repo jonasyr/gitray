@@ -26,8 +26,6 @@ Evidence format: `path/to/file.ts :: symbolName` or `path/to/file.ts:LINE`.
 
 ---
 
----
-
 ## 0. Repository Status and Empirical Validation
 
 **No production code has been changed by this audit.** The repository is at `dev` / `12efe61`, and
@@ -102,7 +100,7 @@ Two further defects surfaced in the same burst, in the server log:
 in fact a **present, reproducible, user-visible outage of half the dashboard on any repository not
 already cached.**
 
-### 0.2 Baseline as it stands today
+### 0.3 Baseline as it stands today
 
 | Check | Result on unmodified `dev` |
 | --- | --- |
@@ -115,7 +113,7 @@ C-8 was re-confirmed after this audit's experiments were reverted: the very next
 showed `1 failed | 58 passed` with 36 skipped. The flakiness is pre-existing and is **not** an
 artefact of anything done here.
 
-### 0.3 Where to start
+### 0.4 Where to start
 
 Nothing in §16 has been done. Phase 0 (safety net) and Phase 1 (correctness) are the entry point,
 and §18.5 gives you Phase 0's first test verbatim.
@@ -299,6 +297,39 @@ plan — scale (§17.7), data shape (§17.8) and ref topology (§17.9). Those co
 place with their results. **No command in any round wrote to this repository's source tree**;
 external clones were made under the session scratchpad.
 
+### 2.3 Tooling used, and its limits
+
+- **The planning vault** (`NiklasSkulll/GitRayDocs`) was read on 2026-09-05 by cloning over **SSH**.
+  Worth recording because it was initially reported in this audit as inaccessible: `gh api` returned
+  **404**, which was an authorisation artefact of the HTTPS token, not evidence that the repository
+  was missing or unshared. An earlier draft over-read that 404 as a hard blocker. **Lesson applied:
+  a 404 from one transport is not proof of absence** — the SSH clone succeeded immediately.
+- **Serena (LSP)** — used for reference searches. **Not sufficient alone**: it returned an empty
+  result for `withTempRepository`, which codebase-memory and grep both show has 14+ call sites in
+  its own unit test. Every DEAD claim was therefore re-verified against the code graph (§13.3).
+- **codebase-memory-mcp** — code knowledge graph. Used for Tarjan/Leiden structure, complexity and
+  loop-depth metrics, `Route` enumeration, and inbound call tracing for dead-code verification.
+- **grep** — used for discovery only.
+- **TypeScript compiler + Vitest** — ground truth for build and test status.
+- **Archify** — used for the diagram deliverables.
+
+**Recorded limitations — these bound the confidence of this document:**
+
+1. **Serena was unavailable for the first half of this audit** (`CONNECT_TIMEOUT`), then recovered.
+   Findings made during the outage were re-verified with Serena afterwards.
+2. **`codebase-memory-mcp` — initially misreported by this audit, then used extensively.**
+   An earlier draft recorded this server as broken. That was **my error, not a tool defect**: the
+   query tools take a `project` name (`C-Users-JW-Documents-Code-gitray`), and I was passing a
+   `repo_path`. Once corrected, the graph (2,865 nodes / 6,865 edges) was used for cycle detection,
+   complexity and hot-path analysis, route enumeration, and independent re-verification of every
+   dead-code claim. **It caught a false negative in Serena** (§13.3).
+3. **No runtime observation.** The server was never started, no repository was analysed end-to-end,
+   and Redis was never connected. All runtime claims are static reconstruction. Anything that would
+   require measurement to confirm is tagged INFERRED and listed in §17.
+4. **No load testing.** `apps/backend/perf/load-test.ts` (k6) was read but not executed.
+
+---
+
 ### 2.4 Product requirements (stated by the team, 2026-09-05)
 
 These were **not** part of the original audit brief and were supplied after the first draft. They
@@ -332,39 +363,6 @@ do not capture, and that **changes the schema**. Full analysis is in §17.9; the
 **Requirement 2 is now known to be conditional.** It holds for public repositories. Private
 repositories are an explicit paid feature, and their index must not be globally readable. This is a
 security boundary that is cheap to design in now and expensive to retrofit.
-
-### 2.3 Tooling used, and its limits
-
-- **The planning vault** (`NiklasSkulll/GitRayDocs`) was read on 2026-09-05 by cloning over **SSH**.
-  Worth recording because it was initially reported in this audit as inaccessible: `gh api` returned
-  **404**, which was an authorisation artefact of the HTTPS token, not evidence that the repository
-  was missing or unshared. An earlier draft over-read that 404 as a hard blocker. **Lesson applied:
-  a 404 from one transport is not proof of absence** — the SSH clone succeeded immediately.
-- **Serena (LSP)** — used for reference searches. **Not sufficient alone**: it returned an empty
-  result for `withTempRepository`, which codebase-memory and grep both show has 14+ call sites in
-  its own unit test. Every DEAD claim was therefore re-verified against the code graph (§13.3).
-- **codebase-memory-mcp** — code knowledge graph. Used for Tarjan/Leiden structure, complexity and
-  loop-depth metrics, `Route` enumeration, and inbound call tracing for dead-code verification.
-- **grep** — used for discovery only.
-- **TypeScript compiler + Vitest** — ground truth for build and test status.
-- **Archify** — used for the diagram deliverables.
-
-**Recorded limitations — these bound the confidence of this document:**
-
-1. **Serena was unavailable for the first half of this audit** (`CONNECT_TIMEOUT`), then recovered.
-   Findings made during the outage were re-verified with Serena afterwards.
-2. **`codebase-memory-mcp` — initially misreported by this audit, then used extensively.**
-   An earlier draft recorded this server as broken. That was **my error, not a tool defect**: the
-   query tools take a `project` name (`C-Users-JW-Documents-Code-gitray`), and I was passing a
-   `repo_path`. Once corrected, the graph (2,865 nodes / 6,865 edges) was used for cycle detection,
-   complexity and hot-path analysis, route enumeration, and independent re-verification of every
-   dead-code claim. **It caught a false negative in Serena** (§13.3).
-3. **No runtime observation.** The server was never started, no repository was analysed end-to-end,
-   and Redis was never connected. All runtime claims are static reconstruction. Anything that would
-   require measurement to confirm is tagged INFERRED and listed in §17.
-4. **No load testing.** `apps/backend/perf/load-test.ts` (k6) was read but not executed.
-
----
 
 ## 3. Repository Overview
 
@@ -1624,23 +1622,6 @@ Those edits belong to the vault's owners; nothing in that repository was modifie
 | Are there external APIs? | Repo-wide search for HTTP clients | **None** |
 | Route inventory | Read all four route modules end to end | §4.2 |
 
-### 13.3 Where the tools disagreed
-
-Two independent tools were used for reachability, and they did not always agree. This is recorded
-because it changes how much confidence a reader should place in any single "dead code" claim.
-
-| Symbol | Serena `find_referencing_symbols` | codebase-memory `trace_path` | Ground truth (grep) |
-| --- | --- | --- | --- |
-| `withTempRepository` | `{}` — no references | 1 test caller | **14+ call sites in `withTempRepository.unit.test.ts`** |
-| `handleValidationErrors` | `{}` — no references | 1 test caller | test-only |
-| `invalidateCachedRepository` | `{}` | none | genuinely unreferenced |
-| `getCommitsWithStats` | 5 test references | 1 test caller | test-only |
-
-**Conclusion:** Serena under-reports references in this repository — for `withTempRepository` it
-returned nothing where 14 call sites exist. Every reachability claim in §11.1 has been re-verified
-against the code graph, and the wording changed from "zero references" to the accurate "no
-production caller". **Do not delete anything in §11.1 on the strength of a single tool.**
-
 ### 13.2 What the green test suite does **not** prove
 
 This is important, because a green run is easy to misread as "the system is correct."
@@ -1660,6 +1641,23 @@ This is important, because a green run is easy to misread as "the system is corr
 attributable to that work.
 
 ---
+
+### 13.3 Where the tools disagreed
+
+Two independent tools were used for reachability, and they did not always agree. This is recorded
+because it changes how much confidence a reader should place in any single "dead code" claim.
+
+| Symbol | Serena `find_referencing_symbols` | codebase-memory `trace_path` | Ground truth (grep) |
+| --- | --- | --- | --- |
+| `withTempRepository` | `{}` — no references | 1 test caller | **14+ call sites in `withTempRepository.unit.test.ts`** |
+| `handleValidationErrors` | `{}` — no references | 1 test caller | test-only |
+| `invalidateCachedRepository` | `{}` | none | genuinely unreferenced |
+| `getCommitsWithStats` | 5 test references | 1 test caller | test-only |
+
+**Conclusion:** Serena under-reports references in this repository — for `withTempRepository` it
+returned nothing where 14 call sites exist. Every reachability claim in §11.1 has been re-verified
+against the code graph, and the wording changed from "zero references" to the accurate "no
+production caller". **Do not delete anything in §11.1 on the strength of a single tool.**
 
 ## 14. Refactoring Options
 
@@ -3155,7 +3153,7 @@ is precisely the kind of processing a works council or a DPO will scrutinise.
 | §14 `authors` | Justified by deduplication | Justified primarily by **GDPR erasure** (R-6) |
 | — | GDPR absent | New constraint, with one unresolved legal conflict (R-6, R-7) |
 
-### 17.3 Diagram index
+### 17.10 Diagram index
 
 Twelve interactive diagrams accompany this audit, in `docs/diagrams/`. Each was produced with
 Archify at the `showcase` quality profile (9/9 artifact checks, 0 errors, 0 warnings) and verified

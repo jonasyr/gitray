@@ -1,0 +1,3 @@
+# Cached CDN bundles fetched by build.mjs
+
+.cache/

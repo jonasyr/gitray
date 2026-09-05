@@ -189,6 +189,9 @@ If unsure where to place code, search existing modules and mirror their location
   Read this before any structural work. It documents the verified current architecture, five
   critical/high defects (including a live cross-request data-corruption bug in `lockManager`),
   dead code, documentation drift, and the recommended phased refactor.
+- Shareable rendering of that audit: `docs/GitRay-Architecture-Audit.html` (one self-contained
+  file, opens offline) and `docs/GitRay-Architecture-Audit.pdf`. Both are **generated** — after
+  editing the audit run `node docs/audit-html/build.mjs --pdf`, or they keep showing the old text.
 - Diagrams: `docs/diagrams/*.html` (current architecture, target architecture, the lock defect).
   Each is also embedded inline in the audit section it belongs to, as a PNG in
   `docs/diagrams/img/`. After changing any diagram, run `node docs/diagrams/capture-png.mjs`
