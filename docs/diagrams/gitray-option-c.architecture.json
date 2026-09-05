@@ -69,8 +69,8 @@
       "id": "db",
       "type": "database",
       "label": "PostgreSQL",
-      "sublabel": "commits, commit_files, rollups",
-      "tag": "persisted, shared",
+      "sublabel": "facts at full granularity",
+      "tag": "1.7-6.1M rows at 1M commits",
       "pos": [280, 445],
       "size": [220, 66]
     },
@@ -81,16 +81,16 @@
       "sublabel": "NEW second process",
       "pos": [760, 445],
       "size": [200, 66],
-      "tag": "24s + 9.4min at 1M"
+      "tag": "metadata 24s, churn 10-35min"
     },
     {
       "id": "gc",
       "type": "backend",
       "label": "gitClient",
-      "sublabel": "FULL clone for churn",
+      "sublabel": "full clone to index",
       "pos": [1040, 445],
       "size": [200, 66],
-      "tag": "blobless is 624x slower"
+      "tag": "blobless to retain"
     },
     {
       "id": "git",
@@ -176,26 +176,27 @@
       "dot": "emerald",
       "title": "Measured at 1M commits",
       "items": [
-        "Commit metadata index: ~24 seconds",
-        "File churn index: ~9.4 minutes",
-        "One-time ~15 min, then milliseconds per delta"
+        "Metadata index: ~24 s. Churn index: 10-35 min",
+        "commit_files: only 1.7-6.1M rows - trivial for Postgres",
+        "Disk is the constraint: 4-50 GB per repo, not the DB"
       ]
     },
     {
       "dot": "cyan",
-      "title": "Why only this option qualifies",
+      "title": "Keep the door open",
       "items": [
-        "A cache is evictable and lost on restart",
-        "Requirement: analysis persisted and never lost",
-        "Requirement: shared globally, notify on completion"
+        "Per-commit-per-file facts, never monthly buckets",
+        "Bucketing kills coupling, ownership and bus factor",
+        "authors table: 3.4% of emails have multiple names"
       ]
     },
     {
       "dot": "amber",
-      "title": "Hard prerequisites",
+      "title": "Two freshness tiers",
       "items": [
-        "Phase 1: the lock layer swaps payloads today",
-        "Phase 3: parser drops commits - 4 in, 3 out"
+        "Metadata delta on a 47 MB blobless clone: seconds",
+        "Churn delta needs blobs: ~94 s per 200 commits",
+        "So churn freshness lags metadata freshness"
       ]
     }
   ]

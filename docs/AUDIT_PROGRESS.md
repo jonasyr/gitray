@@ -255,3 +255,47 @@ Audit §1.5, §2.4 (new: requirements), §14 Option B/C, §15.1 (rewritten), §1
 Phase 3 clone policy corrected), §17.7 (new: scale measurements), §17.3 diagram index;
 `gitray-option-c` and `gitray-target-architecture` diagrams; `docs/diagrams/README.md`;
 `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`; two Serena memories.
+
+---
+
+## Schema validation round (2026-09-05)
+
+Measured the **data shape** on two repositories with deliberately different profiles, to test
+whether the proposed schema is right and whether it forecloses future features. Full detail in
+audit §17.8.
+
+| Measure | `git/git` (82k commits) | `facebook/react` (21.7k commits) |
+| --- | ---: | ---: |
+| Full clone | 317 MB | **1.1 GB** (13x more per commit) |
+| numstat throughput | 1,774 commits/s | **482 commits/s** (3.7x spread) |
+| Merge commits | 25.9% | 12.0% |
+| File rows per commit | 1.66 | 6.11 |
+| Distinct authors | 2,790 | 2,163 (sublinear) |
+| Max files in one commit | 928 | **2,814** |
+| Blobless clone | 117 MB | **47 MB** (23x smaller) |
+
+### New findings
+
+| ID | Finding |
+| --- | --- |
+| **S-4** | §17.7's single-point estimates were the optimistic end. Corrected range for 1M commits: **9.4-34.6 min** churn index, **4-50 GB** clone. Disk depends on blob profile, not commit count. |
+| **S-5** | Blobless retention is 2.7-23x smaller and fully supports metadata deltas: `rev-list` 365 ms, `merge-base --is-ancestor` 279 ms on react. |
+| **S-6** | **Refutes the naive retention plan**: churn deltas on a blobless clone are 37-100x slower (94 s per 200 commits), and re-cloning full is no better (100 s). → **decouple metadata freshness from churn freshness.** |
+
+### Schema decisions the data settled
+
+- **Keep per-commit-per-file facts; reject v1's `file_churn_monthly` bucketing.** Only 1.7-6.1 M
+  rows at 1M commits. Bucketing would permanently foreclose change coupling, code ownership, bus
+  factor and hotspot decay.
+- **Add an `authors` table with a `canonical_author_id` self-FK** — 3.4% of e-mails appear under
+  multiple name spellings, so identity merging is a requirement.
+- **Store `parents` and `is_merge`** — 12-26% of commits are merges and emit no numstat.
+- **Reject path interning** — only 3.8x reuse on react; a join on the hottest table for a few MB.
+- **Nullable additions/deletions** for binary files; **`old_path`** for the 1.4% renames, which
+  appear in two formats.
+
+### Blocked
+
+`NiklasSkulll/GitRayDocs` returns **404** for the available token — the feature roadmap could not
+be read. If it contains per-line features (blame, line-level ownership) or code-content analysis,
+the schema needs a further column family, and that must be decided **before Phase 6**.

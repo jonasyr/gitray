@@ -5109,8 +5109,8 @@
         <text data-detail="fine" x="860" y="368" class="t-messagebus" font-size="7" text-anchor="middle">two-phase</text>
         </g>
 
-        <g id="node-db" data-node-id="db" data-node-label="PostgreSQL" tabindex="0" role="button" aria-label="Focus PostgreSQL, commits, commit_files, rollups, Architecture component" aria-pressed="false" data-node-kind="database" data-node-sublabel="commits, commit_files, rollups" data-node-tag="persisted, shared" data-node-context="Architecture component">
-          <title>PostgreSQL · commits, commit_files, rollups · Architecture component · persisted, shared</title>
+        <g id="node-db" data-node-id="db" data-node-label="PostgreSQL" tabindex="0" role="button" aria-label="Focus PostgreSQL, facts at full granularity, Architecture component" aria-pressed="false" data-node-kind="database" data-node-sublabel="facts at full granularity" data-node-tag="1.7-6.1M rows at 1M commits" data-node-context="Architecture component">
+          <title>PostgreSQL · facts at full granularity · Architecture component · 1.7-6.1M rows at 1M commits</title>
           <rect x="280" y="445" width="220" height="66" rx="6" class="c-mask"/>
           <rect x="280" y="445" width="220" height="66" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(286 451) scale(0.6875)">
@@ -5118,12 +5118,12 @@
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="390" y="476" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">PostgreSQL</text>
-        <text data-detail="context" x="390" y="492" class="t-muted" font-size="9" text-anchor="middle">commits, commit_files, rollups</text>
-        <text data-detail="fine" x="390" y="503" class="t-database" font-size="7" text-anchor="middle">persisted, shared</text>
+        <text data-detail="context" x="390" y="492" class="t-muted" font-size="9" text-anchor="middle">facts at full granularity</text>
+        <text data-detail="fine" x="390" y="503" class="t-database" font-size="7" text-anchor="middle">1.7-6.1M rows at 1M commits</text>
         </g>
 
-        <g id="node-worker" data-node-id="worker" data-node-label="apps/worker" tabindex="0" role="button" aria-label="Focus apps/worker, NEW second process, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="NEW second process" data-node-tag="24s + 9.4min at 1M" data-node-context="Architecture component">
-          <title>apps/worker · NEW second process · Architecture component · 24s + 9.4min at 1M</title>
+        <g id="node-worker" data-node-id="worker" data-node-label="apps/worker" tabindex="0" role="button" aria-label="Focus apps/worker, NEW second process, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="NEW second process" data-node-tag="metadata 24s, churn 10-35min" data-node-context="Architecture component">
+          <title>apps/worker · NEW second process · Architecture component · metadata 24s, churn 10-35min</title>
           <rect x="760" y="445" width="200" height="66" rx="6" class="c-mask"/>
           <rect x="760" y="445" width="200" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(766 451) scale(0.6875)">
@@ -5131,19 +5131,19 @@
           </g>
           <text data-node-label="" data-detail-anchor="" x="860" y="476" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">apps/worker</text>
         <text data-detail="context" x="860" y="492" class="t-muted" font-size="9" text-anchor="middle">NEW second process</text>
-        <text data-detail="fine" x="860" y="503" class="t-backend" font-size="7" text-anchor="middle">24s + 9.4min at 1M</text>
+        <text data-detail="fine" x="860" y="503" class="t-backend" font-size="7" text-anchor="middle">metadata 24s, churn 10-35min</text>
         </g>
 
-        <g id="node-gc" data-node-id="gc" data-node-label="gitClient" tabindex="0" role="button" aria-label="Focus gitClient, FULL clone for churn, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="FULL clone for churn" data-node-tag="blobless is 624x slower" data-node-context="Architecture component">
-          <title>gitClient · FULL clone for churn · Architecture component · blobless is 624x slower</title>
+        <g id="node-gc" data-node-id="gc" data-node-label="gitClient" tabindex="0" role="button" aria-label="Focus gitClient, full clone to index, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="full clone to index" data-node-tag="blobless to retain" data-node-context="Architecture component">
+          <title>gitClient · full clone to index · Architecture component · blobless to retain</title>
           <rect x="1040" y="445" width="200" height="66" rx="6" class="c-mask"/>
           <rect x="1040" y="445" width="200" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1046 451) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="1140" y="476" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">gitClient</text>
-        <text data-detail="context" x="1140" y="492" class="t-muted" font-size="9" text-anchor="middle">FULL clone for churn</text>
-        <text data-detail="fine" x="1140" y="503" class="t-backend" font-size="7" text-anchor="middle">blobless is 624x slower</text>
+        <text data-detail="context" x="1140" y="492" class="t-muted" font-size="9" text-anchor="middle">full clone to index</text>
+        <text data-detail="fine" x="1140" y="503" class="t-backend" font-size="7" text-anchor="middle">blobless to retain</text>
         </g>
 
         <g id="node-git" data-node-id="git" data-node-label="Git remotes" tabindex="0" role="button" aria-label="Focus Git remotes, HTTPS, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="HTTPS" data-node-context="Architecture component">
@@ -5385,32 +5385,33 @@
           <h3>Measured at 1M commits</h3>
         </div>
         <ul>
-          <li>&bull; Commit metadata index: ~24 seconds</li>
-          <li>&bull; File churn index: ~9.4 minutes</li>
-          <li>&bull; One-time ~15 min, then milliseconds per delta</li>
+          <li>&bull; Metadata index: ~24 s. Churn index: 10-35 min</li>
+          <li>&bull; commit_files: only 1.7-6.1M rows - trivial for Postgres</li>
+          <li>&bull; Disk is the constraint: 4-50 GB per repo, not the DB</li>
         </ul>
       </div>
 
       <div class="card">
         <div class="card-header">
           <div class="card-dot cyan"></div>
-          <h3>Why only this option qualifies</h3>
+          <h3>Keep the door open</h3>
         </div>
         <ul>
-          <li>&bull; A cache is evictable and lost on restart</li>
-          <li>&bull; Requirement: analysis persisted and never lost</li>
-          <li>&bull; Requirement: shared globally, notify on completion</li>
+          <li>&bull; Per-commit-per-file facts, never monthly buckets</li>
+          <li>&bull; Bucketing kills coupling, ownership and bus factor</li>
+          <li>&bull; authors table: 3.4% of emails have multiple names</li>
         </ul>
       </div>
 
       <div class="card">
         <div class="card-header">
           <div class="card-dot amber"></div>
-          <h3>Hard prerequisites</h3>
+          <h3>Two freshness tiers</h3>
         </div>
         <ul>
-          <li>&bull; Phase 1: the lock layer swaps payloads today</li>
-          <li>&bull; Phase 3: parser drops commits - 4 in, 3 out</li>
+          <li>&bull; Metadata delta on a 47 MB blobless clone: seconds</li>
+          <li>&bull; Churn delta needs blobs: ~94 s per 200 commits</li>
+          <li>&bull; So churn freshness lags metadata freshness</li>
         </ul>
       </div>
     </div>
@@ -8905,7 +8906,7 @@
       }
       function nodeLabel(node, fallback) {
         return node.getAttribute('data-node-label') ||
-          (node.getAttribute('aria-label') || fallback).replace(/^Focus\s+/, '').split[','](0);
+          (node.getAttribute('aria-label') || fallback).replace(/^Focus\s+/, '').split(',')[0];
       }
       function finePointer() {
         return !window.matchMedia || window.matchMedia('(hover: hover) and (pointer: fine)').matches;
@@ -11913,7 +11914,7 @@
 
       function nodeLabel(node, fallback) {
         return node.getAttribute('data-node-label') ||
-          (node.getAttribute('aria-label') || fallback).replace(/^Focus\s+/, '').split[','](0);
+          (node.getAttribute('aria-label') || fallback).replace(/^Focus\s+/, '').split(',')[0];
       }
       function build() {
         if (!viewBox || viewBox.width <= 0 || viewBox.height <= 0) return false;
@@ -12886,7 +12887,7 @@
       }
       function nodeLabel(node, fallback) {
         return node.getAttribute('data-node-label') ||
-          (node.getAttribute('aria-label') || fallback).replace(/^Focus\s+/, '').split[','](0);
+          (node.getAttribute('aria-label') || fallback).replace(/^Focus\s+/, '').split(',')[0];
       }
       function exportSnapshot() {
         if (mode !== 'result' || activeNodeIds.length < 2 || activeEdges.length !== activeNodeIds.length - 1) return null;

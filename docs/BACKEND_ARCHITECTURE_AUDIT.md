@@ -1711,44 +1711,61 @@ The three cache tiers, the transaction engine, `HybridLRUCache` and the coordina
 | `last_indexed_at` | `timestamptz` | yes | supplies the staleness signal C-2 currently lacks |
 | `error` | `text` | yes | last failure message |
 
+`authors` — identity, deduplicated and mergeable
+
+Measurement (§17.8): distinct authors are **sublinear** (2,790 for 82k commits), and **3.4% of
+e-mail addresses appear under more than one name spelling**. Denormalised author strings would
+foreclose contributor merging and team grouping, so this is a table, not two columns.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `id` | `bigserial` | no | PK |
+| `email_normalised` | `citext` | no | **UNIQUE**. Lower-cased; the join key |
+| `display_name` | `text` | no | most recent spelling seen |
+| `canonical_author_id` | `bigint` | yes | FK → `authors(id)`. **NULL = this is a canonical identity.** Set to merge two identities (mailmap) without rewriting facts |
+
 `commits` — the per-commit facts
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `repository_id` | `bigint` | no | FK CASCADE, part of PK |
 | `sha` | `char(40)` | no | **PK (repository_id, sha)** |
-| `author_name`, `author_email` | `text` | no | |
-| `authored_at` | `timestamptz` | no | from `%aI` |
-| `committed_at` | `timestamptz` | no | from `%cI`. The audit found these two are used inconsistently today (H-3) |
-| `subject` | `text` | no | **may be empty**; today's parser silently drops such commits |
-| `parent_count` | `smallint` | no | merge detection without a second walk |
+| `author_id` | `bigint` | no | FK → `authors(id)` |
+| `committer_id` | `bigint` | yes | FK → `authors(id)` |
+| `authored_at` | `timestamptz` | no | `%aI` |
+| `committed_at` | `timestamptz` | no | `%cI`. **Both are stored** — they diverge after a rebase, and today's code mixes them (H-3) |
+| `subject` | `text` | no | **may be empty string**; today's parser drops such commits (§17.4) |
+| `parents` | `char(40)[]` | no | **Essential.** 12-26% of commits are merges (§17.8); without parents there is no topology, no branch analysis, no way to separate merge noise from work |
+| `is_merge` | `boolean` | no | derived from `array_length(parents,1) > 1`. Merges emit **no** `--numstat` output, so without this flag `commits` and `commit_files` look inconsistent and `rev-list --count` will not reconcile |
+| `generation` | `integer` | no | see rebuild semantics, §16 Phase 7 |
 
-Indexes: `(repository_id, committed_at)` for the heatmap, `(repository_id, author_email)` for
-contributors.
+Indexes: `(repository_id, committed_at)` for the heatmap; `(repository_id, author_id)` for
+contributors; `(repository_id, generation)` for the sweep.
 
-`commit_files` — the expensive table, populated only when churn is enabled
+`commit_files` — per-commit, per-file facts, at **full granularity**
 
-| Column | Type | Null | Notes |
-| --- | --- | --- | --- |
-| `repository_id` | `bigint` | no | FK CASCADE |
-| `sha` | `char(40)` | no | FK to `commits(repository_id, sha)` CASCADE |
-| `path` | `text` | no | **PK (repository_id, sha, path)** |
-| `additions`, `deletions` | `integer` | yes | **NULL when derived from `--name-only`.** Churn has no line counts today, so nullable is honest rather than a fabricated zero |
-
-Index: `(repository_id, path)`.
-
-`daily_activity` — heatmap rollup
+**This is the most important schema decision in the plan.** The v1 audit proposed bucketing this
+into `file_churn_monthly`. The measured volumes say do not: only **1.66-6.11 rows per commit**, so
+**1.7-6.1 M rows for a 1M-commit repository** — unremarkable for Postgres. Bucketing at write time
+would permanently foreclose change-coupling, code ownership, bus factor and hotspot-decay analysis,
+none of which is reconstructible without a full re-index.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `repository_id` | `bigint` | no | FK CASCADE |
-| `day` | `date` | no | **PK (repository_id, day, author_email)** |
-| `author_email` | `text` | no | empty string for the all-authors row |
-| `commit_count` | `integer` | no | |
-| `generation` | `integer` | no | stale rows are ignored, then swept |
+| `sha` | `char(40)` | no | FK → `commits`, **PK (repository_id, sha, path)** |
+| `path` | `text` | no | stored inline. Path interning was measured and **rejected** as premature: only 3.8x reuse on react, a few MB saved, against a join on the hottest table |
+| `old_path` | `text` | yes | populated on renames. `--numstat` emits **two formats** — `old => new` and `dir/{old => new}` — 1.4% of rows. Unparsed, these become synthetic paths that corrupt per-file history |
+| `additions` | `integer` | **yes** | **NULL for binary files**, where `--numstat` emits `-` (0.1% of rows). NULL, never 0 |
+| `deletions` | `integer` | **yes** | as above |
+| `generation` | `integer` | no | |
 
-`file_churn` — churn rollup: **PK (repository_id, path)** plus `change_count`, `additions`,
-`deletions`, `first_seen`, `last_seen`, `generation`.
+Index: `(repository_id, path)`. Batch inserts must be chunked — the largest single commit observed
+touched **2,814 files**.
+
+`daily_activity` and `file_churn` — rollups, materialised **in addition to** the facts, never
+instead of them. Shapes as before: `(repository_id, day, author_id)` and `(repository_id, path)`,
+each carrying `generation` so a stale generation is ignored and then swept.
 
 `index_jobs` — the queue
 
@@ -2286,8 +2303,23 @@ before starting (baseline confirmed in §13); commit per phase.
   single transaction, then sweeps the old one in the background. A half-written generation is never
   visible.
 - **Touched-bucket recomputation:** only the days in the delta refresh `daily_activity`, only the
-  `(path, month)` pairs in the delta refresh `file_churn` — each recomputed from `commits`, so
-  re-running a job is a no-op.
+  paths in the delta refresh `file_churn` — each recomputed from `commits`, so re-running a job is
+  a no-op.
+- **Two freshness tiers (measured, §17.8 S-5/S-6).** Metadata and churn deltas have very different
+  costs and must run on different cadences:
+
+  | Tier | Working copy | Cost | Cadence |
+  | --- | --- | --- | --- |
+  | **Metadata delta** | blobless clone (47 MB for react vs 1.1 GB full) | `rev-list` 365 ms, ancestry check 279 ms | frequent |
+  | **Churn delta** | needs blobs | **~94 s per 200 commits** on a blobless clone | slower cadence, or on demand |
+
+  Churn on a blobless clone is 37-100x slower because Git lazily fetches each blob. Re-cloning full
+  on demand is **not** a way out — a fresh `react` full clone takes 100 s, the same order. So:
+  retain **blobless** clones by default, keep an LRU of **full** clones for recently-viewed
+  repositories bounded by measured bytes, and let churn freshness lag metadata freshness.
+- **Disk budget:** `REPO_CACHE_DISK_LIMIT_GB` defaults to 5 GB. A single `react`-profile repository
+  at 1M commits would be ~50 GB as a full clone. **The limit must be enforced on measured bytes**
+  (today `updateDiskUsageMetrics` is a hard-coded `handles x 100 MB` estimate — P-4 area).
 - **Tests during:** a delta test (append commits, assert only new ones are parsed); a
   **force-push test** (rewrite history, assert rebuild and a correct final row count).
 - **Verification:** after a delta, `commits` count equals `rev-list --count` at the new head.
@@ -2554,6 +2586,11 @@ a ~600x penalty on the one pass that needs blobs.
 
 #### Extrapolated cost of a one-time index at 1,000,000 commits
 
+> **Corrected by §17.8 (S-4).** The figures below are from `git/git` and are the **optimistic end**
+> of a measured 3.7x throughput spread and 13x disk spread. The realistic range is
+> **9.4-34.6 minutes** of churn indexing and **4-50 GB** of clone, depending on the repository's
+> blob profile rather than its commit count.
+
 From the `git/git` full-clone rates (1,774 commits/s for `--numstat`; 41,000 commits/s for
 metadata):
 
@@ -2592,6 +2629,110 @@ A refinement that neither document proposes: **the retained clone can be blobles
 needs no blobs, and churn for a *delta* needs blobs only for the handful of newly-touched files —
 where lazy fetching is entirely acceptable, since the 600x penalty applies per blob, not per repo.
 So: full clone for the initial churn pass, then prune to blobless for retention.
+
+### 17.8 Data-shape measurements and what they mean for the schema
+
+Measured 2026-09-05 on two real repositories with deliberately different profiles, to test whether
+the proposed schema is right and whether it forecloses future features.
+
+| Measure | `git/git` | `facebook/react` | Spread |
+| --- | ---: | ---: | ---: |
+| Commits | 82,135 | 21,678 | |
+| Full bare clone | 317 MB | **1.1 GB** | |
+| **KB per commit** | 3.9 | **50.7** | **13x** |
+| Full clone wall time | 28 s | **100 s** | |
+| `--numstat` walk | 46 s | 45 s | |
+| **Throughput (commits/s)** | **1,774** | **482** | **3.7x** |
+| Merge commits | 25.9% | 12.0% | |
+| File-change rows | 136,387 | 132,443 | |
+| **Rows per commit** | 1.66 | 6.11 | 3.7x |
+| p95 / p99 / max files per commit | 5 / 12 / **928** | 18 / 61 / **2,814** | |
+| Distinct authors | 2,790 | 2,163 | |
+| Distinct paths | 8,216 | 35,291 | |
+| Path reuse | 16.6x | 3.8x | |
+| Empty-subject commits | **1** | 0 | |
+| `\|` in author name | **2** | 0 | |
+
+#### S-4 — the single-point estimates in §17.7 were the optimistic end
+
+Both throughput and disk vary by more than 3x and 13x respectively. Corrected ranges for a
+**1,000,000-commit** repository:
+
+| | Optimistic (`git`-like) | Pessimistic (`react`-like) |
+| --- | ---: | ---: |
+| Churn index time | **9.4 min** | **34.6 min** |
+| Full clone on disk | **~4 GB** | **~50 GB** |
+| `commit_files` rows | 1.7 M | 6.1 M |
+
+The database is never the problem — 6 M rows is unremarkable for Postgres. **Disk for the working
+clones is the real operational constraint**, and it is repo-dependent, not commit-count-dependent.
+
+#### S-5 — blobless retention works for metadata deltas, and is 23x smaller
+
+On `react`: full 1.1 GB versus **blobless 47 MB**, cloned in 5 s. Everything the delta rule needs
+still works on the blobless copy:
+
+| Operation | Time on blobless clone |
+| --- | ---: |
+| `rev-list --count` | 365 ms |
+| Full metadata walk | 1,538 ms |
+| `merge-base --is-ancestor` | 279 ms |
+
+#### S-6 — but churn deltas on a blobless clone are 37-100x slower, and re-cloning is no better
+
+This **refutes** the naive "keep a blobless clone for everything" refinement:
+
+| Delta size (react) | Full clone | Blobless clone | Ratio |
+| --- | ---: | ---: | ---: |
+| 10 commits | 206 ms | 7.6 s | 37x |
+| 50 commits | 340 ms | 24.0 s | 71x |
+| 200 commits | 933 ms | **93.7 s** | 100x |
+
+And re-cloning full on demand is not a way out: a fresh full `react` clone takes **100 s** — the
+same order as just accepting the lazy fetches.
+
+**Design conclusion — decouple the two freshness tiers.** This is the same split as S-2, applied to
+deltas rather than the initial index:
+
+| Tier | Clone needed | Cost | Cadence |
+| --- | --- | --- | --- |
+| **Commit metadata** (commit list, heatmap, contributors, summary) | blobless, 47 MB | seconds | frequently, cheap |
+| **File churn** | blobs required | ~1.5 min per 200 commits | slower cadence, or on demand |
+
+Optionally keep an LRU of **full** clones for recently-viewed repositories, falling back to blobless
+for cold ones — bounded by measured bytes, not by a repository count.
+
+#### Schema consequences — what the data says to build, and what to avoid
+
+| Decision | Verdict | Evidence |
+| --- | --- | --- |
+| **Per-commit-per-file facts** (not monthly buckets) | **Keep full granularity.** | Only 1.7-6.1 M rows at 1M commits. v1 proposed `file_churn_monthly`; bucketing is premature optimisation that **destroys** change-coupling, code-ownership and bus-factor analysis — all of which need to know *which files changed together in which commit*. |
+| **`authors` table with identity resolution** | **Yes.** | Distinct authors are sublinear: 2,790 for 82k commits. And **3.4% of e-mails appear under more than one name**, so identity merging (mailmap) is a real requirement, not a nicety. Raw denormalised strings would foreclose contributor merging and team grouping. |
+| **Store `parents`** | **Yes, essential.** | **12-26% of commits are merges.** Without parents you cannot reconstruct topology, distinguish merge from work, or do any branch analysis. Cheap to store. |
+| **`is_merge` flag** | **Yes.** | Merges emit no `--numstat` output. Without the flag, `commits` count and `commit_files` coverage look inconsistent and `rev-list --count` will not reconcile. |
+| **Store both `%aI` and `%cI`** | **Yes.** | They diverge after rebases; today's code mixes them (H-3). |
+| **Path interning table** | **No — premature.** | Reuse is only 3.8x on react. Absolute saving is ~1.7 MB at 82k commits, extrapolating to tens of MB at 1M. Not worth a join on the hottest table. Revisit only if a repo profile proves otherwise. |
+| **Rename handling** | **Needed in the parser.** | 1.4% of rows, in **two formats**: `old => new` and `dir/{old => new}`. Unparsed, these become synthetic paths that corrupt per-file history. Storing `old_path` also opens file-lineage features. |
+| **Batch-insert sizing** | **Cap it.** | Max files in one commit: 928 (git) and **2,814** (react). A naive per-commit insert of every row is fine; a naive *unbounded* multi-row statement is not. |
+| **Binary files** | **Nullable additions/deletions.** | `--numstat` emits `-` for binaries (0.1% of rows). Store NULL, not 0. |
+
+#### Why full granularity keeps the door open
+
+The features a Git-analytics product plausibly grows into — code ownership, bus factor, change
+coupling ("files that change together"), hotspot decay over time, per-team views, contributor
+merging — **all need per-commit-per-file rows**. Every one of them is foreclosed by pre-aggregating
+to monthly buckets, and none of them is affordable to reconstruct later without a full re-index.
+
+Given that the full-granularity table is only 1.7-6.1 M rows per 1M-commit repository, **there is no
+performance reason to aggregate away information at write time.** Materialise rollups *in addition*
+to the facts, never *instead of* them.
+
+**Open dependency:** the team's feature roadmap (`GitRayDocs/GitRayPlanning/3_notes/`) could not be
+read — the repository is private and returns 404 for the available token. The recommendations above
+are derived from the measured data shape and from what the existing endpoints already do. **If the
+roadmap contains features needing per-line data (blame, ownership by line) or code content (AI
+analysis of source), the schema needs a further column family**, and that decision should be made
+before Phase 6.
 
 ### 17.3 Diagram index
 
