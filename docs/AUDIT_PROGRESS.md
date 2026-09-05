@@ -425,6 +425,11 @@ cross-references**: every `§n.n` in the prose became a link to that section.
 | `pnpm lint:md` | 0 errors |
 | Source tree | `git diff` on `apps/` and `packages/` — **empty** |
 
+One caveat on reproducibility: the **HTML is byte-stable** — building twice from the same sources
+produces an identical file, which is how the pre-commit hook's reformatting of `runtime.js` and
+`transform.js` was caught leaving the committed output one pass behind. The **PDF is not**: Chrome
+stamps a creation time into it, so it differs on every build even when nothing changed.
+
 Same hazard as the diagram PNGs, and worth repeating: the HTML and the PDF are copies. Edit the
 Markdown without re-running `node docs/audit-html/build.mjs --pdf` and they will keep presenting the
 previous version as current.
