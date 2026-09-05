@@ -189,7 +189,10 @@ If unsure where to place code, search existing modules and mirror their location
   Read this before any structural work. It documents the verified current architecture, five
   critical/high defects (including a live cross-request data-corruption bug in `lockManager`),
   dead code, documentation drift, and the recommended phased refactor.
-- Diagrams: `docs/diagrams/*.html` (current architecture, target architecture, the lock defect)
+- Diagrams: `docs/diagrams/*.html` (current architecture, target architecture, the lock defect).
+  Each is also embedded inline in the audit section it belongs to, as a PNG in
+  `docs/diagrams/img/`. After changing any diagram, run `node docs/diagrams/capture-png.mjs`
+  or the embedded images will keep showing the previous version.
 - `docs/ARCHITECTURE.md`, `docs/API.md` and `docs/TESTING.md` do **not** exist yet; they are
   planned as part of the audit's migration Phase 7.
 

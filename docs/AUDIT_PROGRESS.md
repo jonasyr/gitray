@@ -363,3 +363,27 @@ that repository was modified.**
   Phase 5 category; SonarCloud not run locally.
 - `~/Downloads/BACKEND_ARCHITECTURE_AUDIT.md` deliberately **not** overwritten — the brief withheld
   authorisation to replace it.
+
+## Diagram embedding round (2026-09-05)
+
+The twelve Archify diagrams were previously reachable only as separate `.html` files, so the audit
+read as text with a filename next to it. Each is now **also embedded inline** in the section it
+belongs to.
+
+| Step | Detail |
+| --- | --- |
+| Format | PNG at 1600 CSS px wide, 2x device scale, `img/<name>.png`, 188-246 KB each |
+| How | The delivered `.html` is driven in headless Chrome under **its own `@media print` stylesheet** — the one Archify already ships. That is what hides the toolbar, guided-views bar and navigation dock, forces the light palette, and reveals the node detail tags that are transparent at the default detail level |
+| Nothing added | The capture renders only what the delivered artifact already contains; no diagram was redrawn, and no `.json` spec or `.html` was modified this round |
+| Reproducible | `node docs/diagrams/capture-png.mjs` — the only new file. A second run reproduced all twelve at identical dimensions and sizes |
+| Placement | Where a section already carried a Mermaid sketch (§4.1, §5.1, §6.1, §7.1) the sketch was **kept** and the rendered diagram placed after it. C-1's sequence sits under `#### C-1`, not under `### 10.1 CRITICAL` |
+| Also updated | Audit §17.3 (index now links every file and names the section it is embedded in); `docs/diagrams/README.md` (gallery of all twelve + regeneration steps); `CLAUDE.md` context links |
+
+Verification: `pnpm lint:md` — 0 errors across 12 files; every image and diagram link resolved
+against the working tree (**NONE broken**); `git diff` on `*.ts/*.tsx/*.mjs/*.js/*.css` under
+`apps/` and `packages/` — **empty**.
+
+Note the maintenance hazard this introduces, and why the script exists: a PNG is a copy. If a
+`.json` spec is re-delivered and `capture-png.mjs` is not re-run, the Markdown silently shows the
+previous diagram while claiming to show the current one. That is recorded in `CLAUDE.md` and in the
+diagrams README.

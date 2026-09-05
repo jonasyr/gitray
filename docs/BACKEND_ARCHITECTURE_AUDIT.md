@@ -508,6 +508,10 @@ flowchart LR
   OPS["Operator<br/>X-Admin-Token"] -->|"/metrics, /cache/*"| BE
 ```
 
+[![GitRay current architecture: system context, containers and backend components, including the three clone paths and the duplicate route surface](diagrams/img/gitray-current-architecture.png)](diagrams/gitray-current-architecture.html)
+
+*[`gitray-current-architecture.html`](diagrams/gitray-current-architecture.html) is the interactive version — pan, zoom, search, relationship tracing, dark theme. The full current-state map, including all three clone paths and both route architectures.*
+
 **VERIFIED:** `apps/frontend/vite.config.ts:60-68` (proxy `/api` → `localhost:3001`);
 `apps/backend/src/index.ts:199-205` (mounting); `apps/backend/src/config.ts:47,103` (two Redis DBs).
 
@@ -594,6 +598,10 @@ Two observations:
 
 ### 4.5 Startup and shutdown
 
+[![Eight recurring background timers, how each is started, and which cannot be stopped](diagrams/img/gitray-background-jobs.png)](diagrams/gitray-background-jobs.html)
+
+*[`gitray-background-jobs.html`](diagrams/gitray-background-jobs.html) is the interactive version — pan, zoom, search, relationship tracing, dark theme. The eight recurring timers started at boot, and which of them shutdown cannot stop (§10.2).*
+
 `startApplication()` (`index.ts:146`) does, in order: `validateConfig()` →
 `validateStartupEnvironment()` (creates lock/cache/log dirs, TCP-probes Redis) → build Express app →
 `listen()` → register a 5-minute coordination monitor → a 1-second-delayed cache-stats log → a
@@ -657,6 +665,10 @@ flowchart TD
   MET -.->|"dynamic import"| MPM
 ```
 
+[![Backend module dependency graph showing the six-module strongly connected component and the fan-in distribution](diagrams/img/gitray-module-dependencies.png)](diagrams/gitray-module-dependencies.html)
+
+*[`gitray-module-dependencies.html`](diagrams/gitray-module-dependencies.html) is the interactive version — pan, zoom, search, relationship tracing, dark theme. The same graph with the six-module cycle and fan-in made explicit.*
+
 ### 5.2 Layer violations and cycles
 
 **V-1 — `gitService` depends on the cache service. VERIFIED** `gitService.ts:42`
@@ -719,6 +731,10 @@ sequenceDiagram
     BE->>CO: reuses clone #1
   end
 ```
+
+[![Cold-path request sequence for the dashboard load, showing pagination that never reaches the data path](diagrams/img/gitray-request-lifecycle.png)](diagrams/gitray-request-lifecycle.html)
+
+*[`gitray-request-lifecycle.html`](diagrams/gitray-request-lifecycle.html) is the interactive version — pan, zoom, search, relationship tracing, dark theme. The cold path end to end, including the pagination that never reaches the data layer (§10.1 C-3).*
 
 **VERIFIED** `DashboardPage.tsx:194-226` — three un-awaited promise chains in a single `useEffect`.
 
@@ -800,6 +816,10 @@ flowchart TD
   HLC --> MEM["memory Map"] --> DISK["disk: CACHE_ONDISK_PATH"] --> RED[("Redis db1<br/>prefix gitray:cache:")]
   M2 -.-> RED0[("Redis db0")]
 ```
+
+[![The four persistence mechanisms: in-process cache, Redis, repository clones on disk, and advisory lock files](diagrams/img/gitray-persistence-architecture.png)](diagrams/gitray-persistence-architecture.html)
+
+*[`gitray-persistence-architecture.html`](diagrams/gitray-persistence-architecture.html) is the interactive version — pan, zoom, search, relationship tracing, dark theme. This stands in for an ER diagram, because there is no database (§7).*
 
 ### 7.2 Mechanism 1 — `RepositoryCacheManager` (three tiers)
 
@@ -946,6 +966,10 @@ entirely different return type**. That is the second instance of C-1 (§10.1).
 
 ### 8.1 What exists
 
+[![Public analytics endpoints versus the admin-token path](diagrams/img/gitray-auth.png)](diagrams/gitray-auth.html)
+
+*[`gitray-auth.html`](diagrams/gitray-auth.html) is the interactive version — pan, zoom, search, relationship tracing, dark theme. Everything analytics is public; only the admin surface is gated (§8.2).*
+
 **There is no end-user authentication or authorization of any kind.** Every analytics endpoint is
 fully public and unauthenticated. **VERIFIED** — `repositoryRoutes.ts` applies no auth middleware to
 any of its six routes.
@@ -1011,6 +1035,10 @@ must be preserved verbatim through any refactor.
 
 ## 9. External Systems
 
+[![External systems reached by GitRay and the SSRF validation boundary](diagrams/img/gitray-external.png)](diagrams/gitray-external.html)
+
+*[`gitray-external.html`](diagrams/gitray-external.html) is the interactive version — pan, zoom, search, relationship tracing, dark theme. The SSRF boundary is the one genuine strength of this layer (§8.4).*
+
 | System | Protocol | Used by | Failure mode |
 | --- | --- | --- | --- |
 | **Git remotes** | HTTPS via `simple-git` subprocess | `gitService`, `repositorySummaryService`, `fileAnalysisService` | Clone failure → `RepositoryError` → 500 |
@@ -1033,6 +1061,10 @@ Ranked by impact × urgency.
 ### 10.1 CRITICAL
 
 #### C-1 — `withKeyLock` returns another request's result
+
+[![Sequence showing how the dashboard's concurrent requests trigger the lock coalescing defect C-1](diagrams/img/gitray-lock-collision.png)](diagrams/gitray-lock-collision.html)
+
+*[`gitray-lock-collision.html`](diagrams/gitray-lock-collision.html) is the interactive version — pan, zoom, search, relationship tracing, dark theme. How the dashboard's three concurrent requests produce C-1. Reproduced on the running system (§0.2).*
 
 **VERIFIED**, with a complete causal chain.
 
@@ -1635,6 +1667,10 @@ Four options were considered. Each is assessed on the same axes.
 
 ### Option A — Minimal Stabilisation
 
+[![Option A: the current topology with the defects repaired and nothing moved](diagrams/img/gitray-option-a.png)](diagrams/gitray-option-a.html)
+
+*[`gitray-option-a.html`](diagrams/gitray-option-a.html) is the interactive version — pan, zoom, search, relationship tracing, dark theme. Option A reuses the exact node positions of the current-state diagram, so the two can be flipped between.*
+
 **Conceptual architecture.** Unchanged. Repair defects in place; move nothing.
 
 **Module structure.** Identical to today: `routes/`, `services/`, `utils/`, `middlewares/`.
@@ -1699,6 +1735,10 @@ survives untouched.
 
 ### Option B — Incremental Modular Refactor  ⭐ REQUIRED FOUNDATION (Phases 0-5)
 
+[![Option B: one clone path, one cache, one route style — the required foundation](diagrams/img/gitray-target-architecture.png)](diagrams/gitray-target-architecture.html)
+
+*[`gitray-target-architecture.html`](diagrams/gitray-target-architecture.html) is the interactive version — pan, zoom, search, relationship tracing, dark theme. Option B, the required foundation (Phases 0-5). B, C and D share one layout for the same reason.*
+
 **Concept.** Do Option A first, then **delete** subsystems until one clear path per concern remains.
 
 **Target module structure:**
@@ -1744,6 +1784,10 @@ apps/backend/src/
 - **Debt remaining:** LOW-MEDIUM — still no persistence, so cold analyses remain slow.
 
 ### Option C — PostgreSQL + Job Queue  ⭐ RECOMMENDED DESTINATION
+
+[![Option C: PostgreSQL-backed index with a two-phase job queue, the recommended destination](diagrams/img/gitray-option-c.png)](diagrams/gitray-option-c.html)
+
+*[`gitray-option-c.html`](diagrams/gitray-option-c.html) is the interactive version — pan, zoom, search, relationship tracing, dark theme. The recommended destination. Revised 2026-09-05 against the planning vault (§17.9).*
 
 **Conceptual architecture.** Stop deriving analytics per request. Index each repository once into
 normalised per-commit facts, maintain materialised rollups, serve reads from SQL, and drive
@@ -1974,6 +2018,10 @@ transaction engine, coordinator, hybrid cache).
 **Technical debt remaining.** Low *if completed*. That conditional is the whole problem.
 
 ### Option D — Collapse to a single process, drop Redis
+
+[![Option D: a single process with Redis dropped](diagrams/img/gitray-option-d.png)](diagrams/gitray-option-d.html)
+
+*[`gitray-option-d.html`](diagrams/gitray-option-d.html) is the interactive version — pan, zoom, search, relationship tracing, dark theme. Option D, optional and deferred to Phase 9.*
 
 **Conceptual architecture.** Stop implying the system is distributed. Locks, caches and repository
 handles are already per-process (§7.5), so formalise single-instance operation.
@@ -3113,27 +3161,34 @@ Twelve interactive diagrams accompany this audit, in `docs/diagrams/`. Each was 
 Archify at the `showcase` quality profile (9/9 artifact checks, 0 errors, 0 warnings) and verified
 in a real browser at 1440x900, 1600x1000, 1920x1080 and 2048x1320 in both light and dark themes.
 
+Each one is **also embedded inline in the section it belongs to**, as a PNG in `docs/diagrams/img/`.
+The PNG is a rendering of the same `.html` file under its own print stylesheet, so it carries the
+node tags and conclusion cards but none of the viewer chrome; it is generated, never hand-drawn, and
+is regenerated from the `.html` (see `docs/diagrams/README.md`). Where a section already carries a
+Mermaid sketch, the sketch is kept and the rendered diagram follows it — the sketch is the shape of
+the argument, the diagram is the detail.
+
 **Current state — what the repository actually is:**
 
-| File | Shows |
-| --- | --- |
-| `gitray-current-architecture.html` | System context, containers and backend components in one view, including the three clone paths and the duplicate route surface |
-| `gitray-module-dependencies.html` | The six-module strongly connected component and the fan-in distribution |
-| `gitray-persistence-architecture.html` | The four persistence mechanisms — this replaces an ER diagram, because there is no database |
-| `gitray-request-lifecycle.html` | The cold-path request sequence, showing pagination that is not in the data path |
-| `gitray-auth.html` | Public analytics versus the admin-token path |
-| `gitray-background-jobs.html` | Eight recurring timers, how each is started, and which cannot be stopped |
-| `gitray-external.html` | External systems and the SSRF boundary |
-| `gitray-lock-collision.html` | How the dashboard triggers C-1, the critical defect |
+| File | Embedded in | Shows |
+| --- | --- | --- |
+| [`gitray-current-architecture.html`](diagrams/gitray-current-architecture.html) | §4.1 | System context, containers and backend components in one view, including the three clone paths and the duplicate route surface |
+| [`gitray-module-dependencies.html`](diagrams/gitray-module-dependencies.html) | §5.1 | The six-module strongly connected component and the fan-in distribution |
+| [`gitray-persistence-architecture.html`](diagrams/gitray-persistence-architecture.html) | §7.1 | The four persistence mechanisms — this replaces an ER diagram, because there is no database |
+| [`gitray-request-lifecycle.html`](diagrams/gitray-request-lifecycle.html) | §6.1 | The cold-path request sequence, showing pagination that is not in the data path |
+| [`gitray-auth.html`](diagrams/gitray-auth.html) | §8.1 | Public analytics versus the admin-token path |
+| [`gitray-background-jobs.html`](diagrams/gitray-background-jobs.html) | §4.5 | Eight recurring timers, how each is started, and which cannot be stopped |
+| [`gitray-external.html`](diagrams/gitray-external.html) | §9 | External systems and the SSRF boundary |
+| [`gitray-lock-collision.html`](diagrams/gitray-lock-collision.html) | §10.1 C-1 | How the dashboard triggers C-1, the critical defect |
 
 **Target state — the four options, drawn to be comparable:**
 
-| File | Option |
-| --- | --- |
-| `gitray-option-a.html` | A — Minimal stabilisation (same topology as current, defects repaired) |
-| `gitray-target-architecture.html` | **B — required foundation, Phases 0-5** |
-| `gitray-option-c.html` | **C — PostgreSQL + job queue ⭐ recommended destination** |
-| `gitray-option-d.html` | D — Single process, no Redis (optional Phase 9) |
+| File | Embedded in | Option |
+| --- | --- | --- |
+| [`gitray-option-a.html`](diagrams/gitray-option-a.html) | §14 Option A | A — Minimal stabilisation (same topology as current, defects repaired) |
+| [`gitray-target-architecture.html`](diagrams/gitray-target-architecture.html) | §14 Option B | **B — required foundation, Phases 0-5** |
+| [`gitray-option-c.html`](diagrams/gitray-option-c.html) | §14 Option C | **C — PostgreSQL + job queue ⭐ recommended destination** |
+| [`gitray-option-d.html`](diagrams/gitray-option-d.html) | §14 Option D | D — Single process, no Redis (optional Phase 9) |
 
 Option A deliberately reuses the *exact* node positions of the current-state diagram so the two
 can be flipped between; B, C and D share a second common layout for the same reason.
