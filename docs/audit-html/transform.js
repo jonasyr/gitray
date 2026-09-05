@@ -96,6 +96,17 @@ async function transform(payload) {
       if (el) {
         el.removeAttribute('height');
         el.setAttribute('role', 'img');
+        // Publish the diagram's natural width so a narrow screen can render it
+        // at a legible size and scroll, instead of shrinking it to a tenth.
+        // The width attribute has to go, or `width: auto` resolves back to the
+        // container instead of the viewBox.
+        var vb = (el.getAttribute('viewBox') || '').split(/[\s,]+/);
+        var natural = Math.round(parseFloat(vb[2]) || 0);
+        if (natural) {
+          el.removeAttribute('width');
+          el.style.setProperty('--nat', natural + 'px');
+          el.style.maxWidth = natural + 'px';
+        }
       }
       figure.appendChild(body);
       slot.replaceWith(figure);

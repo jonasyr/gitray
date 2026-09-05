@@ -425,6 +425,23 @@ cross-references**: every `§n.n` in the prose became a link to that section.
 | `pnpm lint:md` | 0 errors |
 | Source tree | `git diff` on `apps/` and `packages/` — **empty** |
 
+### Follow-up: the diagrams were unreadable on a phone (2026-09-05)
+
+Reported from a phone, and confirmed by measurement: at a 390px viewport every diagram was being
+fitted to the column, which put the 3200px PNGs at **10% scale** (325px wide) and a 1918px Mermaid
+chart at 309px. Nothing scrolled, so there was no way to read them at all. The verification that
+missed this only went down to 900px wide.
+
+Fixed below 900px: figures keep a legible size and scroll inside their own frame — PNGs at 1200px
+(three quarters of the 1600px canvas they are drawn for), Mermaid charts at their natural viewBox
+width, with a hint line under each figure and the hint suppressed in print. The Mermaid SVGs carry
+`width="100%"`, which makes `width: auto` resolve back to the container, so the renderer now removes
+that attribute and publishes the natural width as a `--nat` custom property instead.
+
+Re-verified at 320, 390, 430, 768, 1024, 900, 1440 and 1920 px: **no horizontal page scroll at any
+width**, figures scroll inside their frames, 12/12 images and 5/5 Mermaid charts render, 0 dead
+anchors. Desktop layout is unchanged.
+
 One caveat on reproducibility: the **HTML is byte-stable** — building twice from the same sources
 produces an identical file, which is how the pre-commit hook's reformatting of `runtime.js` and
 `transform.js` was caught leaving the committed output one pass behind. The **PDF is not**: Chrome

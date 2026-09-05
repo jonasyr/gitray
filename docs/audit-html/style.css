@@ -111,12 +111,13 @@ nav.toc li.hidden { display: none; }
 
 /* ---------- sheet ------------------------------------------------------- */
 main {
+  min-width: 0;
   background: var(--surface);
   border-left: 1px solid var(--rule);
   min-height: 100vh;
   padding: 0 clamp(1.25rem, 4vw, 4.5rem) 6rem;
 }
-.inner { max-width: var(--wide); margin: 0 auto; }
+.inner { max-width: var(--wide); min-width: 0; margin: 0 auto; }
 
 /* ---------- masthead ---------------------------------------------------- */
 .masthead { padding: 4.5rem 0 1rem; }
@@ -283,6 +284,41 @@ blockquote > :last-child { margin-bottom: 0; }
   font-size: .8125rem; color: var(--muted);
 }
 
+/* ---------- diagrams on small screens ----------------------------------- */
+/* The diagrams are drawn for a 1600px canvas. Fitting them to a phone shrinks
+   them to about a tenth of their size, which is unreadable, so below that width
+   they keep a legible size and scroll inside their own frame instead. The
+   figure clips, so the page itself never scrolls sideways. */
+@media (max-width: 900px) {
+  figure > a,
+  figure > .figbody {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* The PNGs are 2x captures of a 1600px canvas; 1200px is three quarters of
+     the size they were drawn at, which stays readable without asking for nine
+     screens of panning. */
+  figure img {
+    width: 1200px;
+    max-width: none;
+  }
+  .mermaid-fig svg {
+    width: var(--nat, 100%);
+    max-width: none !important;
+    height: auto;
+  }
+  figure::after {
+    content: "Scroll the diagram sideways to read all of it";
+    display: block;
+    padding: .5rem .875rem;
+    font-size: .75rem;
+    color: var(--muted);
+    background: var(--surface-sub);
+    border-top: 1px solid var(--rule);
+  }
+}
+
 /* ---------- narrow ------------------------------------------------------ */
 .toc-mobile { display: none; }
 @media (max-width: 1023px) {
@@ -321,4 +357,5 @@ blockquote > :last-child { margin-bottom: 0; }
   .prose a { color: var(--ink); text-decoration: none; }
   a.xref { color: var(--ink); }
   tbody tr:hover { background: none; }
+  figure::after { display: none !important; }
 }
