@@ -5943,28 +5943,43 @@ the lock. See <a class="xref" href="#16-migration-strategy">§16</a> Phase 1.</p
     progress.style.width = Math.min(100, Math.max(0, pct)) + '%';
     ticking = false;
   }
-  window.addEventListener('scroll', function () {
-    if (!ticking) { ticking = true; window.requestAnimationFrame(paintProgress); }
-  }, { passive: true });
+  window.addEventListener(
+    'scroll',
+    function () {
+      if (!ticking) {
+        ticking = true;
+        window.requestAnimationFrame(paintProgress);
+      }
+    },
+    { passive: true }
+  );
   paintProgress();
 
   // Scroll-spy: mark the section currently being read. Position-based rather
   // than intersection-based, so jumping straight to an anchor still resolves.
   if (rail && prose) {
     var links = {};
-    Array.prototype.forEach.call(rail.querySelectorAll('a[href^="#"]'), function (a) {
-      links[decodeURIComponent(a.getAttribute('href').slice(1))] = a;
-    });
+    Array.prototype.forEach.call(
+      rail.querySelectorAll('a[href^="#"]'),
+      function (a) {
+        links[decodeURIComponent(a.getAttribute('href').slice(1))] = a;
+      }
+    );
     var marks = Array.prototype.filter.call(
       prose.querySelectorAll('h2[id], h3[id]'),
-      function (h) { return links[h.id]; }
+      function (h) {
+        return links[h.id];
+      }
     );
     var offsets = [];
     var current = null;
 
     function measure() {
       offsets = marks.map(function (h) {
-        return { id: h.id, top: h.getBoundingClientRect().top + window.scrollY };
+        return {
+          id: h.id,
+          top: h.getBoundingClientRect().top + window.scrollY,
+        };
       });
     }
 
@@ -5976,7 +5991,12 @@ the lock. See <a class="xref" href="#16-migration-strategy">§16</a> Phase 1.</p
       var found = 0;
       while (lo <= hi) {
         var mid = (lo + hi) >> 1;
-        if (offsets[mid].top <= y) { found = mid; lo = mid + 1; } else { hi = mid - 1; }
+        if (offsets[mid].top <= y) {
+          found = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
       }
       var id = offsets[found].id;
       if (id === current) return;
@@ -5986,32 +6006,52 @@ the lock. See <a class="xref" href="#16-migration-strategy">§16</a> Phase 1.</p
       a.classList.add('here');
       var box = a.getBoundingClientRect();
       var frame = rail.getBoundingClientRect();
-      if (box.top < frame.top || box.bottom > frame.bottom) a.scrollIntoView({ block: 'nearest' });
+      if (box.top < frame.top || box.bottom > frame.bottom)
+        a.scrollIntoView({ block: 'nearest' });
     }
 
     measure();
     spy();
     window.addEventListener('scroll', spy, { passive: true });
-    window.addEventListener('resize', function () { measure(); spy(); }, { passive: true });
-    window.addEventListener('load', function () { measure(); spy(); });
+    window.addEventListener(
+      'resize',
+      function () {
+        measure();
+        spy();
+      },
+      { passive: true }
+    );
+    window.addEventListener('load', function () {
+      measure();
+      spy();
+    });
   }
 
   // Filter the contents list.
   if (filter && rail) {
-    var entries = Array.prototype.map.call(rail.querySelectorAll('li'), function (li) {
-      return { li: li, text: li.textContent.toLowerCase() };
-    });
+    var entries = Array.prototype.map.call(
+      rail.querySelectorAll('li'),
+      function (li) {
+        return { li: li, text: li.textContent.toLowerCase() };
+      }
+    );
     filter.addEventListener('input', function () {
       var q = filter.value.trim().toLowerCase();
       entries.forEach(function (entry) {
-        entry.li.classList.toggle('hidden', q !== '' && entry.text.indexOf(q) === -1);
+        entry.li.classList.toggle(
+          'hidden',
+          q !== '' && entry.text.indexOf(q) === -1
+        );
       });
     });
     filter.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape') { filter.value = ''; filter.dispatchEvent(new Event('input')); }
+      if (event.key === 'Escape') {
+        filter.value = '';
+        filter.dispatchEvent(new Event('input'));
+      }
     });
   }
-}());
+})();
 
 </script>
 </body>
