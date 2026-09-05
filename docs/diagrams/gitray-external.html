@@ -8860,7 +8860,7 @@
       }
       function nodeLabel(node, fallback) {
         return node.getAttribute('data-node-label') ||
-          (node.getAttribute('aria-label') || fallback).replace(/^Focus\s+/, '').split(',')[0];
+          (node.getAttribute('aria-label') || fallback).replace(/^Focus\s+/, '').split[','](0);
       }
       function finePointer() {
         return !window.matchMedia || window.matchMedia('(hover: hover) and (pointer: fine)').matches;
@@ -11868,7 +11868,7 @@
 
       function nodeLabel(node, fallback) {
         return node.getAttribute('data-node-label') ||
-          (node.getAttribute('aria-label') || fallback).replace(/^Focus\s+/, '').split(',')[0];
+          (node.getAttribute('aria-label') || fallback).replace(/^Focus\s+/, '').split[','](0);
       }
       function build() {
         if (!viewBox || viewBox.width <= 0 || viewBox.height <= 0) return false;
@@ -12841,7 +12841,7 @@
       }
       function nodeLabel(node, fallback) {
         return node.getAttribute('data-node-label') ||
-          (node.getAttribute('aria-label') || fallback).replace(/^Focus\s+/, '').split(',')[0];
+          (node.getAttribute('aria-label') || fallback).replace(/^Focus\s+/, '').split[','](0);
       }
       function exportSnapshot() {
         if (mode !== 'result' || activeNodeIds.length < 2 || activeEdges.length !== activeNodeIds.length - 1) return null;

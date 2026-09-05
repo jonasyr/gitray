@@ -24,6 +24,25 @@ when an author name contains `|`; the test suite is non-deterministic.
 
 Authoritative analysis: `docs/BACKEND_ARCHITECTURE_AUDIT.md`.
 
+## Architectural direction (decided 2026-09-05)
+
+Destination is a **PostgreSQL-backed index with delta updates**, reached only after the correctness
+and Git-layer phases. A cache cannot meet the requirements (persisted, shared, any repo size,
+notify on completion) because it is evictable and lost on restart.
+
+Measured: a 1M-commit repository costs ~24 s for commit metadata and ~9.4 min for file churn —
+~15 minutes once, then milliseconds per delta.
+
+Two measured design constraints:
+- `--filter=blob:none` is **624x slower** for `--numstat`; use a full clone for the churn pass.
+- Index metadata and churn as **separate jobs** so the dashboard is usable in under a minute.
+
+Rejected: an `analysis_sessions` table — there is no authentication anywhere and results are
+global, so `(repository, index_state, index_job)` covers every responsibility it would have.
+
+Plan and schema: `docs/BACKEND_ARCHITECTURE_AUDIT.md` §15-16.
+
+
 
 ## High-Level Architecture
 

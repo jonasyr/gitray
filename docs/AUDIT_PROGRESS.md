@@ -214,3 +214,44 @@ modified**; all configuration was supplied as environment variables.
 the process was hard-killed. Shared clones are retained by design for `REPO_CACHE_MAX_AGE_HOURS`
 (24 h default), so this is expected behaviour rather than a leak — but combined with C-9 it means
 clones survive both graceful and ungraceful shutdown.
+
+---
+
+## Recommendation reversal (2026-09-05)
+
+The team supplied product requirements that were not in the original brief: **any repository size
+including 1M+ commits; a one-time analysis persisted and never lost; shared globally; optional
+notification on completion.**
+
+The first draft recommended **Option B** (refactor, no new infrastructure) on the grounds that the
+cache already delivers 50-100x on warm reads. That measurement was taken on 75-600 commit
+repositories and does not generalise, and a cache is disqualified outright by the persistence
+requirement.
+
+**Revised recommendation: Option C (PostgreSQL + job queue + delta updates) as the destination,
+reached through Option B's phases, which are its prerequisite.**
+
+### Scale measurements taken to test feasibility
+
+| Repository | Commits | Full clone | Blobless | `--numstat` FULL | `--numstat` BLOBLESS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `p-limit` *(clean run)* | 81 | 150 KB | 111 KB | **63 ms** | **39,299 ms** |
+| `express` | 6,163 | 11 MB | 4 MB | 1,595 ms | killed >10 min |
+| `git/git` | 82,135 | 317 MB | 117 MB | 46,298 ms | killed >20 min |
+
+Extrapolated to 1M commits on a full clone: metadata **~24 s**, churn **~9.4 min**.
+
+### New findings from this round
+
+| ID | Finding |
+| --- | --- |
+| **S-1** | `--numstat` on a `--filter=blob:none` clone is **624x slower** (identical output) because Git lazily fetches every blob. **Contradicts the v1 audit's clone recommendation.** |
+| **S-2** | Metadata (24 s) and churn (9.4 min) differ by 23x — they must be **separate index jobs**. Neither the team's brainstorm nor v1 proposes this. |
+| **S-3** | Disk is the real constraint (~4 GB per 1M-commit repo vs a 5 GB default limit). Refinement: full clone for the initial churn pass, prune to blobless for retention. |
+
+### Documents updated for the reversal
+
+Audit §1.5, §2.4 (new: requirements), §14 Option B/C, §15.1 (rewritten), §16 (Phases 6-10 added,
+Phase 3 clone policy corrected), §17.7 (new: scale measurements), §17.3 diagram index;
+`gitray-option-c` and `gitray-target-architecture` diagrams; `docs/diagrams/README.md`;
+`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`; two Serena memories.

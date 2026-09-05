@@ -36,6 +36,35 @@ including four other verified defects and the recommended refactor, is in
 Also note: the test suite is **non-deterministic** (finding C-8) — the same command has produced
 four different outcomes on an unmodified tree. A green run is not proof.
 
+## Architectural direction (decided 2026-09-05)
+
+**Destination: PostgreSQL-backed index with delta updates. Route: fix correctness and the Git layer
+first.**
+
+Requirements driving this: any repository size including 1M+ commits; a one-time analysis that is
+persisted and never lost; shared globally with every visitor; optional notification on completion.
+A cache cannot satisfy these — it is evictable and lost on restart.
+
+Measured feasibility for a 1M-commit repository: **~24 s** to index commit metadata, **~9.4 min**
+for file churn — about **15 minutes once**, then milliseconds per delta.
+
+Two measured constraints that shape the design:
+
+- **Do not clone with `--filter=blob:none` when you need `--numstat`.** It is **624x slower**,
+  because Git lazily fetches every blob over the network. Full clone for the churn pass.
+- **Index metadata and churn as separate jobs** (24 s vs 9.4 min), so the dashboard is usable in
+  under a minute.
+
+**Hard prerequisites before any persistence work** — the current Git layer would corrupt the index:
+
+1. C-1, the lock defect above.
+2. The commit parser: measured **4 commits in, 3 parsed**. It drops empty-subject commits and
+   shifts fields on a `|` in an author name. A persisted index built on it diverges from
+   `rev-list` silently, and every delta compounds the drift.
+
+Full plan, phases and schema: `docs/BACKEND_ARCHITECTURE_AUDIT.md` §15 and §16.
+
+
 
 ## Development Environment
 

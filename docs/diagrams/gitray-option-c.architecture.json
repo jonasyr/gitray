@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "GitRay — Option C: PostgreSQL + Job Queue",
+    "title": "GitRay — Option C: Recommended Destination",
     "output": "gitray-option-c.html",
     "quality_profile": "showcase",
     "viewBox": [1300, 680],
@@ -11,13 +11,13 @@
         "id": "read",
         "label": "Read path",
         "focus": ["fe", "rr", "an", "db"],
-        "note": "Reads are served from SQL. The API never shells out to git."
+        "note": "Reads served from SQL. The API never shells out to git."
       },
       {
         "id": "index",
-        "label": "Indexing path",
+        "label": "Two-phase indexing",
         "focus": ["queue", "worker", "gc", "git", "db"],
-        "note": "A separate worker process drains index_jobs and writes facts."
+        "note": "Metadata job completes in ~24s at 1M commits; churn follows in ~9.4 min."
       }
     ]
   },
@@ -60,16 +60,17 @@
       "id": "queue",
       "type": "messagebus",
       "label": "index_jobs",
-      "sublabel": "FOR UPDATE SKIP LOCKED",
+      "sublabel": "metadata job, then churn job",
       "pos": [760, 310],
-      "size": [200, 66]
+      "size": [200, 66],
+      "tag": "two-phase"
     },
     {
       "id": "db",
       "type": "database",
       "label": "PostgreSQL",
       "sublabel": "commits, commit_files, rollups",
-      "tag": "source of truth",
+      "tag": "persisted, shared",
       "pos": [280, 445],
       "size": [220, 66]
     },
@@ -79,15 +80,17 @@
       "label": "apps/worker",
       "sublabel": "NEW second process",
       "pos": [760, 445],
-      "size": [200, 66]
+      "size": [200, 66],
+      "tag": "24s + 9.4min at 1M"
     },
     {
       "id": "gc",
       "type": "backend",
       "label": "gitClient",
-      "sublabel": "clone + incremental fetch",
+      "sublabel": "FULL clone for churn",
       "pos": [1040, 445],
-      "size": [200, 66]
+      "size": [200, 66],
+      "tag": "blobless is 624x slower"
     },
     {
       "id": "git",
@@ -170,30 +173,29 @@
   ],
   "cards": [
     {
-      "dot": "cyan",
-      "title": "Proposed schema",
-      "items": [
-        "repositories, index_state, commits, commit_files",
-        "daily_activity and file_churn, generation-stamped",
-        "index_jobs claimed with SKIP LOCKED"
-      ]
-    },
-    {
       "dot": "emerald",
-      "title": "What only C solves",
+      "title": "Measured at 1M commits",
       "items": [
-        "Pagination becomes real SQL LIMIT/OFFSET over indexed rows",
-        "Incremental indexing from the last head_sha",
-        "Repeat views cost a query, not a clone"
+        "Commit metadata index: ~24 seconds",
+        "File churn index: ~9.4 minutes",
+        "One-time ~15 min, then milliseconds per delta"
       ]
     },
     {
-      "dot": "rose",
-      "title": "Why it is not the next step",
+      "dot": "cyan",
+      "title": "Why only this option qualifies",
       "items": [
-        "2 to 3 months, high regression risk during dual-read",
-        "Adds Postgres plus a worker to a stalled two-person project",
-        "Benchmarks would be measured against C-1-corrupted numbers"
+        "A cache is evictable and lost on restart",
+        "Requirement: analysis persisted and never lost",
+        "Requirement: shared globally, notify on completion"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Hard prerequisites",
+      "items": [
+        "Phase 1: the lock layer swaps payloads today",
+        "Phase 3: parser drops commits - 4 in, 3 out"
       ]
     }
   ]

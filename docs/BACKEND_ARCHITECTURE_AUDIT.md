@@ -210,20 +210,44 @@ Phase 1 of §16 is where the previous effort should resume.
 
 ### 1.5 Recommended direction
 
-**Option B — Incremental Modular Refactor, executed correctness-first** (full detail §15).
+**Destination: Option C — PostgreSQL-backed index with delta updates. Route: Option B's phases
+first, because they are its prerequisite.**
 
-Delete concurrency layers rather than add another. Concretely: fix the lock primitive, collapse the
-three clone paths into one, replace the three-tier cache with a single keyed cache, and delete the
-streaming path and the duplicate `/api/commits/*` surface. On measured sizes this removes roughly **2,600–3,000 lines** (breakdown in §15.3) and makes the
-system comprehensible to two people again, **without** introducing PostgreSQL, a job queue, or any
-new infrastructure.
+The team's product requirements (§2.4) are: any repository size including 1M+ commits; a one-time
+analysis that is persisted and never lost; shared globally with every later visitor; optional
+notification on completion. **The current architecture satisfies none of those**, and no amount of
+caching can — a cache is evictable and lost on restart, which is precisely what requirement 4
+forbids.
 
-The v1 audit's PostgreSQL + job-queue proposal is **deferred, not dismissed** (§14 Option C, §15).
-It is a defensible endpoint, but it is the wrong *next* step: it stacks a new subsystem onto a code
-base whose existing subsystems are not yet correct, and any benchmark of it would be measured
-against numbers that are already silently wrong because of C-1 and C-2.
+Measurement says the plan is affordable (§17.7). For a 1,000,000-commit repository:
 
----
+| Stage | Cost |
+| --- | --- |
+| Commit metadata index | **~24 seconds** |
+| File churn index (`--numstat`) | **~9.4 minutes** |
+| **One-time total** | **~15 minutes**, then milliseconds per delta, shared by everyone |
+
+So the team's original instinct — index into Postgres, then delta-update — is **correct**. An
+earlier draft of this audit recommended stopping at Option B; that draft did not have the
+requirements and is superseded by §15.1, which explains the reversal.
+
+**What the phases must deliver before Postgres is touched**, none of it optional:
+
+1. **Phase 1 — C-1.** The lock layer currently swaps payloads between concurrent operations. An
+   indexer built on it would write one repository's facts under another's key.
+2. **Phase 3 — one clone path, real refs, and a correct parser.** Measured today: **4 commits in,
+   3 parsed** (§17.4). A persisted index built on that parser diverges from `rev-list` silently, and
+   every delta compounds the drift. This is the single most dangerous prerequisite.
+
+Three refinements this audit adds to the team's plan, all measured:
+
+- **Do not clone with `--filter=blob:none` for churn** — it is **624x slower**, because Git lazily
+  fetches every blob (§17.7 S-1). This contradicts the v1 audit's recommendation.
+- **Index metadata and churn as two separate jobs** — 24 s versus 9.4 min. Otherwise the dashboard
+  waits 15 minutes for data that was ready in 24 seconds (§17.7 S-2).
+- **Reject the `analysis_sessions` table.** There are no users — no authentication exists anywhere,
+  and results are global by requirement. `(repository, index_state, index_job)` covers every
+  responsibility a session would have.
 
 ## 2. Scope and Methodology
 
@@ -251,6 +275,21 @@ against numbers that are already silently wrong because of C-1 and C-2.
 
 Both ran **before** any file in this repository was modified, so they are a true pre-existing
 baseline. See §13 for what this baseline does and does not prove.
+
+### 2.4 Product requirements (stated by the team, 2026-09-05)
+
+These were **not** part of the original audit brief and were supplied after the first draft. They
+change the recommendation materially, so they are recorded verbatim in substance:
+
+1. **Any repository size, reliably — including 1,000,000+ commits.**
+2. **Analysis is a shared global asset.** If one person analyses a repository, the result is shown
+   to everyone. There is no per-user scoping.
+3. **A repository is either already analysed (instant) or gets analysed on request.**
+4. **The long analysis must be persisted** so the work is never lost.
+5. **Optional notification** (e.g. e-mail) when a long analysis completes.
+
+**The current architecture cannot satisfy any of 1, 3, 4 or 5**, and requirement 2 is the reason
+persistence — rather than caching — is the right mechanism. §15 is rewritten around these.
 
 ### 2.3 Tooling used, and its limits
 
@@ -1575,7 +1614,7 @@ single-flight would increase duplicate clones under load.
 **Technical debt remaining.** **High.** Every structural finding in §10 except C-1, C-7 and C-9
 survives untouched.
 
-### Option B — Incremental Modular Refactor  ⭐ RECOMMENDED
+### Option B — Incremental Modular Refactor  ⭐ REQUIRED FOUNDATION (Phases 0-5)
 
 **Concept.** Do Option A first, then **delete** subsystems until one clear path per concern remains.
 
@@ -1621,7 +1660,7 @@ apps/backend/src/
   in two heads again.
 - **Debt remaining:** LOW-MEDIUM — still no persistence, so cold analyses remain slow.
 
-### Option C — PostgreSQL + Job Queue (the v1 proposal)
+### Option C — PostgreSQL + Job Queue  ⭐ RECOMMENDED DESTINATION
 
 **Conceptual architecture.** Stop deriving analytics per request. Index each repository once into
 normalised per-commit facts, maintain materialised rollups, serve reads from SQL, and drive
@@ -1757,12 +1796,16 @@ indexed rows), makes repeat views cheap, and enables incremental indexing. It is
 that fixes C-3 at the root rather than by bounding it.
 
 **Disadvantages.** It stacks a new subsystem onto a code base whose existing subsystems are not
-yet correct. Any benchmark used to justify it would be measured against numbers already corrupted
-by C-1 and stale from C-2. It also requires operating Postgres plus a worker for a university
-project.
+yet correct — which is why Phases 1 and 3 are hard prerequisites rather than good practice
+(§15.1). It also requires operating Postgres plus a worker.
 
-**Risks.** High. The dominant risk is not technical failure but **abandonment**: a 2 to 3 month
-migration for a two-person team that has already stalled once.
+**Risks.** The dominant risk is not technical failure but **abandonment**: this is a multi-month
+migration for a two-person team that has already stalled once. The phased plan in §16 mitigates it
+by making Phases 1, 3 and 5 independently valuable — Phase 1 alone restores a working product, and
+every phase is a safe stopping point.
+
+**Measured feasibility (§17.7):** ~24 s metadata + ~9.4 min churn for a 1M-commit repository, on a
+full bare clone. The one-time cost is affordable; the delta cost afterwards is milliseconds.
 
 **Implementation effort.** 2 to 3 months part-time.
 
@@ -1823,20 +1866,21 @@ signals the project is single-instance.
 **Technical debt remaining.** Medium. It is orthogonal to C-1 through C-5, none of which it fixes.
 
 **Assessment.** Attractive as a *sub-decision inside* Option B, not as a standalone strategy.
-Recommended as an optional Phase 6 (§16), decided once §17.2 Q-3 is confirmed with the team.
+Recommended as an optional Phase 9 (§16), decided once §17.2 Q-3 is confirmed with the team.
 
 ### Comparison
 
-| Axis | A | **B** | C | D |
+| Axis | A | B | **C** | D |
 | --- | --- | --- | --- | --- |
 | Fixes C-1 correctness | ✅ | ✅ | ✅ | ✅ |
 | Fixes C-2 staleness | ✅ | ✅ | ✅ | ✅ |
 | Improves comprehensibility | ❌ | ✅✅ | ✅ | ✅ |
+| Meets the §2.4 requirements | ❌ | ❌ | **✅ only C** | ❌ |
 | LOC delta | ~0 | **−2.6k to −3.0k** | +3k then −5k | −0.9k |
 | New infrastructure | none | **none** | Postgres + worker | **−Redis** |
-| Effort | 3–5 d | **3–4 wk** | 2–3 mo | 1 wk |
+| Effort | 3-5 d | 3-4 wk | **+2-3 mo on top of B's phases** | 1 wk |
 | Regression risk | LOW | **MEDIUM** | HIGH | LOW |
-| Probability a stalled 2-person team finishes it | High | **High** | Low | High |
+| Probability a stalled 2-person team finishes it | High | High | **Medium — phased, each stop is useful** | High |
 
 ---
 
@@ -1874,51 +1918,89 @@ worth fixing *as part of* a phase rather than on their own. This table is the de
 *standalone and now* — C-8 so you can trust tests, then C-1 so the product works. Almost everything
 else is cheaper as a by-product of a phase than as its own task.
 
-### 15.1 Recommendation: **Option B**, with Option A as its non-negotiable Phase 1
+### 15.1 Recommendation: **Option C as the destination, reached through Option B's phases**
 
-The decision is driven by this project's actual constraints, not by architectural fashion.
+**This reverses the recommendation in the first draft of this audit, and the reason is that the
+first draft was answering the wrong question.**
 
-**Why B:**
+The original brief described a stalled two-person student project that had lost its mental model.
+Against that, Option B — delete code, one path per concern, no new infrastructure — was the right
+answer, and the argument that "the cache already gives 50-100x warm, so Postgres buys little"
+followed from it.
 
-0. **It is the only option that starts by making the product work.** §0.2 shows the dashboard is
-   currently broken on any uncached repository. Phase 1 is not hygiene — it is the repair.
-1. **It attacks the stated blocker.** The team's problem is that they have lost their mental model.
-   B's primary output is *less code with clearer boundaries* — 4,500 fewer lines, one path per
-   concern. A and C both leave the comprehension problem unsolved (A changes nothing structural;
-   C adds a whole new subsystem to understand).
-2. **Most of the work is deletion, much of it of code this audit has *proven* has no production
-   caller.**
-   That is the lowest-risk form of large-scale change. Nine symbols were LSP-verified dead; an
-   entire endpoint family was verified unreferenced by the frontend.
-3. **It needs no new infrastructure**, so it cannot stall on ops work — a real risk for two students.
-4. **It preserves the good parts.** SSRF protection, the hardened 404 handler, admin token
-   comparison, the route factory, and `shared-types` are all sound and are kept verbatim.
-5. **It leaves Option C available.** Once there is one clean `gitClient` and one `analyticsCache`
-   keyed by `(repoId, headSha)`, swapping the cache for a Postgres-backed store is a *contained*
-   change behind one interface. B is a prerequisite for C, not an alternative path away from it.
+Then the actual product requirements arrived (§2.4): **any repository size including 1M+ commits, a
+one-time analysis that is persisted and never lost, shared globally with every later visitor, with
+optional notification on completion.**
 
-**Why not A:** it fixes correctness but leaves the team exactly as unable to work on the code as
-they are today. It is necessary but not sufficient — hence it becomes Phase 1 of B.
+Under those requirements the earlier argument collapses, for three measured reasons:
 
-**Why not C — and the measurements make this stronger than the earlier draft claimed.**
+1. **The 50-100x cache win was measured on 75-600 commit repositories.** It does not generalise.
+   At 1M commits the raw tier holds the entire history as a single cache entry that exceeds the
+   whole default memory budget, so it can never be cached at all — every request re-walks. C-3 is
+   not a slow path at that scale, it is a **wall**.
+2. **A cache is the wrong mechanism for a 15-minute artefact.** Cache entries are evictable under
+   memory pressure and lost on restart. Requirement 4 — "the long analysis must be persisted so the
+   work is never lost" — is a direct statement that caching is disqualified. That is a database.
+3. **There is no job queue, so requirements 3 and 5 are unimplementable.** "Analyse on request, and
+   notify me when it is done" needs a durable job with a lifecycle. Nothing in the current design
+   has one.
 
-The case for PostgreSQL rests largely on read performance. **That case is now measurably weak.**
-The existing cache, when it works, serves warm reads in **9-30 ms** — a 50-100x speed-up over cold
-(§17.6). SQL would not beat that; it would at best match it. What Postgres genuinely buys is
-**freshness (C-2), real pagination (C-3) and incremental indexing** — none of which is a read-speed
-argument, and two of which Phase 3 and Phase 4 address far more cheaply.
+**And the measurements show the plan is affordable.** A 1M-commit repository costs ~24 s of metadata
+indexing and ~9.4 minutes of churn indexing — about **15 minutes once**, then milliseconds per
+delta, shared by everyone thereafter (§17.7). That is a good trade, and it is the number that turns
+the team's instinct into a defensible design.
 
-So the honest framing is: Option C solves *staleness and cold-start*, not *warm latency*. That is a
-much narrower benefit than it first appears, bought at 2-3 months and a second process.
+**So: the team's original instinct — index into Postgres, then delta-update — was right.** This
+audit's first draft under-weighted it because it did not know the requirements.
 
-The sequencing objection also still stands, and is now demonstrated rather than argued: with C-1
-live, **half the dashboard 500s on a cold repository**. Any benchmark used to justify persistence
-today would be measured against a system that does not work. Revisit after B.
+#### What does *not* change
 
-**Why not D standalone:** dropping Redis is a good idea *if* single-instance is acceptable, but it
-is a deployment decision, not an architecture strategy, and it does not touch C-1.
+Option B's early phases are **not an alternative to Option C — they are its prerequisite**, and not
+for reasons of caution:
 
-### 15.2 What Option B actually removes (measured)
+| Prerequisite | Why the index cannot be built without it |
+| --- | --- |
+| **Phase 1, C-1** | The lock layer currently swaps payloads between concurrent operations (§0.2, reproduced). An indexer built on it would write one repository's facts under another's key. |
+| **Phase 3, one clone path** | Delta updates need a single owner of `fetch`. There are three clone paths and none of them fetches after the first clone. |
+| **Phase 3, real refs** | The delta rule is `merge-base --is-ancestor <indexed_sha> <new_head>`. Today the code checks out a detached `FETCH_HEAD`, so there is **no stable ref to diff against**. |
+| **Phase 3, correct parser** | Measured: 4 commits in, **3 parsed** (§17.4). An index built on this parser silently diverges from `rev-list` and the divergence compounds with every delta, invisibly. **This is the one that would quietly corrupt the persisted index.** |
+| **Phase 1, canonical identity** | `repo` and `repo.git` are two different repositories today (P-5). The shared index needs one row per remote, not two. |
+
+**The ordering in the v1 audit was therefore correct** — P0 correctness, P1 one clone and one walk,
+P2 Postgres — and this audit now agrees with it.
+
+#### Where this audit still disagrees with both documents
+
+| Point | Verdict |
+| --- | --- |
+| **Analysis Sessions** as a persisted entity | **Reject.** No responsibility that `(repository, index_state, index_job)` does not already own — and, decisively, **there are no users**: no auth exists anywhere, and requirement 2 says results are global. A session entity models a concept the system cannot populate. Keep a request-scoped correlation id for telemetry. |
+| Clone with `--filter=blob:none` for indexing (v1 §7.3) | **Reject — measured 624x penalty on the churn pass** (§17.7 S-1). Use a full clone for the initial index; prune to blobless for *retention*, where delta blob fetches are few. |
+| Index metadata and churn as one job | **Reject.** 24 s versus 9.4 minutes. Split them so the dashboard is usable in under a minute (§17.7 S-2). |
+| "Delete the cache layer entirely" (v1 #10) | **Partially reject.** Delete the three-tier structure and the 538-line transaction engine. **Keep a single response cache** — 9-30 ms reads are worth having in front of Postgres. |
+| Incrementally mutating counters (`totalCommits++`) | **Reject**, agreeing with v1: non-idempotent, and a retried job corrupts the counter undetectably. |
+| Ancestry-guarded delta with cheap full rebuild (v1 §9.2-9.3) | **Accept unchanged.** This is the strongest idea in either document: `rev-list` yields the full sha set in seconds, so a force-push costs one `rev-list` plus the genuinely new commits. The safe path is also the fast path. |
+| Aggregate-only index | **Reject**, agreeing with v1 — persist per-commit facts, materialise rollups. Note one correction: v1 justifies this by calling `/heatmap?author=` and `/contributors` "live endpoints"; they are **mounted but have no frontend consumer** (§4.2). The conclusion holds anyway, because `/full-data` does pass author filters and aggregate-only forces a re-scan for every future feature. |
+| SQLite as an interim step | **Reject**, agreeing with v1. |
+
+#### Why not stop at Option B
+
+Because it does not meet requirements 1, 3, 4 or 5. Option B makes the system *correct and
+comprehensible*; it does not make it *persistent, shared or scalable to 1M commits*. It is the right
+first half of the journey and the wrong place to stop.
+
+#### Why not go straight to Option C
+
+Because of the prerequisite table above — most sharply the parser. Building the persisted index on
+today's Git layer would produce a durable, shared, silently-wrong dataset, which is materially worse
+than today's transient wrongness.
+
+#### Why not Option A or D
+
+**A** fixes correctness and nothing else; it satisfies none of the five requirements. **D** removes
+Redis, which is orthogonal — and under a Postgres design Redis's remaining jobs (response cache,
+rate limiting) are small enough that dropping it is a later, optional tidy-up.
+
+### 15.2 What the Option B phases remove along the way (measured)
 
 The earlier draft of this audit estimated "4,000-5,000 lines". That was not grounded. Measured
 against the working tree:
@@ -1941,7 +2023,7 @@ branches in `cache.ts`.
 rest on the line count — it rests on collapsing three concurrency mechanisms to one, three clone
 paths to one, and four caches to one.
 
-### 15.3 Target architecture
+### 15.3 Target architecture — the Option B end state (an intermediate milestone)
 
 ```mermaid
 flowchart TD
@@ -1987,7 +2069,7 @@ flowchart TD
 | Staleness | unbounded | bounded by refresh policy; `headSha` makes it self-invalidating |
 | Route styles | 2 | 1 |
 | `gitService` → cache dependency | yes (cycle) | forbidden by lint rule |
-| LOC (backend src) | 21,908 (measured) | ~19,000 (see §15.3) |
+| LOC (backend src) | 21,908 (measured) | ~19,000 after the Option B phases; lower again once the cache tiers are replaced by Postgres reads |
 
 ---
 
@@ -2086,19 +2168,33 @@ before starting (baseline confirmed in §13); commit per phase.
 - **Affected:** `utils/gitUtils.ts`, `services/repositoryCoordinator.ts`,
   `services/repositorySummaryService.ts`, `services/fileAnalysisService.ts`.
 - **Changes:**
-  1. Create `git/gitClient.ts` owning the **only** clone implementation. Prefer
-     `--bare --filter=blob:none --no-tags` (removes the working-tree checkout entirely — see §17 Q-1
-     before committing to this).
-  2. Add `refresh(handle)` — `git fetch` on an existing clone — and `headSha(handle)`.
+  1. Create `git/gitClient.ts` owning the **only** clone implementation, always `--bare --no-tags`
+     (no working tree — §17.1 showed the current `checkout FETCH_HEAD` downloads every HEAD blob).
+     **Clone policy is workload-dependent and was measured (§17.7 S-1):**
+     - **metadata only** → `--filter=blob:none` is correct and cheap;
+     - **anything needing `--numstat` or file sizes** → a **full** clone. Blobless is **624x
+       slower** on the churn pass because Git lazily fetches every blob over the network.
+  2. Fetch into a **real ref**, not detached `FETCH_HEAD`:
+     `git fetch --no-tags origin +refs/heads/<default>:refs/remotes/origin/<default>`.
+     This is what later gives `merge-base --is-ancestor` something to compare, and it is a
+     prerequisite for Phase 7's delta rule.
+  3. Add `refresh(handle)` — `git fetch` on an existing clone — and `headSha(handle)`.
      Call `refresh` from `isHandleValid` when the handle is older than a configurable TTL.
      **Fixes C-2.**
-  3. Change `repositorySummaryService.getRepositorySummary` and the `fileAnalysisService` sparse path
+  4. Replace the log format and parser: `%x1e` record separator, `%x1f` field separator, capture
+     **both** `%aI` and `%cI`, and **never drop a record for an empty subject**. Measured today:
+     4 commits in, 3 out (§17.4). **This is the single most important change in the phase** —
+     everything persisted later inherits this parser's correctness.
+  5. Change `repositorySummaryService.getRepositorySummary` and the `fileAnalysisService` sparse path
      to accept a `localPath` **parameter** instead of cloning. Route handlers obtain it from the
      coordinator. **Fixes C-5.**
 - **Compatibility:** response shapes unchanged.
 - **Tests during:** assert exactly **one** clone occurs for a dashboard-shaped burst of 4 concurrent
   requests (spy on `gitClient.clone`).
-- **Verification:** smoke E2E passes; clone-count test passes.
+- **Verification:** smoke E2E passes; clone-count test passes; and **`getCommits(...).length` equals
+  `git rev-list --count`** for a repository containing an empty-subject commit and an author name
+  containing `|`. That equality is the regression test for §17.4 and the correctness gate for
+  everything in Phases 6-8.
 - **Rollback:** revert; the two services keep their own clone methods until this phase merges.
 - **Checkpoint:** ✅
 
@@ -2142,16 +2238,85 @@ before starting (baseline confirmed in §13); commit per phase.
 
 ---
 
-### Phase 6 (optional, decide later) — Drop Redis
+### Phase 6 — PostgreSQL facts and the job queue
 
-- **Precondition:** resolve §17 Q-3 (is multi-instance deployment a requirement?).
+- **Objective:** make an analysis a durable, shared artefact instead of a cache entry. This is where
+  requirements 3, 4 and 5 (§2.4) are met.
+- **Preconditions:** Phases 1-5. **Phase 3 is non-negotiable** — the parser, the single clone path
+  and a real ref must exist first, or the persisted index will be silently wrong (§15.1).
+- **Schema:** as specified in §14 Option C — `repositories`, `index_state`, `commits`,
+  `commit_files`, `daily_activity`, `file_churn`, `index_jobs`. **No `analysis_sessions` table.**
+- **Job queue:** `index_jobs` claimed with `SELECT … FOR UPDATE SKIP LOCKED`, leased with an expiry
+  so a crashed worker's row returns to `queued`. A partial unique index prevents two pending jobs
+  for the same `(repository_id, kind)`.
+- **Two-phase indexing (§17.7 S-2):** `kind='metadata'` first (~24 s at 1M commits), then
+  `kind='churn'` (~9.4 min). `index_state` reports each independently so the dashboard can render
+  everything except the churn panel within a minute.
+- **Clone policy (§17.7 S-1):** a **full** bare clone for the initial churn pass — *not*
+  `--filter=blob:none`, which is 624x slower on `--numstat`. Prune to blobless for retention.
+- **Idempotency:** `commits` inserted `ON CONFLICT DO NOTHING`; rollups recomputed from facts, never
+  `+=`'d; `index_state.head_sha` advances only in the transaction that commits the facts.
+- **Compatibility:** dual-read. Serve from SQL when `index_state.status='ready'`, else fall back to
+  the existing path. Both live until Phase 8.
+- **Tests before:** contract tests for the four live endpoints (Phase 0) must still pass unchanged.
+- **Tests during:** migration tests; a job-queue concurrency test (two workers, one job, claimed
+  once); and an **equivalence test** asserting SQL-derived output matches Git-derived output for a
+  fixed repository.
+- **Verification:** a 1M-commit repository indexes end to end; `commits` row count equals
+  `git rev-list --count`. That equality is the regression test for the parser bug (§17.4).
+- **Rollback:** feature-flag the SQL read path; the Git path remains until Phase 8.
+- **Checkpoint:** ✅
+
+### Phase 7 — Delta updates
+
+- **Objective:** keep the shared index fresh cheaply. Fixes C-2 permanently.
+- **Rule (adopted from v1 §9.2 unchanged):**
+
+  ```text
+  fetch → new_head = rev-parse refs/remotes/origin/<default>
+  if new_head == head_sha                                   → no-op, touch indexed_at
+  if git merge-base --is-ancestor <head_sha> <new_head>     → delta: rev-list head_sha..new_head
+  else                                                       → NON-FAST-FORWARD → rebuild
+  ```
+
+- **Why rebuild is safe:** `rev-list <ref>` yields the full sha set in seconds; diff it against
+  stored shas and only genuinely new commits need parsing. A force-push rewriting 50 commits costs
+  one `rev-list` plus 50 commits — not a re-scan.
+- **Generations:** facts carry a `generation`; a rebuild writes a new one and promotes it in a
+  single transaction, then sweeps the old one in the background. A half-written generation is never
+  visible.
+- **Touched-bucket recomputation:** only the days in the delta refresh `daily_activity`, only the
+  `(path, month)` pairs in the delta refresh `file_churn` — each recomputed from `commits`, so
+  re-running a job is a no-op.
+- **Tests during:** a delta test (append commits, assert only new ones are parsed); a
+  **force-push test** (rewrite history, assert rebuild and a correct final row count).
+- **Verification:** after a delta, `commits` count equals `rev-list --count` at the new head.
+- **Rollback:** delta is a job kind; disable it and fall back to full re-index.
+- **Checkpoint:** ✅
+
+### Phase 8 — Retire the cache tiers and reshape the API
+
+- **Objective:** remove what Postgres has replaced.
+- **Changes:** delete the three-tier `RepositoryCacheManager` and `HybridLRUCache`; **keep a single
+  response cache** (§15.1). Add `indexState: {status, headSha, lastIndexedAt}` to every analytics
+  response, and return `202 Accepted` with a job id when an index is still running. Add the optional
+  completion notification (requirement 5) as a job-completion hook.
+- **Compatibility:** this changes response shapes — the **frontend must be updated in the same
+  change** to render a pending state. It is the only phase that touches the frontend.
+- **Checkpoint:** ✅ — at this point all five requirements in §2.4 are met.
+
+### Phase 9 (optional, decide later) — Drop Redis
+
+- **Precondition:** resolve §17 Q-3. Note that after Phase 8, Redis's remaining jobs are only
+  response caching and rate limiting, so this becomes a small tidy-up rather than an architectural
+  decision.
 - **Changes:** if single-instance is acceptable, delete `distributedCacheInvalidation`, the Redis
   backend and the two-DB split; keep memory + disk tiers.
 - **Checkpoint:** ✅
 
 ---
 
-### Phase 7 — Documentation
+### Phase 10 — Documentation
 
 Fold §12 corrections into `README.md`, `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`,
 `.serena/memories/*`. Write the `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/TESTING.md` that
@@ -2159,15 +2324,28 @@ Fold §12 corrections into `README.md`, `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`,
 
 ---
 
-### Explicitly **out of scope** for this plan
+### Safe stopping points
 
-- Option C (Postgres + job queue). Reconsider after Phase 5, with honest benchmarks.
-- Replacing `AIInsights`/`PremiumFeatures` mock UI — a product decision, not an architecture one.
-  They should at minimum be **labelled as mock in the UI** so they are not mistaken for features.
-- Frontend restructuring (router, state library, code splitting). Worth doing, unrelated to the
-  backend defects, and safe to defer.
+The plan is designed so that work can stop at any checkpoint without leaving the repository
+unusable:
 
----
+| Stop after | You have |
+| --- | --- |
+| **Phase 1** | A working product. The 500s are gone. **If only one phase is ever done, do this one.** |
+| Phase 3 | One clone path, correct parsing, refreshable clones. Cold latency roughly a third of today's. |
+| Phase 5 | A comprehensible codebase, ~3,000 fewer lines, one path per concern. |
+| **Phase 6** | Persistence. Analyses survive restarts and are shared. |
+| Phase 8 | The full product vision of §2.4. |
+
+### Explicitly **out of scope**
+
+- Replacing the `AIInsights` / `PremiumFeatures` mock UI. Confirmed as an intended but far-future
+  feature (§17 Q-7) — **do not delete**; label it as sample data and fix the copy that describes an
+  *Angular* project.
+- Frontend restructuring (router, state library, code splitting). Worth doing, unrelated, safe to
+  defer — except the F-1 theme fix, which is independent and can be done any time.
+- Coverage tiers / pricing enforcement. The column costs nothing in Phase 6; the enforcement logic
+  should wait until the index is proven.
 
 ## 17. Risks and Open Questions
 
@@ -2257,7 +2435,7 @@ caching is viable exactly as Phase 3/4 assume.
   (§7.5), so a second instance would silently serve divergent data.
 - Keeping Redis costs nothing architecturally and preserves the option of scaling later; removing it
   is a one-week change that can be made at any time.
-- **Therefore Phase 6 stays deferred and optional.** It is not on the critical path and no decision
+- **Therefore the drop-Redis work (now Phase 9) stays deferred and optional.** It is not on the critical path and no decision
   is required now.
 - What *should* change immediately is the documentation: stop claiming horizontal scalability, and
   record that `distributedCacheInvalidation` has no effect in the current topology.
@@ -2346,6 +2524,75 @@ Three conclusions that bear directly on the architecture decision:
    (0.017 s / 0.041 s / 0.047 s), consistent with C-3: the limit is applied after the full history
    has been materialised.
 
+### 17.7 Scale measurements — what a 1M-commit index actually costs
+
+Measured on real repositories on 2026-09-05, to test whether the team's persistence plan is viable
+at the stated scale. **This is the most decision-relevant data in the audit.**
+
+| Repository | Commits | Full bare clone | Blobless bare clone | `--numstat` on FULL | `--numstat` on BLOBLESS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `p-limit` *(clean, isolated run)* | 81 | 150 KB | 111 KB | **63 ms** | **39,299 ms** |
+| `express` | 6,163 | 11 MB | 4 MB | 1,595 ms | killed at >10 min |
+| `git/git` | 82,135 | 317 MB | 117 MB | 46,298 ms | killed at >20 min |
+
+Only the `p-limit` row is a clean head-to-head (the two larger blobless runs were terminated). It
+is unambiguous: **identical output — 361 lines both ways — and 624x slower on the blobless clone.**
+
+#### Finding S-1 — you cannot compute file churn from a `--filter=blob:none` clone
+
+`git log --numstat` must diff each commit against its parent, which requires the blobs. On a
+partial clone those blobs are absent and Git fetches them **lazily, over the network, one round
+trip at a time**. The result is correct and roughly 600x slower.
+
+This **contradicts the v1 audit's §7.3 recommendation** to clone with
+`--bare --filter=blob:none --no-tags` on first index. That is right for commit metadata and wrong
+for churn. It is also the same mechanism as §17.1's finding that `ls-tree -r -l` triggers blob
+fetching.
+
+The disk saving does not justify it: blobless saves 26% on `p-limit` and 63% on `git/git`, against
+a ~600x penalty on the one pass that needs blobs.
+
+#### Extrapolated cost of a one-time index at 1,000,000 commits
+
+From the `git/git` full-clone rates (1,774 commits/s for `--numstat`; 41,000 commits/s for
+metadata):
+
+| Stage | Cost at 1M commits | Notes |
+| --- | --- | --- |
+| Full bare clone | minutes; **~4 GB disk** | extrapolated from 317 MB / 82k commits |
+| **Commit metadata walk** | **~24 seconds** | one `git log`, streamed |
+| **File churn walk (`--numstat`)** | **~9.4 minutes** | the dominant cost |
+| **Total one-time index** | **~15 minutes** | |
+| Subsequent delta (a day of commits) | **milliseconds** | |
+
+**This is the number that makes the team's plan viable.** A 15-minute one-time cost, paid once and
+shared by every subsequent visitor, is entirely reasonable. It is also far too long to sit inside
+an HTTP request — which is precisely why it must be a persisted background job rather than a cache
+fill.
+
+#### Finding S-2 — index the two phases separately
+
+Metadata is **24 seconds**; churn is **9.4 minutes** — a 23x difference. Indexing them as one job
+makes the dashboard wait 15 minutes for data that was ready in 24 seconds.
+
+**Commit metadata should be phase one and churn phase two**, with `index_state` reporting them
+independently. The heatmap, contributors, summary and commit list all become available in under a
+minute for a 1M-commit repository; only the churn panel waits.
+
+Neither the team's brainstorm nor the v1 audit makes this split. It is the single highest-value
+refinement available to the plan.
+
+#### Finding S-3 — disk, not CPU, is the real scaling constraint
+
+A full bare clone must be **retained** after indexing, because delta updates need it to `fetch`.
+At ~4 GB per 1M-commit repository, and `REPO_CACHE_DISK_LIMIT_GB` defaulting to **5 GB**, the
+current configuration holds roughly **one** large repository.
+
+A refinement that neither document proposes: **the retained clone can be blobless.** Delta metadata
+needs no blobs, and churn for a *delta* needs blobs only for the handful of newly-touched files —
+where lazy fetching is entirely acceptable, since the 600x penalty applies per blob, not per repo.
+So: full clone for the initial churn pass, then prune to blobless for retention.
+
 ### 17.3 Diagram index
 
 Twelve interactive diagrams accompany this audit, in `docs/diagrams/`. Each was produced with
@@ -2370,9 +2617,9 @@ in a real browser at 1440x900, 1600x1000, 1920x1080 and 2048x1320 in both light 
 | File | Option |
 | --- | --- |
 | `gitray-option-a.html` | A — Minimal stabilisation (same topology as current, defects repaired) |
-| `gitray-target-architecture.html` | **B — Incremental modular refactor (recommended)** |
-| `gitray-option-c.html` | C — PostgreSQL + job queue |
-| `gitray-option-d.html` | D — Single process, no Redis |
+| `gitray-target-architecture.html` | **B — required foundation, Phases 0-5** |
+| `gitray-option-c.html` | **C — PostgreSQL + job queue ⭐ recommended destination** |
+| `gitray-option-d.html` | D — Single process, no Redis (optional Phase 9) |
 
 Option A deliberately reuses the *exact* node positions of the current-state diagram so the two
 can be flipped between; B, C and D share a second common layout for the same reason.

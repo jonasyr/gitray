@@ -28,9 +28,12 @@ themes.
 | Diagram | Option |
 | --- | --- |
 | `gitray-option-a.html` | A — Minimal stabilisation |
-| `gitray-target-architecture.html` | **B — Incremental modular refactor (recommended)** |
-| `gitray-option-c.html` | C — PostgreSQL + job queue |
-| `gitray-option-d.html` | D — Single process, no Redis |
+| `gitray-target-architecture.html` | **B — required foundation (Phases 0-5)** |
+| `gitray-option-c.html` | **C — PostgreSQL + job queue ⭐ recommended destination** |
+| `gitray-option-d.html` | D — Single process, no Redis (optional) |
+
+The recommendation is **C reached through B's phases**: B is the prerequisite that makes the
+persisted index correct, not an alternative to it. See the audit §15.1.
 
 Option A reuses the exact node positions of the current-state diagram so the two can be flipped
 between; B, C and D share a second common layout for the same reason.

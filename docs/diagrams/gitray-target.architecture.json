@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "GitRay — Target Architecture (Option B, recommended)",
+    "title": "GitRay — Option B: Required Foundation (Phases 0-5)",
     "output": "gitray-target-architecture.html",
     "quality_profile": "showcase",
     "viewBox": [1300, 680],
@@ -235,11 +235,11 @@
     },
     {
       "dot": "violet",
-      "title": "Preserved",
+      "title": "Foundation, not destination",
       "items": [
-        "SSRF guard, hardened 404, admin token",
-        "Route factory and shared-types contract",
-        "Frontend unchanged: same 4 endpoints"
+        "Meets none of the persistence requirements on its own",
+        "Phase 3 here is what makes the Postgres index correct",
+        "See gitray-option-c.html for the destination"
       ]
     }
   ]

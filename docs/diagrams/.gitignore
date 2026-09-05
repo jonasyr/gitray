@@ -1,3 +1,5 @@
-# Archify verification artifacts: browser screenshots and check receipts.
+# Archify verification artifacts: browser screenshots and check receipts
+
 # Regenerate with:  archify visual-check <diagram>.html
+
 *.visual-check.*
