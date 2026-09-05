@@ -53,8 +53,7 @@ async function transform(payload) {
   mermaid.initialize({
     startOnLoad: false,
     theme: 'base',
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
+    fontFamily: 'GitRayDiagram, sans-serif',
     themeVariables: {
       background: '#ffffff',
       primaryColor: '#e7eef4',

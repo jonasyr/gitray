@@ -442,6 +442,30 @@ Re-verified at 320, 390, 430, 768, 1024, 900, 1440 and 1920 px: **no horizontal 
 width**, figures scroll inside their frames, 12/12 images and 5/5 Mermaid charts render, 0 dead
 anchors. Desktop layout is unchanged.
 
+### Follow-up: Mermaid labels were clipped inside their own boxes (2026-09-05)
+
+Reported from a phone again, and the cause was not the phone. Mermaid measures each label, bakes a
+fixed `foreignObject` around it, and that box **clips** its contents. Two things then broke it:
+
+| Cause | Effect |
+| --- | --- |
+| The SVG carried `font-family: -apple-system, BlinkMacSystemFont, …`, which resolves to Segoe UI on the build machine and SF Pro on iOS | Boxes sized with one face, text drawn with a wider one — horizontal clipping on Apple devices only |
+| This document sets `font-size: 16.5px` and `line-height: 1.68`, and both **inherit into the label divs** — but the build page that sized the boxes has browser-default typography | Vertical clipping **everywhere, including desktop**: measured at **56 of 103 labels**, boxes 36px tall holding 47px of text |
+
+The second one was mine, it was present from the first render, and no viewport test would ever have
+caught it — the page had no overflow, the text was simply cut off inside the drawing.
+
+Fixed by removing both sources of drift: diagram text is pinned to an **embedded IBM Plex Sans**
+(woff2 latin subset, data URI, ~122 KB, both weights), so label metrics are identical on every
+device; and the document's typography is neutralised inside `.mermaid-fig svg`, so nothing the page
+sets can push the text out of a box that was sized without it.
+
+Verified with a check that measures `scrollWidth`/`scrollHeight` against `clientWidth`/`clientHeight`
+on the div inside each `foreignObject` — the only scale-independent test of the actual clipping
+condition: **0 of 103 labels clipped**, no system font stack left in any SVG, embedded face loaded.
+The check was then proven sensitive rather than merely green: forcing a wider face (Verdana) clips
+**55 of 103**, which is the failure it now rules out.
+
 One caveat on reproducibility: the **HTML is byte-stable** — building twice from the same sources
 produces an identical file, which is how the pre-commit hook's reformatting of `runtime.js` and
 `transform.js` was caught leaving the committed output one pass behind. The **PDF is not**: Chrome

@@ -65,6 +65,57 @@ for (const [file, url] of Object.entries(BUNDLES)) {
 }
 const lib = (f) => fs.readFileSync(path.join(CACHE, f), 'utf8');
 
+// ------------------------------------------------------------- diagram font --
+// Mermaid measures every label with the *build* machine's font and then bakes
+// fixed shape geometry into the SVG. A reader whose system resolves the same
+// stack to a different face (Segoe UI here, SF Pro on iOS) gets text that
+// overflows the boxes. Pinning diagram text to one embedded face makes the
+// metrics identical everywhere.
+const FONT_FAMILY = 'GitRayDiagram';
+const FONT_CSS_URL = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&display=swap';
+const MODERN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+  + ' (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+async function diagramFontFace() {
+  const cached = path.join(CACHE, 'diagram-font.css');
+  if (fs.existsSync(cached)) return fs.readFileSync(cached, 'utf8');
+
+  process.stderr.write('fetching diagram font\n');
+  const cssResponse = await fetch(FONT_CSS_URL, { headers: { 'User-Agent': MODERN_UA } });
+  if (!cssResponse.ok) throw new Error(`Font CSS fetch failed: HTTP ${cssResponse.status}`);
+  const css = await cssResponse.text();
+
+  // Take only the latin subset of each weight; the diagrams are Latin-only.
+  const faces = [];
+  const blocks = css.split('@font-face').slice(1);
+  for (const block of blocks) {
+    const weight = (block.match(/font-weight:\s*(\d+)/) || [])[1];
+    const url = (block.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+\.woff2)\)/) || [])[1];
+    const range = (block.match(/unicode-range:\s*([^;]+);/) || [])[1] || '';
+    if (!weight || !url) continue;
+    // latin subset covers U+0000-00FF; skip the extended/vietnamese subsets
+    if (!/U\+0000-00FF/.test(range)) continue;
+    if (faces.some((f) => f.weight === weight)) continue;
+    const fontResponse = await fetch(url, { headers: { 'User-Agent': MODERN_UA } });
+    if (!fontResponse.ok) throw new Error(`Font fetch failed: HTTP ${fontResponse.status}`);
+    const data = Buffer.from(await fontResponse.arrayBuffer()).toString('base64');
+    faces.push({ weight, data });
+  }
+  if (faces.length < 2) throw new Error(`Expected two font weights, got ${faces.length}`);
+
+  const out = faces.map(({ weight, data }) => `@font-face {
+  font-family: '${FONT_FAMILY}';
+  font-style: normal;
+  font-weight: ${weight};
+  font-display: block;
+  src: url(data:font/woff2;base64,${data}) format('woff2');
+}`).join('\n');
+  fs.writeFileSync(cached, out);
+  return out;
+}
+
+const fontFace = await diagramFontFace();
+
 // ---------------------------------------------------------------- markdown ---
 let md = fs.readFileSync(SRC, 'utf8');
 md = md.replace(/^<!-- markdownlint-disable MD013 -->\n+/, '');
@@ -138,6 +189,7 @@ const evaluate = async (expression) => {
 // A scratch page carrying Mermaid and highlight.js, where the DOM work happens.
 const stagePath = path.join(CACHE, 'stage.html');
 fs.writeFileSync(stagePath, `<!doctype html><html><head><meta charset="utf-8"><title>stage</title>
+<style>${fontFace}</style>
 <script>${lib('highlight.min.js')}</script>
 <script>${lib('typescript.min.js')}</script>
 <script>${lib('bash.min.js')}</script>
@@ -149,6 +201,16 @@ let loaded = cdp.waitFor('Page.loadEventFired', sessionId);
 await cdp.send('Page.navigate', { url: pathToFileURL(stagePath).href }, sessionId);
 await loaded;
 
+await evaluate(`document.fonts.load('400 14px ${FONT_FAMILY}')
+  .then(function () { return document.fonts.load('600 14px ${FONT_FAMILY}'); })
+  .then(function () { return document.fonts.ready; })
+  .then(function () {
+    if (!document.fonts.check('400 14px ${FONT_FAMILY}')) {
+      throw new Error('diagram font did not load in the build browser');
+    }
+    return true;
+  })`);
+
 const transform = fs.readFileSync(path.join(HERE, 'transform.js'), 'utf8');
 const result = await evaluate(
   `window.__payload = ${JSON.stringify({ html, mermaid: mermaidBlocks })};\n`
@@ -157,7 +219,7 @@ const result = await evaluate(
 if (result.errors.length) throw new Error('Transform errors:\n' + result.errors.join('\n'));
 
 // ----------------------------------------------------------------- assemble --
-const css = fs.readFileSync(path.join(HERE, 'style.css'), 'utf8');
+const css = fontFace + '\n' + fs.readFileSync(path.join(HERE, 'style.css'), 'utf8');
 const runtime = fs.readFileSync(path.join(HERE, 'runtime.js'), 'utf8');
 
 const SPLIT = ' — ';

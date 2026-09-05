@@ -257,6 +257,20 @@ figcaption em { font-style: normal; }
 figcaption a { color: var(--accent); }
 .mermaid-fig > .figbody { padding: 1.25rem; overflow-x: auto; }
 
+/* Mermaid measures every label and then bakes a fixed, clipping box around it.
+   Those boxes are sized in the build page, which has browser-default typography,
+   so this document must not push its own font-size or line-height into the SVG
+   afterwards - inherited metrics make the text outgrow boxes that were sized
+   without them, and the overflow is silently cut off. */
+.mermaid-fig svg {
+  font-size: 16px;
+  line-height: normal;
+}
+.mermaid-fig svg foreignObject > *,
+.mermaid-fig svg foreignObject > * > * {
+  line-height: normal;
+}
+
 /* ---------- callouts ---------------------------------------------------- */
 blockquote {
   margin: 1.5rem auto; padding: .875rem 1.125rem;
